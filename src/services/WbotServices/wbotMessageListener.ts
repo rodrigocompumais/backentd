@@ -476,17 +476,13 @@ const getContactMessage = async (msg: proto.IWebMessageInfo, wbot: Session) => {
 };
 
 const downloadMedia = async (msg: proto.IWebMessageInfo) => {
-  let buffer: Buffer | undefined;
+  let buffer;
   try {
     buffer = await downloadMediaMessage(msg, "buffer", {});
   } catch (err) {
-    logger.error("Erro ao baixar mídia:", err);
-    return null;
-  }
+    console.error("Erro ao baixar mídia:", err);
 
-  if (!buffer) {
-    logger.error("Buffer de mídia vazio");
-    return null;
+    // Trate o erro de acordo com as suas necessidades
   }
 
   let filename = msg.message?.documentMessage?.fileName || "";
@@ -502,10 +498,7 @@ const downloadMedia = async (msg: proto.IWebMessageInfo) => {
       ?.imageMessage ||
     msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.videoMessage;
 
-  if (!mineType) {
-    logger.warn("Tipo de mídia não identificado:", msg);
-    return null;
-  }
+  if (!mineType) console.log(msg);
 
   if (!filename) {
     const ext = mimeExtension(mineType.mimetype);
@@ -833,24 +826,14 @@ export const verifyMediaMessage = async (
     media.filename = `${new Date().getTime()}.${ext}`;
   }
 
-  // Usar caminho absoluto para a pasta public na raiz do projeto
-  const publicFolder = path.resolve(__dirname, "..", "..", "..", "public");
-  const filePath = path.join(publicFolder, media.filename);
-
   try {
-    // Criar pasta public se não existir
-    const fs = require("fs");
-    if (!fs.existsSync(publicFolder)) {
-      fs.mkdirSync(publicFolder, { recursive: true });
-    }
-    
-    // media.data já é um Buffer, não precisa converter de base64
-    await writeFileAsync(filePath, media.data);
-    logger.info(`Mídia salva com sucesso: ${filePath}`);
+    await writeFileAsync(
+      join(__dirname, "..", "..", "..", "public", media.filename),
+      Buffer.from(media.data, 'base64')
+    );
   } catch (err) {
     Sentry.captureException(err);
-    logger.error(`Erro ao salvar mídia ${media.filename}:`, err);
-    throw new Error("ERR_SAVING_MEDIA");
+    logger.error(err);
   }
 
   const body = getBodyMessage(msg);

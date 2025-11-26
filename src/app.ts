@@ -23,6 +23,7 @@ app.set("queues", {
   sendScheduledMessages
 });
 
+const bodyparser = require("body-parser");
 app.use(bodyParser.json({ limit: "10mb" }));
 
 app.use(

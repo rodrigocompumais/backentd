@@ -140,6 +140,13 @@ const AgentSummaryGeminiService = async ({
 
   const conversationsText = lines.join("\n");
 
+  if (!conversationsText || conversationsText.trim().length === 0) {
+    return {
+      summary: "Não foi possível processar as conversas. Verifique se há mensagens válidas no período selecionado.",
+      ticketsCount: tickets.length
+    };
+  }
+
   const systemPrompt =
     "Você é uma IA especializada em resumir atendimentos de suporte ao cliente.\n" +
     "Com base nas conversas abaixo, produza um resumo por atendente com:\n" +
@@ -150,7 +157,14 @@ const AgentSummaryGeminiService = async ({
     "5) Oportunidades de melhoria e recomendações práticas.\n" +
     "Responda em português claro, organizado em seções e, se possível, em formato de bullet points.\n";
 
-  const finalPrompt = `${systemPrompt}\n\nCONVERSAS DO ATENDENTE (até ${maxMessages} mensagens):\n\n${conversationsText}`;
+  // Limitar o tamanho do prompt para evitar exceder limites da API
+  const maxPromptLength = 30000; // Limite conservador
+  let finalConversationsText = conversationsText;
+  if (conversationsText.length > maxPromptLength) {
+    finalConversationsText = conversationsText.slice(0, maxPromptLength) + "\n\n[... conteúdo truncado devido ao tamanho ...]";
+  }
+
+  const finalPrompt = `${systemPrompt}\n\nCONVERSAS DO ATENDENTE (até ${maxMessages} mensagens):\n\n${finalConversationsText}`;
 
   try {
     const apiKey = geminiSetting.value.trim();
@@ -189,14 +203,24 @@ const AgentSummaryGeminiService = async ({
       ticketsCount: tickets.length
     };
   } catch (err: any) {
-    console.error("Erro ao chamar Gemini API:", err.response?.data || err.message);
+    console.error("Erro ao chamar Gemini API:", {
+      status: err.response?.status,
+      data: err.response?.data,
+      message: err.message,
+      stack: err.stack
+    });
+    
     if (err.response?.status === 400) {
-      throw new AppError("GEMINI_API_ERROR", 400);
+      const errorMessage = err.response?.data?.error?.message || "Erro na requisição para a API do Gemini";
+      throw new AppError(`GEMINI_API_ERROR: ${errorMessage}`, 400);
     }
     if (err.response?.status === 401 || err.response?.status === 403) {
       throw new AppError("GEMINI_KEY_INVALID", 401);
     }
-    throw new AppError("ERR_GEMINI_SUMMARY", 500);
+    if (err.response?.status === 429) {
+      throw new AppError("GEMINI_RATE_LIMIT", 429);
+    }
+    throw new AppError(`ERR_GEMINI_SUMMARY: ${err.message || "Erro desconhecido"}`, 500);
   }
 };
 

@@ -5,6 +5,7 @@ import Setting from "../../models/Setting";
 import Ticket from "../../models/Ticket";
 import Message from "../../models/Message";
 import Contact from "../../models/Contact";
+import { GEMINI_MODEL, GEMINI_BASE_URL, validateGeminiApiKey, interpretGeminiError } from "../../config/gemini";
 
 interface AgentSummaryParams {
   companyId: number;
@@ -40,8 +41,11 @@ const AgentSummaryGeminiService = async ({
     }
   });
 
-  if (!geminiSetting || !geminiSetting.value) {
-    throw new AppError("GEMINI_KEY_MISSING", 400);
+  let apiKey: string;
+  try {
+    apiKey = validateGeminiApiKey(geminiSetting?.value);
+  } catch (err: any) {
+    throw new AppError(err.message || "GEMINI_KEY_MISSING", 400);
   }
 
   const ticketWhere: any = {
@@ -167,9 +171,9 @@ const AgentSummaryGeminiService = async ({
   const finalPrompt = `${systemPrompt}\n\nCONVERSAS DO ATENDENTE (até ${maxMessages} mensagens):\n\n${finalConversationsText}`;
 
   try {
-    const apiKey = geminiSetting.value.trim();
-    const url =
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
+    const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent`;
+
+    console.log(`📤 Enviando requisição para Gemini (${GEMINI_MODEL})...`);
 
     const { data } = await axios.post(
       `${url}?key=${apiKey}`,
@@ -185,7 +189,7 @@ const AgentSummaryGeminiService = async ({
         ]
       },
       {
-        timeout: 30000
+        timeout: 60000
       }
     );
 
@@ -198,29 +202,30 @@ const AgentSummaryGeminiService = async ({
       throw new Error("Resposta vazia do Gemini");
     }
 
+    console.log(`✅ Resumo gerado com sucesso (${text.length} caracteres)`);
+
     return {
       summary: text,
       ticketsCount: tickets.length
     };
   } catch (err: any) {
-    console.error("Erro ao chamar Gemini API:", {
-      status: err.response?.status,
-      data: err.response?.data,
+    const status = err.response?.status;
+    const errorData = err.response?.data;
+    
+    console.error("❌ Erro ao chamar Gemini API (Resumo):", {
+      status,
+      data: errorData,
       message: err.message,
-      stack: err.stack
+      model: GEMINI_MODEL,
+      url: err.config?.url
     });
     
-    if (err.response?.status === 400) {
-      const errorMessage = err.response?.data?.error?.message || "Erro na requisição para a API do Gemini";
-      throw new AppError(`GEMINI_API_ERROR: ${errorMessage}`, 400);
+    if (status) {
+      const userMessage = interpretGeminiError(status, errorData);
+      throw new AppError(userMessage, status === 429 ? 429 : status >= 400 && status < 500 ? 400 : 500);
     }
-    if (err.response?.status === 401 || err.response?.status === 403) {
-      throw new AppError("GEMINI_KEY_INVALID", 401);
-    }
-    if (err.response?.status === 429) {
-      throw new AppError("GEMINI_RATE_LIMIT", 429);
-    }
-    throw new AppError(`ERR_GEMINI_SUMMARY: ${err.message || "Erro desconhecido"}`, 500);
+    
+    throw new AppError(`Erro ao gerar resumo: ${err.message || "Erro desconhecido ao comunicar com a API do Gemini"}`, 500);
   }
 };
 

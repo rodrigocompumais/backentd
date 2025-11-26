@@ -5,6 +5,7 @@ import Ticket from "../../models/Ticket";
 import Message from "../../models/Message";
 import Contact from "../../models/Contact";
 import Company from "../../models/Company";
+import { GEMINI_MODEL, GEMINI_BASE_URL, validateGeminiApiKey, interpretGeminiError } from "../../config/gemini";
 
 interface ChatGeminiParams {
   companyId: number;
@@ -28,8 +29,11 @@ const ChatGeminiService = async ({
     }
   });
 
-  if (!geminiSetting || !geminiSetting.value) {
-    throw new AppError("GEMINI_KEY_MISSING", 400);
+  let apiKey: string;
+  try {
+    apiKey = validateGeminiApiKey(geminiSetting?.value);
+  } catch (err: any) {
+    throw new AppError(err.message || "GEMINI_KEY_MISSING", 400);
   }
 
   // Buscar informações da empresa para contexto
@@ -82,9 +86,9 @@ Responda sempre em português, de forma clara e objetiva. Se a pergunta for sobr
   });
 
   try {
-    const apiKey = geminiSetting.value.trim();
-    const url =
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
+    const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent`;
+
+    console.log(`📤 Enviando mensagem para Gemini (${GEMINI_MODEL})...`);
 
     const { data } = await axios.post(
       `${url}?key=${apiKey}`,
@@ -92,7 +96,7 @@ Responda sempre em português, de forma clara e objetiva. Se a pergunta for sobr
         contents: contents
       },
       {
-        timeout: 30000
+        timeout: 60000
       }
     );
 
@@ -105,18 +109,29 @@ Responda sempre em português, de forma clara e objetiva. Se a pergunta for sobr
       throw new Error("Resposta vazia do Gemini");
     }
 
+    console.log(`✅ Resposta recebida do Gemini (${text.length} caracteres)`);
+
     return {
       response: text
     };
   } catch (err: any) {
-    console.error("Erro ao chamar Gemini API (Chat):", err.response?.data || err.message);
-    if (err.response?.status === 400) {
-      throw new AppError("GEMINI_API_ERROR", 400);
+    const status = err.response?.status;
+    const errorData = err.response?.data;
+    
+    console.error("❌ Erro ao chamar Gemini API (Chat):", {
+      status,
+      data: errorData,
+      message: err.message,
+      model: GEMINI_MODEL,
+      url: err.config?.url
+    });
+    
+    if (status) {
+      const userMessage = interpretGeminiError(status, errorData);
+      throw new AppError(userMessage, status === 429 ? 429 : status >= 400 && status < 500 ? 400 : 500);
     }
-    if (err.response?.status === 401 || err.response?.status === 403) {
-      throw new AppError("GEMINI_KEY_INVALID", 401);
-    }
-    throw new AppError("ERR_GEMINI_CHAT", 500);
+    
+    throw new AppError(`Erro no chat: ${err.message || "Erro desconhecido ao comunicar com a API do Gemini"}`, 500);
   }
 };
 

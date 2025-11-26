@@ -7,6 +7,7 @@ import Company from "./models/Company";
 import { startQueueProcess } from "./queues";
 import { TransferTicketQueue } from "./wbotTransferTicketQueue";
 import cron from "node-cron";
+import TestAllGeminiApiKeysService from "./services/AiServices/TestAllGeminiApiKeysService";
 
 const server = app.listen(process.env.PORT, async () => {
   const companies = await Company.findAll();
@@ -19,6 +20,12 @@ const server = app.listen(process.env.PORT, async () => {
   Promise.all(allPromises).then(() => {
     startQueueProcess();
   });
+  
+  // Testar chaves da API do Gemini após inicialização
+  setTimeout(async () => {
+    await TestAllGeminiApiKeysService();
+  }, 5000); // Aguardar 5 segundos após o servidor iniciar
+  
   logger.info(`Server started on port: ${process.env.PORT}`);
 });
 

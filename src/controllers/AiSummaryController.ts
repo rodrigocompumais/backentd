@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import AgentSummaryGeminiService from "../services/ReportService/AgentSummaryGeminiService";
 import ChatGeminiService from "../services/AiServices/ChatGeminiService";
+import TestGeminiApiKeyService from "../services/AiServices/TestGeminiApiKeyService";
 
 export const agentSummary = async (
   req: Request,
@@ -72,6 +73,29 @@ export const chat = async (
     return res.status(500).json({ 
       error: "ERR_GEMINI_CHAT",
       message: err.message || "Erro ao processar mensagem com IA"
+    });
+  }
+};
+
+export const testApiKey = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  try {
+    const { companyId } = req.user;
+
+    const result = await TestGeminiApiKeyService({ companyId });
+
+    if (result.valid) {
+      return res.status(200).json(result);
+    } else {
+      return res.status(400).json(result);
+    }
+  } catch (err: any) {
+    console.error("Erro ao testar API Key:", err);
+    return res.status(500).json({ 
+      valid: false,
+      message: err.message || "Erro ao testar chave da API"
     });
   }
 };

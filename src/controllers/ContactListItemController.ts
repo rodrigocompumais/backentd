@@ -4,6 +4,7 @@ import { getIO } from "../libs/socket";
 
 import ListService from "../services/ContactListItemService/ListService";
 import CreateService from "../services/ContactListItemService/CreateService";
+import CreateBulkService from "../services/ContactListItemService/CreateBulkService";
 import ShowService from "../services/ContactListItemService/ShowService";
 import UpdateService from "../services/ContactListItemService/UpdateService";
 import DeleteService from "../services/ContactListItemService/DeleteService";
@@ -30,6 +31,11 @@ type StoreData = {
 
 type FindParams = {
   companyId: number;
+  contactListId: number;
+};
+
+type BulkStoreData = {
+  contactIds: number[];
   contactListId: number;
 };
 
@@ -73,6 +79,40 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
   });
 
   return res.status(200).json(record);
+};
+
+export const storeBulk = async (req: Request, res: Response): Promise<Response> => {
+  const { companyId } = req.user;
+  const { contactIds, contactListId } = req.body as BulkStoreData;
+
+  const schema = Yup.object().shape({
+    contactIds: Yup.array().of(Yup.number()).min(1).required(),
+    contactListId: Yup.number().required()
+  });
+
+  try {
+    await schema.validate({ contactIds, contactListId });
+  } catch (err: any) {
+    throw new AppError(err.message);
+  }
+
+  const result = await CreateBulkService({
+    contactIds,
+    contactListId,
+    companyId
+  });
+
+  const io = getIO();
+  
+  // Emite evento para cada item criado
+  result.items.forEach(record => {
+    io.to(`company-${companyId}-mainchannel`).emit(`company-${companyId}-ContactListItem`, {
+      action: "create",
+      record
+    });
+  });
+
+  return res.status(200).json(result);
 };
 
 export const show = async (req: Request, res: Response): Promise<Response> => {

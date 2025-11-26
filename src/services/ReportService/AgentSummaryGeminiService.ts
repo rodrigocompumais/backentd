@@ -1,4 +1,5 @@
 import axios from "axios";
+import { Op } from "sequelize";
 import AppError from "../../errors/AppError";
 import Setting from "../../models/Setting";
 import Ticket from "../../models/Ticket";
@@ -53,17 +54,31 @@ const AgentSummaryGeminiService = async ({
   };
 
   if (dateStart) {
-    messagesWhere.createdAt = {
-      ...(messagesWhere.createdAt || {}),
-      $gte: new Date(`${dateStart} 00:00:00`)
-    };
+    const startDate = new Date(`${dateStart} 00:00:00`);
+    if (messagesWhere.createdAt) {
+      messagesWhere.createdAt = {
+        ...messagesWhere.createdAt,
+        [Op.gte]: startDate
+      };
+    } else {
+      messagesWhere.createdAt = {
+        [Op.gte]: startDate
+      };
+    }
   }
 
   if (dateEnd) {
-    messagesWhere.createdAt = {
-      ...(messagesWhere.createdAt || {}),
-      $lte: new Date(`${dateEnd} 23:59:59`)
-    };
+    const endDate = new Date(`${dateEnd} 23:59:59`);
+    if (messagesWhere.createdAt) {
+      messagesWhere.createdAt = {
+        ...messagesWhere.createdAt,
+        [Op.lte]: endDate
+      };
+    } else {
+      messagesWhere.createdAt = {
+        [Op.lte]: endDate
+      };
+    }
   }
 
   const tickets = await Ticket.findAll({

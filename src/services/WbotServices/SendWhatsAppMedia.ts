@@ -122,6 +122,14 @@ const SendWhatsAppMedia = async ({
   try {
     const wbot = await GetTicketWbot(ticket);
 
+    if (!media || !media.path) {
+      throw new AppError("ERR_MEDIA_NOT_FOUND");
+    }
+
+    if (!fs.existsSync(media.path)) {
+      throw new AppError("ERR_MEDIA_FILE_NOT_FOUND");
+    }
+
     const pathMedia = media.path;
     const typeMessage = media.mimetype.split("/")[0];
     let options: AnyMessageContent;

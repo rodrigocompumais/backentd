@@ -16,7 +16,10 @@ export const firstName = (contact?: Contact): string => {
   return '';
 };
 
-export default (body: string, contact: Contact): string => {
+export default (body: string, contact?: Contact): string => {
+  // Retornar string vazia se body for undefined ou null
+  if (!body) return "";
+  
   let ms = "";
 
   const Hr = new Date();

@@ -9,7 +9,17 @@ import { TransferTicketQueue } from "./wbotTransferTicketQueue";
 import cron from "node-cron";
 
 const server = app.listen(process.env.PORT, async () => {
+  console.log("============================================");
+  console.log("✅ SERVIDOR INICIADO COM SUCESSO!");
+  console.log(`🚀 Porta: ${process.env.PORT}`);
+  console.log(`🌐 Backend URL: ${process.env.BACKEND_URL}`);
+  console.log("============================================");
+  
+  logger.info(`Server started on port: ${process.env.PORT}`);
+  
   const companies = await Company.findAll();
+  console.log(`📊 Empresas encontradas: ${companies.length}`);
+  
   const allPromises: any[] = [];
   companies.map(async c => {
     const promise = StartAllWhatsAppsSessions(c.id);
@@ -18,8 +28,8 @@ const server = app.listen(process.env.PORT, async () => {
 
   Promise.all(allPromises).then(() => {
     startQueueProcess();
+    console.log("✅ Filas de processamento iniciadas!");
   });
-  logger.info(`Server started on port: ${process.env.PORT}`);
 });
 
 cron.schedule("* * * * *", async () => {

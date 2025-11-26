@@ -21,7 +21,8 @@ interface TaskData {
 }
 
 export const index = async (req: Request, res: Response): Promise<Response> => {
-  const { companyId, id: userId } = req.user;
+  const { companyId, id: visitorId } = req.user;
+  const userId = Number(visitorId);
   const {
     searchParam,
     status,
@@ -50,7 +51,8 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
 };
 
 export const store = async (req: Request, res: Response): Promise<Response> => {
-  const { companyId, id: userId } = req.user;
+  const { companyId, id: visitorId } = req.user;
+  const userId = Number(visitorId);
   const taskData: TaskData = req.body;
 
   const schema = Yup.object().shape({
@@ -150,7 +152,8 @@ export const remove = async (req: Request, res: Response): Promise<Response> => 
 
 // Estatísticas das tarefas
 export const stats = async (req: Request, res: Response): Promise<Response> => {
-  const { companyId, id: userId } = req.user;
+  const { companyId, id: visitorId } = req.user;
+  const userId = Number(visitorId);
   const { showAll } = req.query;
 
   const pendingTasks = await ListTasksService({
@@ -189,4 +192,3 @@ export const stats = async (req: Request, res: Response): Promise<Response> => {
     total: pendingTasks.count + inProgressTasks.count + completedTasks.count + cancelledTasks.count
   });
 };
-

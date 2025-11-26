@@ -49,47 +49,10 @@ const AgentSummaryGeminiService = async ({
     userId: agentId
   };
 
-  const messagesWhere: any = {
-    companyId
-  };
-
-  if (dateStart) {
-    const startDate = new Date(`${dateStart} 00:00:00`);
-    if (messagesWhere.createdAt) {
-      messagesWhere.createdAt = {
-        ...messagesWhere.createdAt,
-        [Op.gte]: startDate
-      };
-    } else {
-      messagesWhere.createdAt = {
-        [Op.gte]: startDate
-      };
-    }
-  }
-
-  if (dateEnd) {
-    const endDate = new Date(`${dateEnd} 23:59:59`);
-    if (messagesWhere.createdAt) {
-      messagesWhere.createdAt = {
-        ...messagesWhere.createdAt,
-        [Op.lte]: endDate
-      };
-    } else {
-      messagesWhere.createdAt = {
-        [Op.lte]: endDate
-      };
-    }
-  }
-
+  // Buscar tickets primeiro
   const tickets = await Ticket.findAll({
     where: ticketWhere,
     include: [
-      {
-        model: Message,
-        where: messagesWhere,
-        required: false,
-        order: [["createdAt", "ASC"]]
-      },
       {
         model: Contact
       }
@@ -105,17 +68,44 @@ const AgentSummaryGeminiService = async ({
     };
   }
 
+  // Buscar mensagens separadamente para cada ticket
+  const ticketIds = tickets.map(t => t.id);
+  const messagesWhere: any = {
+    ticketId: { [Op.in]: ticketIds },
+    companyId
+  };
+
+  if (dateStart || dateEnd) {
+    messagesWhere.createdAt = {};
+    if (dateStart) {
+      messagesWhere.createdAt[Op.gte] = new Date(`${dateStart} 00:00:00`);
+    }
+    if (dateEnd) {
+      messagesWhere.createdAt[Op.lte] = new Date(`${dateEnd} 23:59:59`);
+    }
+  }
+
+  const allMessages = await Message.findAll({
+    where: messagesWhere,
+    order: [["createdAt", "ASC"]]
+  });
+
+  // Agrupar mensagens por ticket
+  const messagesByTicket: { [key: number]: Message[] } = {};
+  for (const msg of allMessages) {
+    if (!messagesByTicket[msg.ticketId]) {
+      messagesByTicket[msg.ticketId] = [];
+    }
+    messagesByTicket[msg.ticketId].push(msg);
+  }
+
   const lines: string[] = [];
   let messagesCount = 0;
 
   for (const ticket of tickets) {
     const anyTicket: any = ticket as any;
     const contact: Contact | undefined = anyTicket.contact;
-    const ticketMessages: Message[] = (anyTicket.messages || []).sort(
-      (a: any, b: any) =>
-        new Date(a.createdAt as any).getTime() -
-        new Date(b.createdAt as any).getTime()
-    );
+    const ticketMessages: Message[] = messagesByTicket[ticket.id] || [];
 
     if (!ticketMessages.length) {
       continue;
@@ -198,7 +188,14 @@ const AgentSummaryGeminiService = async ({
       summary: text,
       ticketsCount: tickets.length
     };
-  } catch (err) {
+  } catch (err: any) {
+    console.error("Erro ao chamar Gemini API:", err.response?.data || err.message);
+    if (err.response?.status === 400) {
+      throw new AppError("GEMINI_API_ERROR", 400);
+    }
+    if (err.response?.status === 401 || err.response?.status === 403) {
+      throw new AppError("GEMINI_KEY_INVALID", 401);
+    }
     throw new AppError("ERR_GEMINI_SUMMARY", 500);
   }
 };

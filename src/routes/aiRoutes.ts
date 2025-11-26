@@ -5,6 +5,7 @@ import * as AiSummaryController from "../controllers/AiSummaryController";
 const routes = express.Router();
 
 routes.post("/ai/summary/agent", isAuth, AiSummaryController.agentSummary);
+routes.post("/ai/chat", isAuth, AiSummaryController.chat);
 
 export default routes;
 

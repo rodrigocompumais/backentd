@@ -8,6 +8,7 @@ import Queue from "../models/Queue";
 import User from "../models/User";
 import Whatsapp from "../models/Whatsapp";
 import formatBody from "../helpers/Mustache";
+import { logger } from "../utils/logger";
 
 import ListMessagesService from "../services/MessageServices/ListMessagesService";
 import ShowTicketService from "../services/TicketServices/ShowTicketService";
@@ -66,21 +67,48 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
   const medias = req.files as Express.Multer.File[];
   const { companyId } = req.user;
 
-  const ticket = await ShowTicketService(ticketId, companyId);
+  logger.info(`[MessageController.store] Iniciando - ticketId: ${ticketId}, companyId: ${companyId}`);
+  logger.info(`[MessageController.store] Body: ${body}, Medias: ${medias ? medias.length : 0}`);
 
-  SetTicketMessagesAsRead(ticket);
+  try {
+    const ticket = await ShowTicketService(ticketId, companyId);
+    logger.info(`[MessageController.store] Ticket encontrado: ${ticket.id}, Contact: ${ticket.contact?.name}`);
 
-  if (medias) {
-    await Promise.all(
-      medias.map(async (media: Express.Multer.File, index) => {
-        await SendWhatsAppMedia({ media, ticket, body: Array.isArray(body) ? body[index] : body });
-      })
-    );
-  } else {
-    const send = await SendWhatsAppMessage({ body, ticket, quotedMsg });
+    SetTicketMessagesAsRead(ticket);
+
+    if (medias && medias.length > 0) {
+      logger.info(`[MessageController.store] Processando ${medias.length} mídia(s)`);
+      
+      for (const media of medias) {
+        logger.info(`[MessageController.store] Mídia: ${media.originalname}, Path: ${media.path}, Size: ${media.size}`);
+      }
+
+      await Promise.all(
+        medias.map(async (media: Express.Multer.File, index) => {
+          try {
+            logger.info(`[MessageController.store] Enviando mídia ${index + 1}: ${media.originalname}`);
+            await SendWhatsAppMedia({ media, ticket, body: Array.isArray(body) ? body[index] : body });
+            logger.info(`[MessageController.store] Mídia ${index + 1} enviada com sucesso`);
+          } catch (mediaError: any) {
+            logger.error(`[MessageController.store] ERRO ao enviar mídia ${index + 1}: ${mediaError.message}`);
+            logger.error(`[MessageController.store] Stack: ${mediaError.stack}`);
+            throw mediaError;
+          }
+        })
+      );
+    } else {
+      logger.info(`[MessageController.store] Enviando mensagem de texto`);
+      await SendWhatsAppMessage({ body, ticket, quotedMsg });
+      logger.info(`[MessageController.store] Mensagem de texto enviada`);
+    }
+
+    logger.info(`[MessageController.store] Concluído com sucesso`);
+    return res.send();
+  } catch (error: any) {
+    logger.error(`[MessageController.store] ERRO GERAL: ${error.message}`);
+    logger.error(`[MessageController.store] Stack: ${error.stack}`);
+    throw error;
   }
-
-  return res.send();
 };
 
 export const remove = async (

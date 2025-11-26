@@ -11,14 +11,14 @@ export const agentSummary = async (
     const { companyId } = req.user;
     const { agentId, dateStart, dateEnd, maxMessages } = req.body;
 
-    if (!agentId) {
-      return res.status(400).json({ error: "agentId é obrigatório" });
-    }
-
-    const agentIdNumber = Number(agentId);
-
-    if (isNaN(agentIdNumber)) {
-      return res.status(400).json({ error: "agentId inválido" });
+    // agentId é opcional - se não fornecido, gera resumo geral
+    let agentIdNumber: number | undefined = undefined;
+    
+    if (agentId) {
+      agentIdNumber = Number(agentId);
+      if (isNaN(agentIdNumber)) {
+        return res.status(400).json({ error: "agentId inválido" });
+      }
     }
 
     const summary = await AgentSummaryGeminiService({

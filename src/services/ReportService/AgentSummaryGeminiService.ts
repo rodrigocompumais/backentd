@@ -5,11 +5,12 @@ import Setting from "../../models/Setting";
 import Ticket from "../../models/Ticket";
 import Message from "../../models/Message";
 import Contact from "../../models/Contact";
+import User from "../../models/User";
 import { GEMINI_MODEL, GEMINI_BASE_URL, validateGeminiApiKey, interpretGeminiError } from "../../config/gemini";
 
 interface AgentSummaryParams {
   companyId: number;
-  agentId: number;
+  agentId?: number; // Agora é opcional
   dateStart?: string;
   dateEnd?: string;
   maxMessages?: number;
@@ -48,26 +49,52 @@ const AgentSummaryGeminiService = async ({
     throw new AppError(err.message || "GEMINI_KEY_MISSING", 400);
   }
 
+  // Determinar se é resumo de atendente específico ou geral
+  const isGeneralSummary = !agentId;
+  let agentName = "Todos os Atendentes";
+  
+  if (agentId) {
+    const agent = await User.findByPk(agentId);
+    agentName = agent?.name || "Atendente";
+  }
+
+  // Montar filtro de tickets
   const ticketWhere: any = {
-    companyId,
-    userId: agentId
+    companyId
   };
 
-  // Buscar tickets primeiro
+  // Se tiver agentId, filtrar por ele
+  if (agentId) {
+    ticketWhere.userId = agentId;
+  }
+
+  // Filtrar por período se fornecido
+  if (dateStart || dateEnd) {
+    ticketWhere.createdAt = {};
+    if (dateStart) {
+      ticketWhere.createdAt[Op.gte] = new Date(`${dateStart} 00:00:00`);
+    }
+    if (dateEnd) {
+      ticketWhere.createdAt[Op.lte] = new Date(`${dateEnd} 23:59:59`);
+    }
+  }
+
+  // Buscar tickets
   const tickets = await Ticket.findAll({
     where: ticketWhere,
     include: [
-      {
-        model: Contact
-      }
+      { model: Contact },
+      { model: User, attributes: ["id", "name"] }
     ],
-    order: [["createdAt", "DESC"]]
+    order: [["createdAt", "DESC"]],
+    limit: 100 // Limitar para não sobrecarregar
   });
 
   if (!tickets.length) {
     return {
-      summary:
-        "Nenhuma conversa encontrada para o atendente e período informados.",
+      summary: isGeneralSummary 
+        ? "Nenhuma conversa encontrada no período informado."
+        : "Nenhuma conversa encontrada para o atendente e período informados.",
       ticketsCount: 0
     };
   }
@@ -109,16 +136,22 @@ const AgentSummaryGeminiService = async ({
   for (const ticket of tickets) {
     const anyTicket: any = ticket as any;
     const contact: Contact | undefined = anyTicket.contact;
+    const ticketUser: any = anyTicket.user;
     const ticketMessages: Message[] = messagesByTicket[ticket.id] || [];
 
     if (!ticketMessages.length) {
       continue;
     }
 
+    // Incluir nome do atendente no resumo geral
+    const attendantInfo = isGeneralSummary && ticketUser?.name 
+      ? ` | Atendente: ${ticketUser.name}` 
+      : "";
+
     lines.push(
       `=== Ticket #${ticket.id} | Contato: ${
         contact?.name || contact?.number || "Desconhecido"
-      } | Criado em: ${formatDate(ticket.createdAt)} ===`
+      }${attendantInfo} | Criado em: ${formatDate(ticket.createdAt)} ===`
     );
 
     for (const msg of ticketMessages) {
@@ -151,12 +184,16 @@ const AgentSummaryGeminiService = async ({
     };
   }
 
+  const summaryType = isGeneralSummary ? "RESUMO GERAL DA OPERAÇÃO" : `RESUMO DO ATENDENTE: ${agentName}`;
+  
   const systemPrompt = `Você é um ANALISTA DE QUALIDADE DE ATENDIMENTO especializado em avaliar conversas de suporte ao cliente via WhatsApp.
 
 ═══════════════════════════════════════════════════════════════════
-📋 SUA MISSÃO
+📋 SUA MISSÃO: ${summaryType}
 ═══════════════════════════════════════════════════════════════════
-Analise as conversas do atendente abaixo e produza um RELATÓRIO EXECUTIVO completo e detalhado.
+${isGeneralSummary 
+  ? "Analise TODAS as conversas da empresa abaixo e produza um RELATÓRIO EXECUTIVO GERAL completo."
+  : "Analise as conversas do atendente abaixo e produza um RELATÓRIO EXECUTIVO completo e detalhado."}
 
 ═══════════════════════════════════════════════════════════════════
 📊 ESTRUTURA DO RELATÓRIO (OBRIGATÓRIA)
@@ -165,7 +202,7 @@ Analise as conversas do atendente abaixo e produza um RELATÓRIO EXECUTIVO compl
 ## 1. 📈 RESUMO EXECUTIVO
 - Quantidade de atendimentos analisados
 - Período coberto
-- Avaliação geral (Excelente/Bom/Regular/Precisa Melhorar)
+- ${isGeneralSummary ? "Visão geral da operação" : "Avaliação geral (Excelente/Bom/Regular/Precisa Melhorar)"}
 
 ## 2. 🎯 PRINCIPAIS DEMANDAS DOS CLIENTES
 - Liste os TOP 5 assuntos mais frequentes
@@ -177,10 +214,28 @@ Analise as conversas do atendente abaixo e produza um RELATÓRIO EXECUTIVO compl
 
 ## 4. ⚠️ PENDÊNCIAS E FOLLOW-UPS NECESSÁRIOS
 - Liste TODOS os casos não resolvidos
-- Para cada um, informe: Ticket #, Cliente, Problema, Ação necessária
+- Para cada um, informe: Ticket #, Cliente, ${isGeneralSummary ? "Atendente, " : ""}Problema, Ação necessária
 - Ordene por prioridade (Alta/Média/Baixa)
 
-## 5. 💪 PONTOS FORTES DO ATENDENTE
+${isGeneralSummary ? `## 5. 👥 DESEMPENHO POR ATENDENTE
+- Liste cada atendente com quantidade de atendimentos
+- Destaque os melhores desempenhos
+- Identifique quem precisa de suporte
+
+## 6. 💪 PONTOS FORTES DA EQUIPE
+- Boas práticas identificadas
+- Exemplos de excelência no atendimento
+
+## 7. 🔧 OPORTUNIDADES DE MELHORIA
+- Aspectos gerais a desenvolver
+- Sugestões de treinamento para a equipe
+- Processos que podem ser otimizados
+
+## 8. 📌 RECOMENDAÇÕES ESTRATÉGICAS
+- Ações imediatas sugeridas
+- Insights para a gestão
+- Tendências identificadas` 
+: `## 5. 💪 PONTOS FORTES DO ATENDENTE
 - Habilidades demonstradas
 - Boas práticas identificadas
 - Exemplos específicos
@@ -193,7 +248,7 @@ Analise as conversas do atendente abaixo e produza um RELATÓRIO EXECUTIVO compl
 ## 7. 📌 RECOMENDAÇÕES ESTRATÉGICAS
 - Ações imediatas sugeridas
 - Processos que podem ser otimizados
-- Insights para a gestão
+- Insights para a gestão`}
 
 ═══════════════════════════════════════════════════════════════════
 ⚙️ REGRAS DE ANÁLISE
@@ -214,7 +269,11 @@ Analise as conversas do atendente abaixo e produza um RELATÓRIO EXECUTIVO compl
     finalConversationsText = conversationsText.slice(0, maxPromptLength) + "\n\n[... conteúdo truncado devido ao tamanho ...]";
   }
 
-  const finalPrompt = `${systemPrompt}\n\nCONVERSAS DO ATENDENTE (até ${maxMessages} mensagens):\n\n${finalConversationsText}`;
+  const conversationsLabel = isGeneralSummary 
+    ? `CONVERSAS DA EMPRESA (até ${maxMessages} mensagens de ${tickets.length} tickets)` 
+    : `CONVERSAS DO ATENDENTE ${agentName} (até ${maxMessages} mensagens)`;
+  
+  const finalPrompt = `${systemPrompt}\n\n${conversationsLabel}:\n\n${finalConversationsText}`;
 
   try {
     const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent`;

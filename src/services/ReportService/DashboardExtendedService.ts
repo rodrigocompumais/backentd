@@ -1,4 +1,4 @@
-import { QueryTypes, Op } from "sequelize";
+import { QueryTypes, Op, Sequelize } from "sequelize";
 import sequelize from "../../database";
 import Ticket from "../../models/Ticket";
 import Message from "../../models/Message";
@@ -71,7 +71,7 @@ const DashboardExtendedService = async (
       companyId,
       status: "closed",
       updatedAt: {
-        [Op.between]: [dateFrom, dateTo]
+        [Op.between]: [+dateFrom, +dateTo]
       }
     }
   });
@@ -81,7 +81,7 @@ const DashboardExtendedService = async (
     where: {
       companyId,
       createdAt: {
-        [Op.between]: [dateFrom, dateTo]
+        [Op.between]: [+dateFrom, +dateTo]
       }
     }
   });
@@ -105,7 +105,7 @@ const DashboardExtendedService = async (
       companyId,
       fromMe: true,
       createdAt: {
-        [Op.between]: [dateFrom, dateTo]
+        [Op.between]: [+dateFrom, +dateTo]
       }
     }
   });
@@ -145,7 +145,7 @@ const DashboardExtendedService = async (
     where: { companyId },
     attributes: [
       "status",
-      [sequelize.fn("COUNT", sequelize.col("id")), "count"]
+      [Sequelize.fn("COUNT", Sequelize.col("id")), "count"]
     ],
     group: ["status"],
     raw: true

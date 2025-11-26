@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import DashboardDataService, { DashboardData, Params } from "../services/ReportService/DashbardDataService";
+import DashboardExtendedService, { ExtendedParams } from "../services/ReportService/DashboardExtendedService";
 import { TicketsAttendance } from "../services/ReportService/TicketsAttendance";
 import { TicketsDayService } from "../services/ReportService/TicketsDayService";
 
@@ -39,4 +40,13 @@ export const reportsDay = async (req: Request, res: Response): Promise<Response>
 
   return res.json({ count, data });
 
+}
+
+export const extended = async (req: Request, res: Response): Promise<Response> => {
+  const params: ExtendedParams = req.query;
+  const { companyId } = req.user;
+
+  const extendedData = await DashboardExtendedService(companyId, params);
+
+  return res.status(200).json(extendedData);
 }

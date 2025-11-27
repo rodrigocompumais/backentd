@@ -402,6 +402,10 @@ export const improveMessage = async ({
     ]
   });
 
+  if (!ticketData) {
+    throw new AppError("ERR_NO_TICKET_FOUND", 404);
+  }
+
   // Buscar últimas 20 mensagens para contexto
   const messages = await fetchLastMessages(ticketId, companyId);
 
@@ -450,8 +454,12 @@ IMPORTANTE: Retorne APENAS o texto melhorado, sem explicações ou comentários 
 IMPORTANTE: Retorne APENAS o texto da resposta sugerida, sem explicações ou comentários adicionais.`}`;
 
   try {
-    const response = await axios.post(
-      `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+    const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent`;
+
+    console.log(`📤 Enviando requisição para Gemini (${GEMINI_MODEL}) - Melhorar mensagem...`);
+
+    const { data } = await axios.post(
+      `${url}?key=${apiKey}`,
       {
         contents: [
           {
@@ -461,23 +469,26 @@ IMPORTANTE: Retorne APENAS o texto da resposta sugerida, sem explicações ou co
               }
             ]
           }
-        ],
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 1024
-        }
+        ]
       },
       {
         timeout: 60000
       }
     );
 
-    const improvedText = response.data.candidates[0]?.content?.parts[0]?.text || "";
-    
+    const candidates = data?.candidates || [];
+    const first = candidates[0];
+    const parts = first?.content?.parts || [];
+    const text = parts.map((p: any) => p.text).join("\n");
+
+    if (!text) {
+      throw new Error("Resposta vazia do Gemini");
+    }
+
+    console.log(`✅ Texto melhorado gerado com sucesso (${text.length} caracteres)`);
+
     // Limpar o texto (remover possíveis markdown ou formatação)
-    const cleanedText = improvedText
+    const cleanedText = text
       .replace(/```[\s\S]*?```/g, "") // Remove blocos de código
       .replace(/`([^`]+)`/g, "$1") // Remove inline code
       .replace(/^\s*["']|["']\s*$/g, "") // Remove aspas no início/fim
@@ -487,13 +498,24 @@ IMPORTANTE: Retorne APENAS o texto da resposta sugerida, sem explicações ou co
       improvedText: cleanedText || (draftText.trim() || "Desculpe, não foi possível melhorar a mensagem."),
       originalText: draftText.trim() || undefined
     };
-  } catch (error: any) {
-    const status = error.response?.status;
+  } catch (err: any) {
+    const status = err.response?.status;
+    const errorData = err.response?.data;
+    
+    console.error("❌ Erro ao chamar Gemini API (Melhorar Mensagem):", {
+      status,
+      data: errorData,
+      message: err.message,
+      model: GEMINI_MODEL,
+      url: err.config?.url
+    });
+    
     if (status) {
-      const errorMessage = interpretGeminiError(status, error.response?.data);
-      throw new AppError(errorMessage, status);
+      const userMessage = interpretGeminiError(status, errorData);
+      throw new AppError(userMessage, status === 429 ? 429 : status >= 400 && status < 500 ? 400 : 500);
     }
-    throw new AppError("Erro ao melhorar mensagem", 500);
+    
+    throw new AppError(`Erro ao melhorar mensagem: ${err.message || "Erro desconhecido ao comunicar com a API do Gemini"}`, 500);
   }
 };
 

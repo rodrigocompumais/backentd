@@ -92,15 +92,20 @@ export const improve = async (
       return res.status(400).json({ error: "ticketId é obrigatório" });
     }
 
+    console.log(`[ChatAIController] Melhorando mensagem - ticketId: ${ticketId}, companyId: ${companyId}, draftText length: ${draftText?.length || 0}`);
+
     const result = await improveMessage({
       ticketId: Number(ticketId),
       companyId,
       draftText: draftText || ""
     });
 
+    console.log(`[ChatAIController] Mensagem melhorada com sucesso - improvedText length: ${result.improvedText?.length || 0}`);
+
     return res.status(200).json(result);
   } catch (err: any) {
-    console.error("Erro ao melhorar mensagem:", err);
+    console.error("[ChatAIController] Erro ao melhorar mensagem:", err);
+    console.error("[ChatAIController] Stack trace:", err.stack);
     
     if (err.message?.includes("GEMINI_KEY")) {
       return res.status(400).json({ error: "GEMINI_KEY_MISSING" });

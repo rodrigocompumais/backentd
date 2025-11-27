@@ -227,8 +227,16 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
                 logger.info(`Session QRCode Generate ${name}`);
                 retriesQrCodeMap.set(id, (retriesQrCode += 1));
 
+                // Validar e tratar o QR code antes de salvar
+                const qrCodeValue = typeof qr === 'string' ? qr.trim() : String(qr || '').trim();
+                
+                // Log para debug (pode ser removido em produção se necessário)
+                if (qrCodeValue) {
+                  logger.info(`QR Code value type: ${typeof qr}, length: ${qrCodeValue.length}`);
+                }
+
                 await whatsapp.update({
-                  qrcode: qr,
+                  qrcode: qrCodeValue,
                   status: "qrcode",
                   retries: 0
                 });

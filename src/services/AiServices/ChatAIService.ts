@@ -60,6 +60,47 @@ const formatDateTime = (date: Date | string): string => {
   });
 };
 
+const callGeminiGenerateContent = async (
+  apiKey: string,
+  prompt: string,
+  { temperature = 0.5, maxOutputTokens = 1024 }: { temperature?: number; maxOutputTokens?: number } = {}
+): Promise<string> => {
+  const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent`;
+
+  const payload = {
+    contents: [
+      {
+        parts: [
+          {
+            text: prompt
+          }
+        ]
+      }
+    ],
+    generationConfig: {
+      temperature,
+      topK: 40,
+      topP: 0.95,
+      maxOutputTokens
+    }
+  };
+
+  const { data } = await axios.post(`${url}?key=${apiKey}`, payload, {
+    timeout: 90000
+  });
+
+  const candidates = data?.candidates || [];
+  const first = candidates[0];
+  const parts = first?.content?.parts || [];
+  const text = parts.map((p: any) => p.text).join("\n");
+
+  if (!text || text.trim() === "") {
+    throw new AppError("A IA não retornou resposta válida", 500);
+  }
+
+  return text.trim();
+};
+
 // Buscar últimas 20 mensagens do ticket
 const fetchLastMessages = async (
   ticketId: number,
@@ -454,44 +495,18 @@ IMPORTANTE: Retorne APENAS o texto melhorado, sem explicações ou comentários 
 IMPORTANTE: Retorne APENAS o texto da resposta sugerida, sem explicações ou comentários adicionais.`}`;
 
   try {
-    const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent`;
-
     console.log(`📤 Enviando requisição para Gemini (${GEMINI_MODEL}) - Melhorar mensagem...`);
+    const textResponse = await callGeminiGenerateContent(apiKey, systemPrompt, {
+      temperature: draftText.trim() ? 0.4 : 0.6,
+      maxOutputTokens: 1024
+    });
 
-    const { data } = await axios.post(
-      `${url}?key=${apiKey}`,
-      {
-        contents: [
-          {
-            parts: [
-              {
-                text: systemPrompt
-              }
-            ]
-          }
-        ]
-      },
-      {
-        timeout: 60000
-      }
-    );
+    console.log(`✅ Texto melhorado gerado com sucesso (${textResponse.length} caracteres)`);
 
-    const candidates = data?.candidates || [];
-    const first = candidates[0];
-    const parts = first?.content?.parts || [];
-    const text = parts.map((p: any) => p.text).join("\n");
-
-    if (!text) {
-      throw new Error("Resposta vazia do Gemini");
-    }
-
-    console.log(`✅ Texto melhorado gerado com sucesso (${text.length} caracteres)`);
-
-    // Limpar o texto (remover possíveis markdown ou formatação)
-    const cleanedText = text
-      .replace(/```[\s\S]*?```/g, "") // Remove blocos de código
-      .replace(/`([^`]+)`/g, "$1") // Remove inline code
-      .replace(/^\s*["']|["']\s*$/g, "") // Remove aspas no início/fim
+    const cleanedText = textResponse
+      .replace(/```[\s\S]*?```/g, "")
+      .replace(/`([^`]+)`/g, "$1")
+      .replace(/^\s*["']|["']\s*$/g, "")
       .trim();
 
     return {
@@ -501,7 +516,7 @@ IMPORTANTE: Retorne APENAS o texto da resposta sugerida, sem explicações ou co
   } catch (err: any) {
     const status = err.response?.status;
     const errorData = err.response?.data;
-    
+
     console.error("❌ Erro ao chamar Gemini API (Melhorar Mensagem):", {
       status,
       data: errorData,
@@ -509,12 +524,12 @@ IMPORTANTE: Retorne APENAS o texto da resposta sugerida, sem explicações ou co
       model: GEMINI_MODEL,
       url: err.config?.url
     });
-    
+
     if (status) {
       const userMessage = interpretGeminiError(status, errorData);
       throw new AppError(userMessage, status === 429 ? 429 : status >= 400 && status < 500 ? 400 : 500);
     }
-    
+
     throw new AppError(`Erro ao melhorar mensagem: ${err.message || "Erro desconhecido ao comunicar com a API do Gemini"}`, 500);
   }
 };

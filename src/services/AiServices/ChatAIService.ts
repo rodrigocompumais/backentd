@@ -37,6 +37,17 @@ interface AudioSummaryResponse {
   }>;
 }
 
+interface ImproveMessageParams {
+  ticketId: number;
+  companyId: number;
+  draftText?: string;
+}
+
+interface ImproveMessageResponse {
+  improvedText: string;
+  originalText?: string;
+}
+
 // Função para formatar data/hora
 const formatDateTime = (date: Date | string): string => {
   const d = new Date(date);
@@ -366,6 +377,123 @@ Retorne APENAS um JSON válido:
       throw new AppError(errorMessage, status);
     }
     throw new AppError("Erro ao processar resumo de áudios", 500);
+  }
+};
+
+// Melhorar texto da mensagem
+export const improveMessage = async ({
+  ticketId,
+  companyId,
+  draftText = ""
+}: ImproveMessageParams): Promise<ImproveMessageResponse> => {
+  const apiKey = validateGeminiApiKey(process.env.GEMINI_API_KEY);
+
+  const ticket = await ShowTicketService(ticketId, companyId);
+  if (!ticket) {
+    throw new AppError("ERR_NO_TICKET_FOUND", 404);
+  }
+
+  // Buscar informações do ticket
+  const ticketData = await Ticket.findByPk(ticketId, {
+    include: [
+      { model: Contact, attributes: ["id", "name", "number"] },
+      { model: User, attributes: ["id", "name"] },
+      { model: Queue, attributes: ["id", "name"] }
+    ]
+  });
+
+  // Buscar últimas 20 mensagens para contexto
+  const messages = await fetchLastMessages(ticketId, companyId);
+
+  // Construir contexto das mensagens
+  const messagesContext = messages.length > 0
+    ? messages.map((msg, index) => {
+        return `[${msg.createdAt}] ${msg.sender} (${msg.contactName}): ${msg.body || "[Mídia]"}`;
+      }).join("\n")
+    : "Nenhuma mensagem anterior na conversa.";
+
+  // Construir prompt baseado se há rascunho ou não
+  let systemPrompt = `Você é o Compuchat, um assistente de IA especializado em melhorar mensagens de atendimento ao cliente.
+
+CONTEXTO DO TICKET:
+- Status: ${ticketData.status}
+- Contato: ${ticketData.contact?.name || "Desconhecido"}
+- Atendente: ${ticketData.user?.name || "Sem atendente"}
+- Fila: ${ticketData.queue?.name || "Sem fila"}
+
+ÚLTIMAS 20 MENSAGENS DA CONVERSA:
+${messagesContext}
+
+${draftText.trim() 
+  ? `RASCUNHO DA MENSAGEM DO ATENDENTE:
+"${draftText}"
+
+INSTRUÇÕES:
+- Melhore o rascunho acima considerando o contexto da conversa
+- Corrija erros de gramática e ortografia
+- Ajuste o tom para ser profissional, empático e adequado ao contexto
+- Mantenha a intenção e o significado original
+- Se necessário, adicione informações relevantes do contexto da conversa
+- Mantenha a mensagem clara, objetiva e apropriada para atendimento ao cliente
+- Use o nome do cliente quando apropriado: ${ticketData.contact?.name || "o cliente"}
+- Seja respeitoso e prestativo
+
+IMPORTANTE: Retorne APENAS o texto melhorado, sem explicações ou comentários adicionais.`
+  : `INSTRUÇÕES:
+- Com base no contexto da conversa acima, sugira uma resposta completa e apropriada
+- A resposta deve ser profissional, empática e adequada ao contexto
+- Considere o status do ticket e o histórico da conversa
+- Use o nome do cliente quando apropriado: ${ticketData.contact?.name || "o cliente"}
+- Seja respeitoso, prestativo e direto
+- A resposta deve ajudar a resolver a situação do cliente de forma eficiente
+
+IMPORTANTE: Retorne APENAS o texto da resposta sugerida, sem explicações ou comentários adicionais.`}`;
+
+  try {
+    const response = await axios.post(
+      `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+      {
+        contents: [
+          {
+            parts: [
+              {
+                text: systemPrompt
+              }
+            ]
+          }
+        ],
+        generationConfig: {
+          temperature: 0.7,
+          topK: 40,
+          topP: 0.95,
+          maxOutputTokens: 1024
+        }
+      },
+      {
+        timeout: 60000
+      }
+    );
+
+    const improvedText = response.data.candidates[0]?.content?.parts[0]?.text || "";
+    
+    // Limpar o texto (remover possíveis markdown ou formatação)
+    const cleanedText = improvedText
+      .replace(/```[\s\S]*?```/g, "") // Remove blocos de código
+      .replace(/`([^`]+)`/g, "$1") // Remove inline code
+      .replace(/^\s*["']|["']\s*$/g, "") // Remove aspas no início/fim
+      .trim();
+
+    return {
+      improvedText: cleanedText || (draftText.trim() || "Desculpe, não foi possível melhorar a mensagem."),
+      originalText: draftText.trim() || undefined
+    };
+  } catch (error: any) {
+    const status = error.response?.status;
+    if (status) {
+      const errorMessage = interpretGeminiError(status, error.response?.data);
+      throw new AppError(errorMessage, status);
+    }
+    throw new AppError("Erro ao melhorar mensagem", 500);
   }
 };
 

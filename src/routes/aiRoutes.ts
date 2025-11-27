@@ -12,6 +12,7 @@ routes.get("/ai/test-key", isAuth, AiSummaryController.testApiKey);
 // Rotas para IA no chat
 routes.post("/chat-ai/analyze", isAuth, ChatAIController.analyze);
 routes.post("/chat-ai/audio-summary", isAuth, ChatAIController.audioSummary);
+routes.post("/chat-ai/improve", isAuth, ChatAIController.improve);
 
 export default routes;
 

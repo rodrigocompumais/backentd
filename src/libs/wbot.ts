@@ -227,12 +227,42 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
                 logger.info(`Session QRCode Generate ${name}`);
                 retriesQrCodeMap.set(id, (retriesQrCode += 1));
 
+                // Log detalhado do QR code recebido do Baileys
+                logger.info(`QR Code recebido do Baileys - Tipo: ${typeof qr}, Valor bruto: ${JSON.stringify(qr)}`);
+                logger.info(`QR Code recebido do Baileys - Primeiros 100 caracteres: ${typeof qr === 'string' ? qr.substring(0, 100) : 'N/A'}`);
+                
                 // Validar e tratar o QR code antes de salvar
                 const qrCodeValue = typeof qr === 'string' ? qr.trim() : String(qr || '').trim();
                 
-                // Log para debug (pode ser removido em produção se necessário)
-                if (qrCodeValue) {
-                  logger.info(`QR Code value type: ${typeof qr}, length: ${qrCodeValue.length}`);
+                // Verificar se o QR code contém URLs suspeitas - REJEITAR se contiver
+                const hasSuspiciousURL = qrCodeValue.includes('linktr.ee') || 
+                                         qrCodeValue.includes('http://') || 
+                                         qrCodeValue.includes('https://') ||
+                                         qrCodeValue.startsWith('http') ||
+                                         qrCodeValue.match(/^https?:\/\//i);
+                
+                if (hasSuspiciousURL) {
+                  logger.error(`⚠️ ERRO CRÍTICO: QR Code contém URL suspeita e será REJEITADO!`);
+                  logger.error(`QR Code suspeito recebido: ${qrCodeValue.substring(0, 200)}`);
+                  logger.error(`QR Code completo: ${qrCodeValue}`);
+                  // NÃO salvar QR codes com URLs suspeitas
+                  logger.error(`QR Code rejeitado - não será salvo no banco de dados.`);
+                  return; // Não processar este QR code
+                }
+                
+                // Log do valor processado
+                logger.info(`QR Code processado - Tipo: ${typeof qrCodeValue}, Tamanho: ${qrCodeValue.length}, Primeiros 100 caracteres: ${qrCodeValue.substring(0, 100)}`);
+
+                // Verificar se o QR code parece ser um código válido do WhatsApp
+                // QR codes do WhatsApp geralmente começam com algo como "2@" ou são base64
+                const isValidWhatsAppQR = qrCodeValue.length > 20 && 
+                  (qrCodeValue.startsWith('2@') || 
+                   qrCodeValue.includes('@') || 
+                   /^[A-Za-z0-9+/=_-]+$/.test(qrCodeValue));
+                
+                if (!isValidWhatsAppQR && qrCodeValue.length > 0) {
+                  logger.warn(`⚠️ QR Code pode não ser válido para WhatsApp. Formato suspeito detectado.`);
+                  logger.warn(`QR Code recebido: ${qrCodeValue.substring(0, 150)}`);
                 }
 
                 await whatsapp.update({
@@ -240,6 +270,16 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
                   status: "qrcode",
                   retries: 0
                 });
+                
+                // Verificar o valor salvo no banco
+                const whatsappAfterUpdate = await Whatsapp.findByPk(whatsapp.id);
+                if (whatsappAfterUpdate) {
+                  logger.info(`QR Code salvo no banco - Tamanho: ${whatsappAfterUpdate.qrcode?.length || 0}, Primeiros 100 caracteres: ${whatsappAfterUpdate.qrcode?.substring(0, 100) || 'VAZIO'}`);
+                  if (whatsappAfterUpdate.qrcode !== qrCodeValue) {
+                    logger.error(`⚠️ ERRO: QR Code foi modificado após salvar! Esperado: ${qrCodeValue.substring(0, 100)}, Obtido: ${whatsappAfterUpdate.qrcode?.substring(0, 100)}`);
+                  }
+                }
+                
                 const sessionIndex = sessions.findIndex(
                   s => s.id === whatsapp.id
                 );

@@ -6,6 +6,7 @@ import Ticket from "../../models/Ticket";
 import Contact from "../../models/Contact";
 import User from "../../models/User";
 import Queue from "../../models/Queue";
+import Setting from "../../models/Setting";
 import ShowTicketService from "../TicketServices/ShowTicketService";
 import { GEMINI_MODEL, GEMINI_BASE_URL, validateGeminiApiKey, interpretGeminiError } from "../../config/gemini";
 
@@ -139,7 +140,19 @@ export const analyzeChatContext = async ({
   question,
   suggestResponse = false
 }: AnalyzeChatParams): Promise<AnalyzeChatResponse> => {
-  const apiKey = validateGeminiApiKey(process.env.GEMINI_API_KEY);
+  const geminiSetting = await Setting.findOne({
+    where: {
+      key: "geminiApiKey",
+      companyId
+    }
+  });
+
+  let apiKey: string;
+  try {
+    apiKey = validateGeminiApiKey(geminiSetting?.value);
+  } catch (err: any) {
+    throw new AppError(err.message || "GEMINI_KEY_MISSING", 400);
+  }
 
   const ticket = await ShowTicketService(ticketId, companyId);
   if (!ticket) {
@@ -277,7 +290,19 @@ export const summarizeUnreadAudios = async ({
   ticketId,
   companyId
 }: AudioSummaryParams): Promise<AudioSummaryResponse> => {
-  const apiKey = validateGeminiApiKey(process.env.GEMINI_API_KEY);
+  const geminiSetting = await Setting.findOne({
+    where: {
+      key: "geminiApiKey",
+      companyId
+    }
+  });
+
+  let apiKey: string;
+  try {
+    apiKey = validateGeminiApiKey(geminiSetting?.value);
+  } catch (err: any) {
+    throw new AppError(err.message || "GEMINI_KEY_MISSING", 400);
+  }
 
   const ticket = await ShowTicketService(ticketId, companyId);
   if (!ticket) {
@@ -427,7 +452,19 @@ export const improveMessage = async ({
   companyId,
   draftText = ""
 }: ImproveMessageParams): Promise<ImproveMessageResponse> => {
-  const apiKey = validateGeminiApiKey(process.env.GEMINI_API_KEY);
+  const geminiSetting = await Setting.findOne({
+    where: {
+      key: "geminiApiKey",
+      companyId
+    }
+  });
+
+  let apiKey: string;
+  try {
+    apiKey = validateGeminiApiKey(geminiSetting?.value);
+  } catch (err: any) {
+    throw new AppError(err.message || "GEMINI_KEY_MISSING", 400);
+  }
 
   const ticket = await ShowTicketService(ticketId, companyId);
   if (!ticket) {

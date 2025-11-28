@@ -46,6 +46,7 @@ import { cacheLayer } from "../../libs/cache";
 import { provider } from "./providers";
 import { debounce } from "../../helpers/Debounce";
 import { ChatCompletionRequestMessage, Configuration, OpenAIApi } from "openai";
+import { isBrazilianNumber, getCountryCode, formatBlockedNumberLog } from "../../helpers/ValidateBrazilianNumber";
 import ffmpeg from "fluent-ffmpeg";
 import {
   SpeechConfig,
@@ -2222,6 +2223,18 @@ const handleMessage = async (
       msgContact = await getContactMessage(msg, wbot);
     } else {
       msgContact = await getContactMessage(msg, wbot);
+    }
+
+    // Validação: Bloquear números não-brasileiros (apenas para mensagens recebidas)
+    if (!msg.key.fromMe && !isGroup) {
+      const contactNumber = msgContact.id.replace(/\D/g, "");
+      
+      if (!isBrazilianNumber(contactNumber)) {
+        const countryCode = getCountryCode(contactNumber);
+        logger.warn(formatBlockedNumberLog(contactNumber, countryCode));
+        logger.info(`Mensagem bloqueada de +${countryCode}: ${contactNumber} (empresa: ${companyId})`);
+        return; // Bloqueia o processamento da mensagem
+      }
     }
 
     if (msgIsGroupBlock?.value === "enabled" && isGroup) return;

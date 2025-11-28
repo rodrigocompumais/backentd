@@ -31,29 +31,15 @@ const CreateOrUpdateContactService = async ({
   const number = isGroup ? rawNumber : rawNumber.replace(/[^0-9]/g, "");
 
   const io = getIO();
-  let contact: Contact | null;
-
-  contact = await Contact.findOne({
+  
+  // Usar findOrCreate para evitar race conditions
+  // Esta operação é atômica e garante que apenas um registro seja criado
+  const [contact, created] = await Contact.findOrCreate({
     where: {
       number,
       companyId
-    }
-  });
-
-  if (contact) {
-    contact.update({ profilePicUrl });
-    console.log(contact.whatsappId)
-    if (isNil(contact.whatsappId === null)) {
-      contact.update({
-        whatsappId
-      });
-    }
-    io.to(`company-${companyId}-mainchannel`).emit(`company-${companyId}-contact`, {
-      action: "update",
-      contact
-    });
-  } else {
-    contact = await Contact.create({
+    },
+    defaults: {
       name,
       number,
       profilePicUrl,
@@ -62,8 +48,26 @@ const CreateOrUpdateContactService = async ({
       extraInfo,
       companyId,
       whatsappId
-    });
+    }
+  });
 
+  // Se o contato já existia, atualizar os dados
+  if (!created) {
+    const updateData: any = { profilePicUrl };
+    
+    // Atualizar whatsappId apenas se não estiver definido
+    if (isNil(contact.whatsappId) && whatsappId) {
+      updateData.whatsappId = whatsappId;
+    }
+    
+    await contact.update(updateData);
+    
+    io.to(`company-${companyId}-mainchannel`).emit(`company-${companyId}-contact`, {
+      action: "update",
+      contact
+    });
+  } else {
+    // Contato criado com sucesso
     io.to(`company-${companyId}-mainchannel`).emit(`company-${companyId}-contact`, {
       action: "create",
       contact

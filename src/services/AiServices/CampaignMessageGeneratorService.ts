@@ -1,9 +1,7 @@
 import axios from "axios";
 import AppError from "../../errors/AppError";
-import { getGeminiKey } from "../../config/gemini";
-
-const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
-const GEMINI_MODEL = "gemini-1.5-flash";
+import { GEMINI_MODEL, GEMINI_BASE_URL, validateGeminiApiKey, interpretGeminiError } from "../../config/gemini";
+import Setting from "../../models/Setting";
 
 interface GenerateInitialMessageParams {
   companyId: number;
@@ -24,25 +22,6 @@ interface VariationsResponse {
   variations: string[];
 }
 
-const interpretGeminiError = (status: number, errorData: any): string => {
-  if (status === 429) {
-    return "Limite de requisições excedido. Aguarde alguns minutos.";
-  }
-  if (status === 400) {
-    return "Erro na requisição. Verifique os dados enviados.";
-  }
-  if (status === 403) {
-    return "API Key inválida ou sem permissão. Configure em Integrações.";
-  }
-  if (status === 404) {
-    return "Modelo não encontrado. Entre em contato com o suporte.";
-  }
-  if (status >= 500) {
-    return "Erro no servidor do Gemini. Tente novamente em alguns minutos.";
-  }
-  return errorData?.error?.message || "Erro desconhecido ao processar com IA";
-};
-
 /**
  * Gera mensagem inicial de campanha baseada no objetivo
  * Usa temperature alta (0.85) para máxima criatividade
@@ -51,9 +30,17 @@ export const generateInitialMessage = async ({
   companyId,
   objective
 }: GenerateInitialMessageParams): Promise<MessageResponse> => {
-  const apiKey = await getGeminiKey(companyId);
-  
-  if (!apiKey) {
+  const geminiSetting = await Setting.findOne({
+    where: {
+      key: "geminiApiKey",
+      companyId
+    }
+  });
+
+  let apiKey: string;
+  try {
+    apiKey = validateGeminiApiKey(geminiSetting?.value);
+  } catch (err: any) {
     throw new AppError("GEMINI_KEY_MISSING", 400);
   }
 
@@ -149,9 +136,17 @@ export const generateVariations = async ({
   originalMessage,
   objective
 }: GenerateVariationsParams): Promise<VariationsResponse> => {
-  const apiKey = await getGeminiKey(companyId);
-  
-  if (!apiKey) {
+  const geminiSetting = await Setting.findOne({
+    where: {
+      key: "geminiApiKey",
+      companyId
+    }
+  });
+
+  let apiKey: string;
+  try {
+    apiKey = validateGeminiApiKey(geminiSetting?.value);
+  } catch (err: any) {
     throw new AppError("GEMINI_KEY_MISSING", 400);
   }
 

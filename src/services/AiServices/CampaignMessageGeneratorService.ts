@@ -69,6 +69,7 @@ Retorne APENAS a mensagem, sem explicações adicionais.`;
 
     console.log(`🎨 Gerando mensagem inicial de campanha...`);
     console.log(`📝 Objetivo: ${objective}`);
+    console.log(`🔗 URL da API: ${url}`);
 
     const { data } = await axios.post(
       `${url}?key=${apiKey}`,
@@ -115,7 +116,9 @@ Retorne APENAS a mensagem, sem explicações adicionais.`;
     console.error("❌ Erro ao gerar mensagem inicial:", {
       status,
       data: errorData,
-      message: err.message
+      message: err.message,
+      url: err.config?.url,
+      stack: err.stack
     });
     
     if (status) {
@@ -188,6 +191,7 @@ Exemplo de formato:
 
     console.log(`🎨 Gerando 4 variações criativas...`);
     console.log(`📝 Mensagem original: ${originalMessage.substring(0, 50)}...`);
+    console.log(`🔗 URL da API: ${url}`);
 
     const { data } = await axios.post(
       `${url}?key=${apiKey}`,
@@ -252,7 +256,9 @@ Exemplo de formato:
     console.error("❌ Erro ao gerar variações:", {
       status,
       data: errorData,
-      message: err.message
+      message: err.message,
+      url: err.config?.url,
+      stack: err.stack
     });
     
     if (status) {

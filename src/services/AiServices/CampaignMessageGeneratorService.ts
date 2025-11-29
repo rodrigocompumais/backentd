@@ -87,20 +87,57 @@ Retorne APENAS a mensagem, sem explicações adicionais.`;
           topK: 40,
           topP: 0.95,
           maxOutputTokens: 1024
-        }
+        },
+        safetySettings: [
+          {
+            category: "HARM_CATEGORY_HARASSMENT",
+            threshold: "BLOCK_NONE"
+          },
+          {
+            category: "HARM_CATEGORY_HATE_SPEECH",
+            threshold: "BLOCK_NONE"
+          },
+          {
+            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+            threshold: "BLOCK_NONE"
+          },
+          {
+            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+            threshold: "BLOCK_NONE"
+          }
+        ]
       },
       {
         timeout: 60000
       }
     );
 
+    console.log("🔍 Resposta completa do Gemini:", JSON.stringify(data, null, 2));
+
     const candidates = data?.candidates || [];
+    
+    // Verificar se foi bloqueado por safety
+    if (candidates.length === 0) {
+      console.error("❌ Nenhum candidato retornado. Possível bloqueio de segurança.");
+      throw new Error("Conteúdo bloqueado pelos filtros de segurança. Tente reformular o objetivo da campanha.");
+    }
+
     const first = candidates[0];
+    
+    // Verificar finishReason
+    if (first?.finishReason && first.finishReason !== "STOP") {
+      console.error(`⚠️ finishReason: ${first.finishReason}`);
+      if (first.finishReason === "SAFETY") {
+        throw new Error("Conteúdo bloqueado pelos filtros de segurança. Evite termos como preços, valores ou ofertas muito agressivas. Tente: 'Promover produto com condições especiais'");
+      }
+    }
+
     const parts = first?.content?.parts || [];
     const text = parts.map((p: any) => p.text).join("\n").trim();
 
     if (!text) {
-      throw new Error("Resposta vazia do Gemini");
+      console.error("❌ Texto vazio. Candidates:", JSON.stringify(candidates, null, 2));
+      throw new Error("Resposta vazia. Tente simplificar o objetivo da campanha.");
     }
 
     console.log(`✅ Mensagem inicial gerada (${text.length} caracteres)`);
@@ -206,20 +243,57 @@ Exemplo de formato:
           topK: 50,
           topP: 0.95,
           maxOutputTokens: 2048
-        }
+        },
+        safetySettings: [
+          {
+            category: "HARM_CATEGORY_HARASSMENT",
+            threshold: "BLOCK_NONE"
+          },
+          {
+            category: "HARM_CATEGORY_HATE_SPEECH",
+            threshold: "BLOCK_NONE"
+          },
+          {
+            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+            threshold: "BLOCK_NONE"
+          },
+          {
+            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+            threshold: "BLOCK_NONE"
+          }
+        ]
       },
       {
         timeout: 90000
       }
     );
 
+    console.log("🔍 Resposta de variações do Gemini:", JSON.stringify(data, null, 2));
+
     const candidates = data?.candidates || [];
+    
+    // Verificar se foi bloqueado por safety
+    if (candidates.length === 0) {
+      console.error("❌ Nenhum candidato retornado para variações.");
+      throw new Error("Conteúdo bloqueado pelos filtros de segurança ao gerar variações.");
+    }
+
     const first = candidates[0];
+    
+    // Verificar finishReason
+    if (first?.finishReason && first.finishReason !== "STOP") {
+      console.error(`⚠️ finishReason para variações: ${first.finishReason}`);
+      if (first.finishReason === "SAFETY") {
+        throw new Error("Variações bloqueadas pelos filtros. A mensagem original pode conter termos sensíveis.");
+      }
+    }
+
     const parts = first?.content?.parts || [];
     const text = parts.map((p: any) => p.text).join("\n").trim();
 
     if (!text) {
-      throw new Error("Resposta vazia do Gemini");
+      console.error("❌ Texto de variações vazio. Candidates:", JSON.stringify(candidates, null, 2));
+      throw new Error("Resposta vazia ao gerar variações.");
     }
 
     // Separar as variações pelo delimitador "---"

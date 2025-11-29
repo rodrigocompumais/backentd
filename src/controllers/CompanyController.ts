@@ -182,6 +182,9 @@ export const indexPlan = async (req: Request, res: Response): Promise<Response> 
 };
 
 export const storeWithPayment = async (req: Request, res: Response): Promise<Response> => {
+  console.log("=== storeWithPayment chamado ===");
+  console.log("Body recebido:", JSON.stringify(req.body, null, 2));
+  
   const { companyData, paymentData } = req.body;
 
   const schema = Yup.object().shape({
@@ -209,15 +212,20 @@ export const storeWithPayment = async (req: Request, res: Response): Promise<Res
 
   try {
     await schema.validate(req.body);
+    console.log("✓ Validação do schema passou");
   } catch (err: any) {
+    console.error("✗ Erro na validação do schema:", err.message);
     throw new AppError(err.message, 400);
   }
 
   try {
+    console.log("Iniciando CreateCompanyWithPaymentService...");
     const result = await CreateCompanyWithPaymentService({
       companyData,
       paymentData,
     });
+
+    console.log("✓ Empresa criada com sucesso. Payment status:", result.payment?.status);
 
     return res.status(200).json({
       company: result.company,
@@ -226,6 +234,8 @@ export const storeWithPayment = async (req: Request, res: Response): Promise<Res
       success: result.payment.status === "approved",
     });
   } catch (error: any) {
+    console.error("✗ Erro ao criar empresa com pagamento:", error);
+    console.error("Erro completo:", JSON.stringify(error, null, 2));
     throw new AppError(error.message || "Erro ao criar empresa com pagamento", 400);
   }
 };

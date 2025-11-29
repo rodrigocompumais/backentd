@@ -95,12 +95,28 @@ Retorne APENAS a mensagem, sem explicações adicionais.`;
       }
     );
 
+    console.log("📦 Resposta completa da API:", JSON.stringify(data, null, 2));
+
     const candidates = data?.candidates || [];
+    console.log(`📊 Número de candidatos: ${candidates.length}`);
+    
     const first = candidates[0];
+    console.log(`📝 Primeiro candidato:`, JSON.stringify(first, null, 2));
+    
     const parts = first?.content?.parts || [];
+    console.log(`📄 Número de parts: ${parts.length}`);
+    
     const text = parts.map((p: any) => p.text).join("\n").trim();
+    console.log(`✍️ Texto extraído (${text.length} chars): ${text.substring(0, 100)}...`);
 
     if (!text) {
+      console.error("❌ Estrutura da resposta:", {
+        hasData: !!data,
+        hasCandidates: !!data?.candidates,
+        candidatesLength: data?.candidates?.length,
+        firstCandidate: first,
+        contentParts: parts
+      });
       throw new Error("Resposta vazia do Gemini");
     }
 
@@ -217,12 +233,21 @@ Exemplo de formato:
       }
     );
 
+    console.log("📦 Resposta completa da API (variações):", JSON.stringify(data, null, 2));
+
     const candidates = data?.candidates || [];
     const first = candidates[0];
     const parts = first?.content?.parts || [];
     const text = parts.map((p: any) => p.text).join("\n").trim();
 
     if (!text) {
+      console.error("❌ Estrutura da resposta (variações):", {
+        hasData: !!data,
+        hasCandidates: !!data?.candidates,
+        candidatesLength: data?.candidates?.length,
+        firstCandidate: first,
+        contentParts: parts
+      });
       throw new Error("Resposta vazia do Gemini");
     }
 

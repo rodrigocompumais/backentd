@@ -64,7 +64,7 @@ const formatDateTime = (date: Date | string): string => {
 const callGeminiGenerateContent = async (
   apiKey: string,
   prompt: string,
-  { temperature = 0.5, maxOutputTokens = 1024 }: { temperature?: number; maxOutputTokens?: number } = {}
+  { temperature = 0.5, maxOutputTokens = 2048 }: { temperature?: number; maxOutputTokens?: number } = {}
 ): Promise<string> => {
   const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent`;
 
@@ -83,7 +83,25 @@ const callGeminiGenerateContent = async (
       topK: 40,
       topP: 0.95,
       maxOutputTokens
-    }
+    },
+    safetySettings: [
+      {
+        category: "HARM_CATEGORY_HARASSMENT",
+        threshold: "BLOCK_ONLY_HIGH"
+      },
+      {
+        category: "HARM_CATEGORY_HATE_SPEECH",
+        threshold: "BLOCK_ONLY_HIGH"
+      },
+      {
+        category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+        threshold: "BLOCK_ONLY_HIGH"
+      },
+      {
+        category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+        threshold: "BLOCK_ONLY_HIGH"
+      }
+    ]
   };
 
   const { data } = await axios.post(`${url}?key=${apiKey}`, payload, {
@@ -91,11 +109,33 @@ const callGeminiGenerateContent = async (
   });
 
   const candidates = data?.candidates || [];
+  
+  if (candidates.length === 0) {
+    console.error("❌ Nenhum candidato retornado pelo Gemini");
+    throw new AppError("Conteúdo bloqueado pelos filtros de segurança", 400);
+  }
+
   const first = candidates[0];
+  
+  // Verificar finishReason
+  if (first?.finishReason && first.finishReason !== "STOP") {
+    console.warn(`⚠️ finishReason: ${first.finishReason}`);
+    
+    if (first.finishReason === "SAFETY") {
+      throw new AppError("Conteúdo bloqueado pelos filtros de segurança", 400);
+    }
+    
+    if (first.finishReason === "MAX_TOKENS") {
+      console.warn("⚠️ MAX_TOKENS atingido, resposta pode estar incompleta");
+      // Continua para tentar extrair o que foi gerado
+    }
+  }
+
   const parts = first?.content?.parts || [];
   const text = parts.map((p: any) => p.text).join("\n");
 
   if (!text || text.trim() === "") {
+    console.error("❌ Resposta vazia do Gemini. finishReason:", first?.finishReason);
     throw new AppError("A IA não retornou resposta válida", 500);
   }
 
@@ -240,15 +280,40 @@ ${suggestResponse
           temperature: 0.3,
           topK: 40,
           topP: 0.95,
-          maxOutputTokens: 2048
-        }
+          maxOutputTokens: 4096
+        },
+        safetySettings: [
+          {
+            category: "HARM_CATEGORY_HARASSMENT",
+            threshold: "BLOCK_ONLY_HIGH"
+          },
+          {
+            category: "HARM_CATEGORY_HATE_SPEECH",
+            threshold: "BLOCK_ONLY_HIGH"
+          },
+          {
+            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+            threshold: "BLOCK_ONLY_HIGH"
+          },
+          {
+            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+            threshold: "BLOCK_ONLY_HIGH"
+          }
+        ]
       },
       {
         timeout: 90000
       }
     );
 
-    const responseText = response.data.candidates[0]?.content?.parts[0]?.text || "";
+    const candidates = response.data?.candidates || [];
+    const first = candidates[0];
+    
+    if (!first || first.finishReason === "MAX_TOKENS") {
+      console.warn("⚠️ Possível MAX_TOKENS em analyzeChatContext");
+    }
+
+    const responseText = first?.content?.parts[0]?.text || "";
     
     // Tentar extrair JSON da resposta
     let parsedResponse: any = {};
@@ -395,15 +460,40 @@ Retorne APENAS um JSON válido:
           temperature: 0.3,
           topK: 40,
           topP: 0.95,
-          maxOutputTokens: 2048
-        }
+          maxOutputTokens: 4096
+        },
+        safetySettings: [
+          {
+            category: "HARM_CATEGORY_HARASSMENT",
+            threshold: "BLOCK_ONLY_HIGH"
+          },
+          {
+            category: "HARM_CATEGORY_HATE_SPEECH",
+            threshold: "BLOCK_ONLY_HIGH"
+          },
+          {
+            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+            threshold: "BLOCK_ONLY_HIGH"
+          },
+          {
+            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+            threshold: "BLOCK_ONLY_HIGH"
+          }
+        ]
       },
       {
         timeout: 90000
       }
     );
 
-    const responseText = response.data.candidates[0]?.content?.parts[0]?.text || "";
+    const candidates = response.data?.candidates || [];
+    const first = candidates[0];
+    
+    if (!first || first.finishReason === "MAX_TOKENS") {
+      console.warn("⚠️ Possível MAX_TOKENS em summarizeUnreadAudios");
+    }
+
+    const responseText = first?.content?.parts[0]?.text || "";
     
     // Tentar extrair JSON da resposta
     let parsedResponse: any = {};
@@ -535,7 +625,7 @@ IMPORTANTE: Retorne APENAS o texto da resposta sugerida, sem explicações ou co
     console.log(`📤 Enviando requisição para Gemini (${GEMINI_MODEL}) - Melhorar mensagem...`);
     const textResponse = await callGeminiGenerateContent(apiKey, systemPrompt, {
       temperature: draftText.trim() ? 0.4 : 0.6,
-      maxOutputTokens: 1024
+      maxOutputTokens: 2048
     });
 
     console.log(`✅ Texto melhorado gerado com sucesso (${textResponse.length} caracteres)`);

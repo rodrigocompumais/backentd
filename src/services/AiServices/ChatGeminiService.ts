@@ -667,7 +667,25 @@ VOCÊ PODE RESPONDER SOBRE:
           topK: 40,
           topP: 0.95,
           maxOutputTokens: 4096
-        }
+        },
+        safetySettings: [
+          {
+            category: "HARM_CATEGORY_HARASSMENT",
+            threshold: "BLOCK_ONLY_HIGH"
+          },
+          {
+            category: "HARM_CATEGORY_HATE_SPEECH",
+            threshold: "BLOCK_ONLY_HIGH"
+          },
+          {
+            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+            threshold: "BLOCK_ONLY_HIGH"
+          },
+          {
+            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+            threshold: "BLOCK_ONLY_HIGH"
+          }
+        ]
       },
       {
         timeout: 90000
@@ -675,11 +693,32 @@ VOCÊ PODE RESPONDER SOBRE:
     );
 
     const candidates = data?.candidates || [];
+    
+    if (candidates.length === 0) {
+      console.error("❌ Nenhum candidato retornado pelo Gemini");
+      throw new Error("Conteúdo bloqueado pelos filtros de segurança");
+    }
+
     const first = candidates[0];
+    
+    // Verificar finishReason
+    if (first?.finishReason && first.finishReason !== "STOP") {
+      console.warn(`⚠️ finishReason no Chat: ${first.finishReason}`);
+      
+      if (first.finishReason === "SAFETY") {
+        throw new Error("Conteúdo bloqueado pelos filtros de segurança");
+      }
+      
+      if (first.finishReason === "MAX_TOKENS") {
+        console.warn("⚠️ MAX_TOKENS no Chat, resposta pode estar incompleta");
+      }
+    }
+
     const parts = first?.content?.parts || [];
     const text = parts.map((p: any) => p.text).join("\n");
 
     if (!text) {
+      console.error("❌ Resposta vazia do Gemini. finishReason:", first?.finishReason);
       throw new Error("Resposta vazia do Gemini");
     }
 

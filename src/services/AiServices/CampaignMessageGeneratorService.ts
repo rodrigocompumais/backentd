@@ -86,7 +86,8 @@ Retorne APENAS a mensagem, sem explicações adicionais.`;
           temperature: 0.85, // Alta criatividade
           topK: 40,
           topP: 0.95,
-          maxOutputTokens: 1024
+          maxOutputTokens: 2048, // Aumentado para acomodar thoughts do 2.5-flash
+          candidateCount: 1
         },
         safetySettings: [
           {
@@ -127,13 +128,26 @@ Retorne APENAS a mensagem, sem explicações adicionais.`;
     // Verificar finishReason
     if (first?.finishReason && first.finishReason !== "STOP") {
       console.error(`⚠️ finishReason: ${first.finishReason}`);
+      
       if (first.finishReason === "SAFETY") {
         throw new Error("Conteúdo bloqueado pelos filtros de segurança. Evite termos como preços, valores ou ofertas muito agressivas. Tente: 'Promover produto com condições especiais'");
+      }
+      
+      if (first.finishReason === "MAX_TOKENS") {
+        console.error("❌ MAX_TOKENS atingido. thoughtsTokenCount:", data.usageMetadata?.thoughtsTokenCount);
+        // Não lançar erro, tentar extrair o que foi gerado
+        console.warn("⚠️ Resposta pode estar incompleta devido a MAX_TOKENS");
       }
     }
 
     const parts = first?.content?.parts || [];
-    const text = parts.map((p: any) => p.text).join("\n").trim();
+    let text = parts.map((p: any) => p.text).join("\n").trim();
+
+    // Se não há texto mas há parts vazio, pode ser problema do modelo 2.5-flash
+    if (!text && first?.finishReason === "MAX_TOKENS") {
+      console.error("❌ MAX_TOKENS sem conteúdo. O modelo gastou todos os tokens pensando.");
+      throw new Error("O modelo gastou muito tempo processando. Tente um objetivo mais simples e direto. Ex: 'Promover relógio de ponto com oferta especial'");
+    }
 
     if (!text) {
       console.error("❌ Texto vazio. Candidates:", JSON.stringify(candidates, null, 2));
@@ -242,7 +256,8 @@ Exemplo de formato:
           temperature: 0.9, // Máxima criatividade para variações
           topK: 50,
           topP: 0.95,
-          maxOutputTokens: 2048
+          maxOutputTokens: 4096, // Maior para acomodar 4 variações + thoughts
+          candidateCount: 1
         },
         safetySettings: [
           {
@@ -283,13 +298,24 @@ Exemplo de formato:
     // Verificar finishReason
     if (first?.finishReason && first.finishReason !== "STOP") {
       console.error(`⚠️ finishReason para variações: ${first.finishReason}`);
+      
       if (first.finishReason === "SAFETY") {
         throw new Error("Variações bloqueadas pelos filtros. A mensagem original pode conter termos sensíveis.");
+      }
+      
+      if (first.finishReason === "MAX_TOKENS") {
+        console.error("❌ MAX_TOKENS nas variações. thoughtsTokenCount:", data.usageMetadata?.thoughtsTokenCount);
+        console.warn("⚠️ Variações podem estar incompletas");
       }
     }
 
     const parts = first?.content?.parts || [];
-    const text = parts.map((p: any) => p.text).join("\n").trim();
+    let text = parts.map((p: any) => p.text).join("\n").trim();
+
+    if (!text && first?.finishReason === "MAX_TOKENS") {
+      console.error("❌ MAX_TOKENS sem conteúdo nas variações.");
+      throw new Error("Erro ao gerar variações. A mensagem original pode ser muito complexa.");
+    }
 
     if (!text) {
       console.error("❌ Texto de variações vazio. Candidates:", JSON.stringify(candidates, null, 2));

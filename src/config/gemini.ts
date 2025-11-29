@@ -1,8 +1,8 @@
 import axios from "axios";
 
 // Configuração centralizada do Gemini
-export const GEMINI_MODEL = "models/gemini-1.5-flash"; // Modelo estável e testado
-export const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1";
+export const GEMINI_MODEL = "gemini-1.5-flash"; // Sem o prefixo "models/" na v1beta
+export const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 
 // Validação da chave da API
 export const validateGeminiApiKey = (apiKey: string | null | undefined): string => {
@@ -18,7 +18,7 @@ export const interpretGeminiError = (status: number, errorData?: any): string =>
     return "Chave da API inválida ou sem permissão no projeto Google Cloud.";
   }
   if (status === 404) {
-    return "Modelo Gemini não encontrado. Verifique se está usando 'models/gemini-2.5-flash'.";
+    return "Modelo Gemini não encontrado. A API pode estar com problemas ou o modelo não está disponível.";
   }
   if (status === 429) {
     return "Limite de uso da API do Gemini atingido. Aguarde alguns minutos.";

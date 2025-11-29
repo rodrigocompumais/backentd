@@ -7,6 +7,8 @@ import {
   getPaymentStatus,
   processWebhook,
   validateCardData,
+  createCardToken,
+  getPaymentMethodsByBin,
 } from "../services/PaymentService/MercadoPagoService";
 import { logger } from "../utils/logger";
 import Company from "../models/Company";
@@ -177,6 +179,60 @@ export const getPaymentStatusController = async (
     logger.error("Erro no getPaymentStatusController:", error);
     throw new AppError(
       error.message || "Erro ao consultar status do pagamento",
+      400
+    );
+  }
+};
+
+export const createCardTokenController = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  const schema = Yup.object().shape({
+    cardNumber: Yup.string().required(),
+    cardholderName: Yup.string().required(),
+    expirationMonth: Yup.string().required(),
+    expirationYear: Yup.string().required(),
+    securityCode: Yup.string().required(),
+    identificationType: Yup.string().required(),
+    identificationNumber: Yup.string().required(),
+  });
+
+  try {
+    await schema.validate(req.body);
+  } catch (err: any) {
+    throw new AppError(err.message, 400);
+  }
+
+  try {
+    const token = await createCardToken(req.body);
+    return res.status(200).json(token);
+  } catch (error: any) {
+    logger.error("Erro no createCardTokenController:", error);
+    throw new AppError(
+      error.message || "Erro ao criar token do cartão",
+      400
+    );
+  }
+};
+
+export const getPaymentMethodsController = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  const { bin } = req.query;
+
+  if (!bin || typeof bin !== "string") {
+    throw new AppError("BIN do cartão é obrigatório", 400);
+  }
+
+  try {
+    const paymentMethods = await getPaymentMethodsByBin(bin);
+    return res.status(200).json(paymentMethods);
+  } catch (error: any) {
+    logger.error("Erro no getPaymentMethodsController:", error);
+    throw new AppError(
+      error.message || "Erro ao obter informações do cartão",
       400
     );
   }

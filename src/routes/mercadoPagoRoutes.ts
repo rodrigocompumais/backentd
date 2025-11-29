@@ -27,5 +27,17 @@ mercadoPagoRoutes.get(
   MercadoPagoController.getPaymentStatusController
 );
 
+// Criar token do cartão (AVISO: viola PCI DSS)
+mercadoPagoRoutes.post(
+  "/mercadopago/create-card-token",
+  MercadoPagoController.createCardTokenController
+);
+
+// Obter informações do cartão por BIN
+mercadoPagoRoutes.get(
+  "/mercadopago/payment-methods",
+  MercadoPagoController.getPaymentMethodsController
+);
+
 export default mercadoPagoRoutes;
 

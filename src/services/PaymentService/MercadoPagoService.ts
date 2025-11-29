@@ -197,6 +197,87 @@ export const processWebhook = async (data: any): Promise<any> => {
   }
 };
 
+export const createCardToken = async (cardData: {
+  cardNumber: string;
+  cardholderName: string;
+  expirationMonth: string;
+  expirationYear: string;
+  securityCode: string;
+  identificationType: string;
+  identificationNumber: string;
+}): Promise<any> => {
+  try {
+    // AVISO: Esta implementação viola PCI DSS pois os dados do cartão passam pelo servidor
+    // O ideal é usar Secure Fields no frontend
+    
+    const tokenData = {
+      card_number: cardData.cardNumber.replace(/\s/g, ""),
+      cardholder: {
+        name: cardData.cardholderName,
+        identification: {
+          type: cardData.identificationType,
+          number: cardData.identificationNumber.replace(/\D/g, ""),
+        },
+      },
+      security_code: cardData.securityCode,
+      expiration_month: cardData.expirationMonth,
+      expiration_year: `20${cardData.expirationYear}`,
+    };
+
+    // Usar API REST do Mercado Pago para criar token
+    const response = await fetch("https://api.mercadopago.com/v1/card_tokens", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.MERCADOPAGO_ACCESS_TOKEN}`,
+      },
+      body: JSON.stringify(tokenData),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      logger.error("Erro ao criar token:", errorData);
+      throw new AppError(
+        errorData.message || "Erro ao criar token do cartão",
+        400
+      );
+    }
+
+    const token = await response.json();
+    return token;
+  } catch (error: any) {
+    logger.error("Erro ao criar card token:", error);
+    throw new AppError(
+      error.message || "Erro ao criar token do cartão",
+      400
+    );
+  }
+};
+
+export const getPaymentMethodsByBin = async (bin: string): Promise<any> => {
+  try {
+    const response = await fetch(
+      `https://api.mercadopago.com/v1/payment_methods/card_issuers?bin=${bin}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.MERCADOPAGO_ACCESS_TOKEN}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      logger.warn("Erro ao obter informações do cartão:", await response.text());
+      return [];
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error: any) {
+    logger.error("Erro ao obter payment methods:", error);
+    return [];
+  }
+};
+
 export const validateCardData = (cardData: any): boolean => {
   // Validação básica da estrutura dos dados do cartão
   if (!cardData.cardNumber || !cardData.cardholderName) {

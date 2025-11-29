@@ -1,7 +1,7 @@
 import axios from "axios";
 
 // Configuração centralizada do Gemini
-export const GEMINI_MODEL = "gemini-1.5-flash"; // Sem o prefixo "models/" na v1beta
+export const GEMINI_MODEL = "gemini-2.0-flash-exp"; // Modelo que funciona bem
 export const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 
 // Validação da chave da API

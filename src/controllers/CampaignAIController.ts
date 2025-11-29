@@ -44,11 +44,7 @@ export const generateCampaignInitialMessage = async (
 
     return res.status(200).json(result);
   } catch (err: any) {
-    console.error("❌ Erro ao gerar mensagem inicial de campanha:", {
-      message: err.message,
-      statusCode: err.statusCode,
-      stack: err.stack
-    });
+    console.error("Erro ao gerar mensagem inicial de campanha:", err);
     
     if (err.message === "GEMINI_KEY_MISSING") {
       return res.status(400).json({ 
@@ -112,11 +108,7 @@ export const generateCampaignVariations = async (
 
     return res.status(200).json(result);
   } catch (err: any) {
-    console.error("❌ Erro ao gerar variações de campanha:", {
-      message: err.message,
-      statusCode: err.statusCode,
-      stack: err.stack
-    });
+    console.error("Erro ao gerar variações de campanha:", err);
     
     if (err.message === "GEMINI_KEY_MISSING") {
       return res.status(400).json({ 

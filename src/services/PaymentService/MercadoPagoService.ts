@@ -52,6 +52,7 @@ export const createPaymentIntent = async (
     const preferenceData = {
       items: [
         {
+          id: `item-${Date.now()}`,
           title: data.description,
           quantity: 1,
           unit_price: data.transactionAmount,
@@ -86,11 +87,10 @@ export const processPayment = async (
   paymentData: PaymentData
 ): Promise<any> => {
   try {
-    const paymentBody = {
+    const paymentBody: any = {
       transaction_amount: paymentData.transactionAmount,
       description: paymentData.description,
       payment_method_id: paymentData.paymentMethodId,
-      issuer_id: paymentData.issuerId,
       token: paymentData.token,
       installments: paymentData.installments,
       payer: {
@@ -104,6 +104,14 @@ export const processPayment = async (
       },
       metadata: paymentData.metadata || {},
     };
+
+    // issuer_id precisa ser number ou não ser incluído se não existir
+    if (paymentData.issuerId) {
+      const issuerIdNumber = parseInt(paymentData.issuerId, 10);
+      if (!isNaN(issuerIdNumber)) {
+        paymentBody.issuer_id = issuerIdNumber;
+      }
+    }
 
     const response = await payment.create({ body: paymentBody });
 

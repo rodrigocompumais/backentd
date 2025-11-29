@@ -16,6 +16,7 @@ import { verify } from "jsonwebtoken";
 import User from "../models/User";
 import ShowPlanCompanyService from "../services/CompanyService/ShowPlanCompanyService";
 import ListCompaniesPlanService from "../services/CompanyService/ListCompaniesPlanService";
+import CreateCompanyWithPaymentService from "../services/CompanyService/CreateCompanyWithPaymentService";
 
 type IndexQuery = {
   searchParam: string;
@@ -178,4 +179,53 @@ export const indexPlan = async (req: Request, res: Response): Promise<Response> 
     return res.status(400).json({ error: "Você não possui permissão para acessar este recurso!" });
   }
 
+};
+
+export const storeWithPayment = async (req: Request, res: Response): Promise<Response> => {
+  const { companyData, paymentData } = req.body;
+
+  const schema = Yup.object().shape({
+    companyData: Yup.object().shape({
+      name: Yup.string().required(),
+      email: Yup.string().email().required(),
+      phone: Yup.string().required(),
+      password: Yup.string().required(),
+      planId: Yup.number().required(),
+    }).required(),
+    paymentData: Yup.object().shape({
+      transactionAmount: Yup.number().required().positive(),
+      paymentMethodId: Yup.string().required(),
+      token: Yup.string().required(),
+      installments: Yup.number().required().min(1).max(12),
+      identificationType: Yup.string().required(),
+      identificationNumber: Yup.string().required(),
+      payer: Yup.object().shape({
+        email: Yup.string().email().required(),
+        firstName: Yup.string().optional(),
+        lastName: Yup.string().optional(),
+      }).required(),
+    }).required(),
+  });
+
+  try {
+    await schema.validate(req.body);
+  } catch (err: any) {
+    throw new AppError(err.message, 400);
+  }
+
+  try {
+    const result = await CreateCompanyWithPaymentService({
+      companyData,
+      paymentData,
+    });
+
+    return res.status(200).json({
+      company: result.company,
+      payment: result.payment,
+      invoice: result.invoice,
+      success: result.payment.status === "approved",
+    });
+  } catch (error: any) {
+    throw new AppError(error.message || "Erro ao criar empresa com pagamento", 400);
+  }
 };

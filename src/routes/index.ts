@@ -36,6 +36,7 @@ import flowBuilder from "./flowBuilderRoutes";
 import flowCampaignRoutes from "./flowCampaignRoutes";
 import taskRoutes from "./taskRoutes";
 import aiRoutes from "./aiRoutes";
+import mercadoPagoRoutes from "./mercadoPagoRoutes";
 const routes = Router();
 
 routes.use(userRoutes);
@@ -76,5 +77,6 @@ routes.use(flowBuilder)
 routes.use(flowCampaignRoutes)
 routes.use(taskRoutes);
 routes.use(aiRoutes);
+routes.use(mercadoPagoRoutes);
 
 export default routes;

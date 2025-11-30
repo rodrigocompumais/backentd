@@ -559,8 +559,8 @@ export const processPayment = async (
     console.error("║                    FIM DO ERRO                             ║");
     console.error("╚═══════════════════════════════════════════════════════════════╝\n");
     
-    // Log usando logger também (formato que pino entende melhor)
-    logger.error({
+    // Log usando console.error e stderr para garantir que apareça (logger do pino pode não exibir objetos complexos)
+    const errorDetailsJson = JSON.stringify({
       msg: "Erro COMPLETO do Mercado Pago",
       errorName: errorDetails.name,
       errorMessage: errorDetails.message,
@@ -569,6 +569,22 @@ export const processPayment = async (
       causeArray: errorDetails.causeArray,
       cause: errorDetails.cause,
       response: errorDetails.response,
+    }, null, 2);
+    
+    console.error("\n[ERRO DETALHADO DO MERCADO PAGO]", errorDetailsJson);
+    try {
+      process.stderr.write(`\n[ERRO DETALHADO DO MERCADO PAGO] ${errorDetailsJson}\n`);
+    } catch (e) {
+      // Se stderr.write falhar, continuar
+    }
+    
+    // Log usando logger também (formato que pino entende melhor)
+    logger.error({
+      msg: "Erro COMPLETO do Mercado Pago",
+      errorName: errorDetails.name,
+      errorMessage: errorDetails.message,
+      errorStatus: errorDetails.status,
+      errorStatusCode: errorDetails.statusCode,
     });
 
     // Extrair mensagem de erro mais específica
@@ -652,7 +668,22 @@ export const processPayment = async (
     // Traduzir erro para mensagem amigável
     const friendlyMessage = translateMercadoPagoError({ message: errorMessage, cause: error.cause });
     
-    logger.error("Erro traduzido:", {
+    // Log usando console.error e stderr para garantir que apareça
+    const translationLog = {
+      original: errorMessage,
+      errorCode: errorCode,
+      translated: friendlyMessage,
+    };
+    
+    console.error("\n[ERRO TRADUZIDO]", JSON.stringify(translationLog, null, 2));
+    try {
+      process.stderr.write(`\n[ERRO TRADUZIDO] ${JSON.stringify(translationLog, null, 2)}\n`);
+    } catch (e) {
+      // Se stderr.write falhar, continuar
+    }
+    
+    logger.error({
+      msg: "Erro traduzido",
       original: errorMessage,
       errorCode: errorCode,
       translated: friendlyMessage,

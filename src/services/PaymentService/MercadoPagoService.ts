@@ -100,27 +100,27 @@ const validateMercadoPagoCredentials = (): void => {
     throw new AppError("Configuração de pagamento incompleta. Entre em contato com o suporte.", 500);
   }
 
-  // Detectar ambiente baseado no token (test tokens geralmente começam com TEST_)
-  const isTestToken = accessToken.startsWith("TEST_");
-  const isProductionToken = accessToken.startsWith("APP_USR_");
-  
+  // Detectar ambiente baseado no token (aceitar tanto hífen quanto underscore)
+  const isTestToken = accessToken.startsWith("TEST-") || accessToken.startsWith("TEST_");
+  const isProductionToken = accessToken.startsWith("APP_USR-") || accessToken.startsWith("APP_USR_");
+
   logger.info("Credenciais do Mercado Pago detectadas:", {
     tokenPrefix: accessToken.substring(0, 10) + "...",
     isTestToken,
     isProductionToken,
     nodeEnv: process.env.NODE_ENV,
   });
-  
+
   if (process.env.NODE_ENV === "production" && isTestToken) {
     logger.warn("⚠️ ATENÇÃO: Usando credenciais de TESTE em PRODUÇÃO!");
     logger.warn("⚠️ Isso causará erro 'Unauthorized use of live credentials' se tentar processar pagamentos reais!");
   }
-  
+
   if (process.env.NODE_ENV !== "production" && isProductionToken) {
     logger.warn("⚠️ ATENÇÃO: Usando credenciais de PRODUÇÃO em ambiente de desenvolvimento!");
     logger.warn("⚠️ Use credenciais de TESTE para desenvolvimento. Cartões de teste não funcionam com credenciais de produção!");
   }
-  
+
   // Se não for nem teste nem produção, avisar
   if (!isTestToken && !isProductionToken) {
     logger.warn("⚠️ Formato de token não reconhecido. Pode causar erros.");
@@ -130,22 +130,23 @@ const validateMercadoPagoCredentials = (): void => {
 // Validação preventiva de credenciais antes de processar pagamento
 const validateCredentialsBeforePayment = (): void => {
   const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
-  
+
   if (!accessToken || accessToken.trim() === "") {
     throw new AppError(
       "MERCADOPAGO_ACCESS_TOKEN não configurado. Configure a variável de ambiente antes de processar pagamentos.",
       500
     );
   }
-  
-  const isTestToken = accessToken.startsWith("TEST_");
-  const isProductionToken = accessToken.startsWith("APP_USR_");
+
+  // Mercado Pago usa tanto hífen quanto underscore - aceitar ambos
+  const isTestToken = accessToken.startsWith("TEST-") || accessToken.startsWith("TEST_");
+  const isProductionToken = accessToken.startsWith("APP_USR-") || accessToken.startsWith("APP_USR_");
   const isProduction = process.env.NODE_ENV === "production";
-  
+
   // Validar formato do token
   if (!isTestToken && !isProductionToken) {
     throw new AppError(
-      `Formato de token inválido. O token deve começar com "TEST_" (teste) ou "APP_USR_" (produção). ` +
+      `Formato de token inválido. O token deve começar com "TEST-" ou "TEST_" (teste) ou "APP_USR-" ou "APP_USR_" (produção). ` +
       `Token recebido começa com: "${accessToken.substring(0, 10)}..."`,
       500
     );
@@ -342,9 +343,9 @@ export const processPayment = async (
 
     // Log das credenciais sendo usadas (sem expor o token completo)
     const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN || "NÃO CONFIGURADO";
-    const tokenType = accessToken.startsWith("TEST_") ? "TESTE" : 
-                     accessToken.startsWith("APP_USR_") ? "PRODUÇÃO" : "DESCONHECIDO";
-    
+    const tokenType = (accessToken.startsWith("TEST-") || accessToken.startsWith("TEST_")) ? "TESTE" :
+                     (accessToken.startsWith("APP_USR-") || accessToken.startsWith("APP_USR_")) ? "PRODUÇÃO" : "DESCONHECIDO";
+
     logger.info("Credenciais do Mercado Pago em uso:", {
       tokenType,
       tokenPrefix: accessToken.substring(0, 15) + "...",
@@ -467,8 +468,8 @@ export const processPayment = async (
         hasIssuerId: !!paymentData.issuerId,
       },
       credentials: {
-        tokenType: process.env.MERCADOPAGO_ACCESS_TOKEN?.startsWith("TEST_") ? "TESTE" : 
-                   process.env.MERCADOPAGO_ACCESS_TOKEN?.startsWith("APP_USR_") ? "PRODUÇÃO" : "DESCONHECIDO",
+        tokenType: (process.env.MERCADOPAGO_ACCESS_TOKEN?.startsWith("TEST-") || process.env.MERCADOPAGO_ACCESS_TOKEN?.startsWith("TEST_")) ? "TESTE" :
+                   (process.env.MERCADOPAGO_ACCESS_TOKEN?.startsWith("APP_USR-") || process.env.MERCADOPAGO_ACCESS_TOKEN?.startsWith("APP_USR_")) ? "PRODUÇÃO" : "DESCONHECIDO",
         nodeEnv: process.env.NODE_ENV,
       },
     });
@@ -609,28 +610,28 @@ export const processPayment = async (
 
     if (isCredentialsError) {
       const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN || "NÃO CONFIGURADO";
-      const tokenType = accessToken.startsWith("TEST_") ? "TESTE" : 
-                       accessToken.startsWith("APP_USR_") ? "PRODUÇÃO" : "DESCONHECIDO";
-      
+      const tokenType = (accessToken.startsWith("TEST-") || accessToken.startsWith("TEST_")) ? "TESTE" :
+                       (accessToken.startsWith("APP_USR-") || accessToken.startsWith("APP_USR_")) ? "PRODUÇÃO" : "DESCONHECIDO";
+
       // Log direto no console para garantir que apareça
       console.error("\n⚠️⚠️⚠️ ERRO DE CREDENCIAIS DETECTADO ⚠️⚠️⚠️");
       console.error("Token Type:", tokenType);
       console.error("Token Prefix:", accessToken.substring(0, 15) + "...");
       console.error("NODE_ENV:", process.env.NODE_ENV);
-      console.error("Problema:", tokenType === "PRODUÇÃO" 
+      console.error("Problema:", tokenType === "PRODUÇÃO"
         ? "Credenciais de PRODUÇÃO detectadas. Use credenciais de TESTE para desenvolvimento."
         : tokenType === "TESTE"
         ? "Credenciais de TESTE detectadas. Certifique-se de usar cartões de teste válidos."
         : "Formato de token não reconhecido.");
       console.error("Solução: Verifique o arquivo MERCADOPAGO_SETUP.md para instruções detalhadas.");
       console.error("⚠️⚠️⚠️ FIM DO ERRO DE CREDENCIAIS ⚠️⚠️⚠️\n");
-      
+
       logger.error({
         msg: "⚠️ ERRO DE CREDENCIAIS DETECTADO",
         accessTokenPrefix: accessToken.substring(0, 15) + "...",
         tokenType,
         nodeEnv: process.env.NODE_ENV,
-        problema: tokenType === "PRODUÇÃO" 
+        problema: tokenType === "PRODUÇÃO"
           ? "Credenciais de PRODUÇÃO detectadas. Use credenciais de TESTE para desenvolvimento."
           : tokenType === "TESTE"
           ? "Credenciais de TESTE detectadas. Certifique-se de usar cartões de teste válidos."

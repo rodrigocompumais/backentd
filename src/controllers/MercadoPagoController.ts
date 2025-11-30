@@ -238,3 +238,71 @@ export const getPaymentMethodsController = async (
   }
 };
 
+export const getMercadoPagoDiagnostic = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  try {
+    const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN || "NÃO CONFIGURADO";
+    const tokenType = accessToken.startsWith("TEST_") ? "TESTE" : 
+                     accessToken.startsWith("APP_USR_") ? "PRODUÇÃO" : "DESCONHECIDO";
+    const isProduction = process.env.NODE_ENV === "production";
+    
+    // Verificar se o cliente foi inicializado (precisa importar do service)
+    // Por enquanto, vamos verificar se o token está configurado
+    let clientStatus = "não inicializado";
+    try {
+      if (accessToken !== "NÃO CONFIGURADO") {
+        clientStatus = "configurado";
+      }
+    } catch (e) {
+      clientStatus = "erro na inicialização";
+    }
+    
+    const compatibility = {
+      valid: (tokenType === "TESTE" && !isProduction) ||
+             (tokenType === "PRODUÇÃO" && isProduction),
+      warning: tokenType === "PRODUÇÃO" && !isProduction,
+      error: tokenType === "TESTE" && isProduction,
+    };
+    
+    const diagnostic = {
+      status: clientStatus,
+      credentials: {
+        type: tokenType,
+        prefix: accessToken.substring(0, 15) + "...",
+        configured: accessToken !== "NÃO CONFIGURADO",
+        length: accessToken.length,
+      },
+      environment: {
+        nodeEnv: process.env.NODE_ENV || "não configurado",
+        isProduction,
+      },
+      compatibility,
+      recommendations: [
+        ...(compatibility.error ? [
+          "ERRO: Credenciais de TESTE em ambiente de PRODUÇÃO. Use credenciais de produção (APP_USR_...) ou altere NODE_ENV."
+        ] : []),
+        ...(compatibility.warning ? [
+          "AVISO: Credenciais de PRODUÇÃO em desenvolvimento. Use credenciais de teste (TEST_...) para desenvolvimento."
+        ] : []),
+        ...(tokenType === "DESCONHECIDO" ? [
+          "ERRO: Formato de token não reconhecido. Deve começar com 'TEST_' ou 'APP_USR_'."
+        ] : []),
+        ...(accessToken === "NÃO CONFIGURADO" ? [
+          "ERRO: MERCADOPAGO_ACCESS_TOKEN não configurado. Configure a variável de ambiente."
+        ] : []),
+      ],
+      timestamp: new Date().toISOString(),
+    };
+    
+    return res.status(200).json(diagnostic);
+  } catch (error: any) {
+    logger.error("Erro no getMercadoPagoDiagnostic:", error);
+    throw new AppError(
+      error.message || "Erro ao obter diagnóstico do Mercado Pago",
+      500
+    );
+  }
+};
+

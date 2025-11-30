@@ -1,5 +1,6 @@
 import express from "express";
 import * as MercadoPagoController from "../controllers/MercadoPagoController";
+import { validateMercadoPago } from "../middleware/validateMercadoPago";
 
 const mercadoPagoRoutes = express.Router();
 
@@ -9,9 +10,10 @@ mercadoPagoRoutes.post(
   MercadoPagoController.createPaymentIntentController
 );
 
-// Processar pagamento
+// Processar pagamento (com validação de credenciais)
 mercadoPagoRoutes.post(
   "/mercadopago/process-payment",
+  validateMercadoPago,
   MercadoPagoController.processPaymentController
 );
 
@@ -37,6 +39,11 @@ mercadoPagoRoutes.post(
 mercadoPagoRoutes.get(
   "/mercadopago/payment-methods",
   MercadoPagoController.getPaymentMethodsController
+);
+
+mercadoPagoRoutes.get(
+  "/diagnostic/mercadopago",
+  MercadoPagoController.getMercadoPagoDiagnostic
 );
 
 export default mercadoPagoRoutes;

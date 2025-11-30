@@ -2,6 +2,92 @@ import { MercadoPagoConfig, Payment, Preference } from "mercadopago";
 import AppError from "../../errors/AppError";
 import { logger } from "../../utils/logger";
 
+// Função auxiliar para logging robusto de erros
+const logErrorDetails = (error: any, context: any = {}): void => {
+  const timestamp = new Date().toISOString();
+  
+  // Capturar informações básicas do erro
+  const errorInfo: any = {
+    timestamp,
+    error: {
+      name: error?.name || "Unknown",
+      message: error?.message || "No message",
+      stack: error?.stack?.substring(0, 500) || "No stack",
+    },
+    context,
+  };
+
+  // Capturar propriedades adicionais do erro
+  if (error?.cause) {
+    if (Array.isArray(error.cause)) {
+      errorInfo.error.causeArray = error.cause.map((c: any, idx: number) => ({
+        index: idx,
+        code: c.code,
+        description: c.description,
+        message: c.message,
+        data: c.data,
+        field: c.field,
+      }));
+    } else {
+      errorInfo.error.cause = {
+        code: error.cause.code,
+        description: error.cause.description,
+        message: error.cause.message,
+        data: error.cause.data,
+        field: error.cause.field,
+      };
+    }
+  }
+
+  if (error?.response) {
+    errorInfo.error.response = {
+      status: error.response.status,
+      statusText: error.response.statusText,
+      data: error.response.data,
+    };
+  }
+
+  if (error?.status) {
+    errorInfo.error.status = error.status;
+  }
+
+  if (error?.statusCode) {
+    errorInfo.error.statusCode = error.statusCode;
+  }
+
+  // Serializar de forma segura
+  let errorJson: string;
+  try {
+    errorJson = JSON.stringify(errorInfo, null, 2);
+  } catch (e) {
+    errorJson = JSON.stringify({
+      timestamp,
+      error: {
+        name: String(error?.name || "Unknown"),
+        message: String(error?.message || "No message"),
+      },
+      context,
+      serializationError: "Failed to serialize error object",
+    }, null, 2);
+  }
+
+  // 1. console.error (pode ser capturado pelo PM2)
+  console.error("\n[ERRO MERCADO PAGO]", errorJson);
+
+  // 2. process.stderr.write (sempre aparece, mesmo no PM2)
+  try {
+    process.stderr.write(`\n[ERRO MERCADO PAGO] ${errorJson}\n`);
+  } catch (e) {
+    // Se stderr.write falhar, continuar
+  }
+
+  // 3. logger (formato estruturado para pino)
+  logger.error({
+    msg: "Erro Mercado Pago",
+    ...errorInfo,
+  });
+};
+
 // Validar credenciais do Mercado Pago
 const validateMercadoPagoCredentials = (): void => {
   const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
@@ -35,6 +121,49 @@ const validateMercadoPagoCredentials = (): void => {
   // Se não for nem teste nem produção, avisar
   if (!isTestToken && !isProductionToken) {
     logger.warn("⚠️ Formato de token não reconhecido. Pode causar erros.");
+  }
+};
+
+// Validação preventiva de credenciais antes de processar pagamento
+const validateCredentialsBeforePayment = (): void => {
+  const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
+  
+  if (!accessToken || accessToken.trim() === "") {
+    throw new AppError(
+      "MERCADOPAGO_ACCESS_TOKEN não configurado. Configure a variável de ambiente antes de processar pagamentos.",
+      500
+    );
+  }
+  
+  const isTestToken = accessToken.startsWith("TEST_");
+  const isProductionToken = accessToken.startsWith("APP_USR_");
+  const isProduction = process.env.NODE_ENV === "production";
+  
+  // Validar formato do token
+  if (!isTestToken && !isProductionToken) {
+    throw new AppError(
+      `Formato de token inválido. O token deve começar com "TEST_" (teste) ou "APP_USR_" (produção). ` +
+      `Token recebido começa com: "${accessToken.substring(0, 10)}..."`,
+      500
+    );
+  }
+  
+  // Validar compatibilidade entre credenciais e ambiente
+  if (isProduction && isTestToken) {
+    throw new AppError(
+      "Incompatibilidade detectada: Credenciais de TESTE em ambiente de PRODUÇÃO. " +
+      "Use credenciais de produção (APP_USR_...) ou altere NODE_ENV para 'development'. " +
+      "Isso causará erro 'Unauthorized use of live credentials' ao processar pagamentos.",
+      500
+    );
+  }
+  
+  if (!isProduction && isProductionToken) {
+    logger.warn(
+      "Credenciais de PRODUÇÃO detectadas em ambiente de desenvolvimento. " +
+      "Recomendado: Use credenciais de teste (TEST_...) para desenvolvimento. " +
+      "Cartões de teste não funcionam com credenciais de produção."
+    );
   }
 };
 
@@ -196,6 +325,9 @@ export const processPayment = async (
   paymentData: PaymentData
 ): Promise<any> => {
   try {
+    // Validação preventiva de credenciais ANTES de qualquer processamento
+    validateCredentialsBeforePayment();
+
     // Inicializar Mercado Pago se ainda não foi inicializado
     if (!payment) {
       initializeMercadoPago();
@@ -322,6 +454,22 @@ export const processPayment = async (
       dateApproved: response.date_approved,
     };
   } catch (error: any) {
+    // Usar função de logging robusta
+    logErrorDetails(error, {
+      paymentData: {
+        transactionAmount: paymentData.transactionAmount,
+        paymentMethodId: paymentData.paymentMethodId,
+        tokenLength: paymentData.token?.length,
+        installments: paymentData.installments,
+        hasIssuerId: !!paymentData.issuerId,
+      },
+      credentials: {
+        tokenType: process.env.MERCADOPAGO_ACCESS_TOKEN?.startsWith("TEST_") ? "TESTE" : 
+                   process.env.MERCADOPAGO_ACCESS_TOKEN?.startsWith("APP_USR_") ? "PRODUÇÃO" : "DESCONHECIDO",
+        nodeEnv: process.env.NODE_ENV,
+      },
+    });
+
     // Log COMPLETO do erro do Mercado Pago - capturar TODAS as propriedades
     const errorDetails: any = {
       name: error.name,

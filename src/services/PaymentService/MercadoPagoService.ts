@@ -84,7 +84,10 @@ const logErrorDetails = (error: any, context: any = {}): void => {
   // 3. logger (formato estruturado para pino)
   logger.error({
     msg: "Erro Mercado Pago",
-    ...errorInfo,
+    timestamp: errorInfo.timestamp,
+    errorName: errorInfo.error.name,
+    errorMessage: errorInfo.error.message,
+    context: errorInfo.context,
   });
 };
 
@@ -168,7 +171,7 @@ const validateCredentialsBeforePayment = (): void => {
 };
 
 // Traduzir erros do Mercado Pago para mensagens amigáveis
-const translateMercadoPagoError = (error: any): string => {
+export const translateMercadoPagoError = (error: any): string => {
   const errorMessage = error.message || "";
   const errorCause = error.cause?.[0]?.description || error.cause?.[0]?.message || "";
   const fullError = `${errorMessage} ${errorCause}`.trim();

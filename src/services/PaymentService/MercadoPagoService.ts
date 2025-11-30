@@ -15,12 +15,26 @@ const validateMercadoPagoCredentials = (): void => {
   const isTestToken = accessToken.startsWith("TEST_");
   const isProductionToken = accessToken.startsWith("APP_USR_");
   
+  logger.info("Credenciais do Mercado Pago detectadas:", {
+    tokenPrefix: accessToken.substring(0, 10) + "...",
+    isTestToken,
+    isProductionToken,
+    nodeEnv: process.env.NODE_ENV,
+  });
+  
   if (process.env.NODE_ENV === "production" && isTestToken) {
     logger.warn("⚠️ ATENÇÃO: Usando credenciais de TESTE em PRODUÇÃO!");
+    logger.warn("⚠️ Isso causará erro 'Unauthorized use of live credentials' se tentar processar pagamentos reais!");
   }
   
   if (process.env.NODE_ENV !== "production" && isProductionToken) {
     logger.warn("⚠️ ATENÇÃO: Usando credenciais de PRODUÇÃO em ambiente de desenvolvimento!");
+    logger.warn("⚠️ Use credenciais de TESTE para desenvolvimento. Cartões de teste não funcionam com credenciais de produção!");
+  }
+  
+  // Se não for nem teste nem produção, avisar
+  if (!isTestToken && !isProductionToken) {
+    logger.warn("⚠️ Formato de token não reconhecido. Pode causar erros.");
   }
 };
 
@@ -297,23 +311,93 @@ export const processPayment = async (
       dateApproved: response.date_approved,
     };
   } catch (error: any) {
-    // Log detalhado do erro do Mercado Pago
-    logger.error("Erro detalhado do Mercado Pago:", {
+    // Log COMPLETO do erro do Mercado Pago - capturar TODAS as propriedades
+    const errorDetails: any = {
+      name: error.name,
       message: error.message,
-      cause: error.cause,
-      causeArray: Array.isArray(error.cause) ? error.cause.map((c: any) => ({
-        code: c.code,
-        description: c.description,
-        data: c.data,
-      })) : error.cause,
       status: error.status,
       statusCode: error.statusCode,
-      stack: error.stack?.substring(0, 500), // Limitar stack trace
-    });
+      type: error.type,
+    };
+
+    // Capturar cause completo
+    if (error.cause) {
+      if (Array.isArray(error.cause)) {
+        errorDetails.causeArray = error.cause.map((c: any, index: number) => ({
+          index,
+          code: c.code,
+          description: c.description,
+          message: c.message,
+          data: c.data,
+          field: c.field,
+          fullCause: c,
+        }));
+      } else {
+        errorDetails.cause = {
+          code: error.cause.code,
+          description: error.cause.description,
+          message: error.cause.message,
+          data: error.cause.data,
+          field: error.cause.field,
+          fullCause: error.cause,
+        };
+      }
+    }
+
+    // Capturar response se existir
+    if (error.response) {
+      errorDetails.response = {
+        status: error.response.status,
+        statusText: error.response.statusText,
+        data: error.response.data,
+      };
+    }
+
+    // Capturar APIError específico do Mercado Pago
+    if (error.api_response) {
+      errorDetails.apiResponse = error.api_response;
+    }
+
+    // Capturar todas as propriedades do erro
+    errorDetails.allProperties = Object.keys(error);
+    errorDetails.errorString = JSON.stringify(error, Object.getOwnPropertyNames(error), 2);
+
+    logger.error("Erro COMPLETO do Mercado Pago:", errorDetails);
 
     // Extrair mensagem de erro mais específica
     let errorMessage = error.message || "Erro ao processar pagamento";
     let errorCode = null;
+    
+    // Verificar se é erro de credenciais (pode estar em diferentes lugares)
+    const errorMessageLower = error.message?.toLowerCase() || "";
+    const errorString = JSON.stringify(error).toLowerCase();
+    const isCredentialsError = 
+      errorMessageLower.includes("unauthorized use of live credentials") ||
+      errorMessageLower.includes("unauthorized") ||
+      errorString.includes("unauthorized use of live credentials") ||
+      (Array.isArray(error.cause) && error.cause.some((c: any) => 
+        c.description?.toLowerCase().includes("unauthorized use of live credentials") ||
+        c.message?.toLowerCase().includes("unauthorized use of live credentials")
+      )) ||
+      (error.cause?.description?.toLowerCase().includes("unauthorized use of live credentials"));
+
+    if (isCredentialsError) {
+      const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN || "NÃO CONFIGURADO";
+      const tokenType = accessToken.startsWith("TEST_") ? "TESTE" : 
+                       accessToken.startsWith("APP_USR_") ? "PRODUÇÃO" : "DESCONHECIDO";
+      
+      logger.error("⚠️ ERRO DE CREDENCIAIS DETECTADO:", {
+        accessTokenPrefix: accessToken.substring(0, 15) + "...",
+        tokenType,
+        nodeEnv: process.env.NODE_ENV,
+        problema: tokenType === "PRODUÇÃO" 
+          ? "Credenciais de PRODUÇÃO detectadas. Use credenciais de TESTE para desenvolvimento."
+          : tokenType === "TESTE"
+          ? "Credenciais de TESTE detectadas. Certifique-se de usar cartões de teste válidos."
+          : "Formato de token não reconhecido.",
+        solucao: "Verifique o arquivo MERCADOPAGO_SETUP.md para instruções detalhadas.",
+      });
+    }
     
     // Tentar extrair mensagem do cause array
     if (Array.isArray(error.cause) && error.cause.length > 0) {

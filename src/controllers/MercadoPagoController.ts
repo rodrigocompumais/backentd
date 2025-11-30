@@ -3,18 +3,18 @@ import * as Yup from "yup";
 import AppError from "../errors/AppError";
 import {
   createPaymentIntent,
-  processPayment,
   getPaymentStatus,
   processWebhook,
-  validateCardData,
-  createCardToken,
-  getPaymentMethodsByBin,
 } from "../services/PaymentService/MercadoPagoService";
 import { logger } from "../utils/logger";
 import Company from "../models/Company";
 import Invoices from "../models/Invoices";
 import { getIO } from "../libs/socket";
 import moment from "moment";
+import CreateCompanyService from "../services/CompanyService/CreateCompanyService";
+import CreateInvoiceService from "../services/InvoicesService/CreateInvoiceService";
+import { Op } from "sequelize";
+import User from "../models/User";
 
 export const createPaymentIntentController = async (
   req: Request,
@@ -44,50 +44,6 @@ export const createPaymentIntentController = async (
   }
 };
 
-export const processPaymentController = async (
-  req: Request,
-  res: Response
-): Promise<Response> => {
-  const schema = Yup.object().shape({
-    transactionAmount: Yup.number().required().positive(),
-    description: Yup.string().required(),
-    paymentMethodId: Yup.string().required(),
-    token: Yup.string().required(),
-    installments: Yup.number().required().min(1).max(12),
-    identificationType: Yup.string().required(),
-    identificationNumber: Yup.string().required(),
-    payer: Yup.object().shape({
-      email: Yup.string().email().required(),
-      firstName: Yup.string().optional(),
-      lastName: Yup.string().optional(),
-    }).required(),
-    metadata: Yup.object().optional(),
-    issuerId: Yup.string().optional(),
-  });
-
-  try {
-    await schema.validate(req.body);
-  } catch (err: any) {
-    throw new AppError(err.message, 400);
-  }
-
-  // Validar dados do cartão
-  if (!validateCardData(req.body)) {
-    throw new AppError("Dados do cartão inválidos", 400);
-  }
-
-  try {
-    const paymentResult = await processPayment(req.body);
-    return res.status(200).json(paymentResult);
-  } catch (error: any) {
-    logger.error("Erro no processPaymentController:", error);
-    throw new AppError(
-      error.message || "Erro ao processar pagamento",
-      400
-    );
-  }
-};
-
 export const webhookController = async (
   req: Request,
   res: Response
@@ -104,54 +60,151 @@ export const webhookController = async (
 
     const webhookData = await processWebhook(req.body);
 
-    if (webhookData && webhookData.metadata) {
-      const { companyId, invoiceId } = webhookData.metadata;
+    if (!webhookData || !webhookData.metadata) {
+      logger.warn("Webhook sem metadata, ignorando");
+      return res.status(200).json({ received: true });
+    }
 
-      if (companyId && invoiceId) {
-        const company = await Company.findByPk(companyId);
-        const invoice = await Invoices.findByPk(invoiceId);
+    const metadata = webhookData.metadata;
+    const { companyName, companyEmail, companyPhone, companyPasswordHash, planId, recurrence, campaignsEnabled } = metadata;
 
-        if (company && invoice) {
-          // Atualizar invoice e company conforme status
-          if (webhookData.status === "approved") {
-            // Ativar empresa e atualizar dueDate
-            const newDueDate = moment().add(30, "days").format();
-            await company.update({
-              status: true,
-              dueDate: newDueDate,
-            });
+    // Se já existe companyId, significa que empresa já foi criada (fluxo antigo)
+    if (metadata.companyId && metadata.invoiceId) {
+      const company = await Company.findByPk(metadata.companyId);
+      const invoice = await Invoices.findByPk(metadata.invoiceId);
 
-            await invoice.update({
-              status: "paid",
-            });
+      if (company && invoice) {
+        // Atualizar invoice e company conforme status
+        if (webhookData.status === "approved") {
+          const newDueDate = moment().add(30, "days").format();
+          await company.update({
+            status: true,
+            dueDate: newDueDate,
+          });
 
-            // Emitir evento via Socket.IO
-            const io = getIO();
-            io.to(`company-${companyId}-mainchannel`).emit(
-              `company-${companyId}-payment`,
-              {
-                action: "approved",
-                company: await company.reload(),
-                payment: webhookData,
-              }
-            );
+          await invoice.update({
+            status: "paid",
+          });
 
-            logger.info(
-              `Pagamento aprovado - Empresa ${companyId} ativada via webhook`
-            );
-          } else if (webhookData.status === "rejected") {
-            await invoice.update({
-              status: "rejected",
-            });
+          const io = getIO();
+          io.to(`company-${metadata.companyId}-mainchannel`).emit(
+            `company-${metadata.companyId}-payment`,
+            {
+              action: "approved",
+              company: await company.reload(),
+              payment: webhookData,
+            }
+          );
 
-            logger.warn(`Pagamento rejeitado - Invoice ${invoiceId}`);
-          } else if (webhookData.status === "pending") {
-            await invoice.update({
-              status: "pending",
-            });
-          }
+          logger.info(
+            `Pagamento aprovado - Empresa ${metadata.companyId} ativada via webhook`
+          );
+        } else if (webhookData.status === "rejected") {
+          await invoice.update({
+            status: "rejected",
+          });
+          logger.warn(`Pagamento rejeitado - Invoice ${metadata.invoiceId}`);
+        } else if (webhookData.status === "pending") {
+          await invoice.update({
+            status: "pending",
+          });
         }
       }
+      return res.status(200).json({ received: true, data: webhookData });
+    }
+
+    // Novo fluxo: criar empresa apenas quando pagamento for aprovado
+    if (webhookData.status === "approved" && companyName && companyEmail) {
+      // Verificar se empresa já existe
+      const existingCompany = await Company.findOne({
+        where: {
+          [Op.or]: [
+            { email: companyEmail },
+            { name: companyName }
+          ]
+        }
+      });
+
+      if (existingCompany) {
+        logger.warn(`Empresa já existe: ${companyEmail}`);
+        // Atualizar empresa existente
+        const newDueDate = moment().add(30, "days").format();
+        await existingCompany.update({
+          status: true,
+          dueDate: newDueDate,
+        });
+
+        const io = getIO();
+        io.to(`company-${existingCompany.id}-mainchannel`).emit(
+          `company-${existingCompany.id}-payment`,
+          {
+            action: "approved",
+            company: await existingCompany.reload(),
+            payment: webhookData,
+          }
+        );
+
+        return res.status(200).json({ received: true, data: webhookData });
+      }
+
+      // Criar empresa
+      logger.info("Criando empresa via webhook após pagamento aprovado:", {
+        companyName,
+        companyEmail,
+        planId,
+      });
+
+      // Nota: CreateCompanyService faz hash da senha internamente
+      // Mas como já temos o hash no metadata, precisamos passar uma senha temporária
+      // e depois atualizar o User com o hash correto
+      const company = await CreateCompanyService({
+        name: companyName,
+        email: companyEmail,
+        phone: companyPhone,
+        password: "temp_password_will_be_updated", // Será atualizado abaixo
+        planId: planId ? parseInt(planId.toString()) : undefined,
+        status: true, // Ativar imediatamente
+        dueDate: moment().add(30, "days").format(),
+        recurrence: recurrence || "MENSAL",
+        campaignsEnabled: campaignsEnabled !== undefined ? campaignsEnabled : true,
+      });
+
+      // Atualizar senha do usuário com o hash correto
+      const user = await User.findOne({ where: { companyId: company.id, profile: "admin" } });
+      if (user && companyPasswordHash) {
+        await user.update({ passwordHash: companyPasswordHash });
+      }
+
+      // Criar invoice
+      const invoice = await CreateInvoiceService({
+        companyId: company.id,
+        detail: `Pagamento plano - ${company.name}`,
+        value: webhookData.transactionAmount || 0,
+        status: "paid",
+        dueDate: moment().add(30, "days").format(),
+      });
+
+      logger.info("Empresa criada via webhook:", {
+        companyId: company.id,
+        invoiceId: invoice.id,
+        paymentId: webhookData.id,
+      });
+
+      // Emitir evento via Socket.IO
+      const io = getIO();
+      io.to(`company-${company.id}-mainchannel`).emit(
+        `company-${company.id}-payment`,
+        {
+          action: "approved",
+          company: await company.reload(),
+          payment: webhookData,
+        }
+      );
+    } else if (webhookData.status === "rejected" || webhookData.status === "pending") {
+      logger.info("Pagamento não aprovado, empresa não será criada:", {
+        status: webhookData.status,
+        companyEmail,
+      });
     }
 
     return res.status(200).json({ received: true, data: webhookData });
@@ -179,60 +232,6 @@ export const getPaymentStatusController = async (
     logger.error("Erro no getPaymentStatusController:", error);
     throw new AppError(
       error.message || "Erro ao consultar status do pagamento",
-      400
-    );
-  }
-};
-
-export const createCardTokenController = async (
-  req: Request,
-  res: Response
-): Promise<Response> => {
-  const schema = Yup.object().shape({
-    cardNumber: Yup.string().required(),
-    cardholderName: Yup.string().required(),
-    expirationMonth: Yup.string().required(),
-    expirationYear: Yup.string().required(),
-    securityCode: Yup.string().required(),
-    identificationType: Yup.string().required(),
-    identificationNumber: Yup.string().required(),
-  });
-
-  try {
-    await schema.validate(req.body);
-  } catch (err: any) {
-    throw new AppError(err.message, 400);
-  }
-
-  try {
-    const token = await createCardToken(req.body);
-    return res.status(200).json(token);
-  } catch (error: any) {
-    logger.error("Erro no createCardTokenController:", error);
-    throw new AppError(
-      error.message || "Erro ao criar token do cartão",
-      400
-    );
-  }
-};
-
-export const getPaymentMethodsController = async (
-  req: Request,
-  res: Response
-): Promise<Response> => {
-  const { bin } = req.query;
-
-  if (!bin || typeof bin !== "string") {
-    throw new AppError("BIN do cartão é obrigatório", 400);
-  }
-
-  try {
-    const paymentMethods = await getPaymentMethodsByBin(bin);
-    return res.status(200).json(paymentMethods);
-  } catch (error: any) {
-    logger.error("Erro no getPaymentMethodsController:", error);
-    throw new AppError(
-      error.message || "Erro ao obter informações do cartão",
       400
     );
   }

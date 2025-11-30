@@ -16,8 +16,10 @@ import { verify } from "jsonwebtoken";
 import User from "../models/User";
 import ShowPlanCompanyService from "../services/CompanyService/ShowPlanCompanyService";
 import ListCompaniesPlanService from "../services/CompanyService/ListCompaniesPlanService";
-import CreateCompanyWithPaymentService from "../services/CompanyService/CreateCompanyWithPaymentService";
 import { logger } from "../utils/logger";
+import { createPaymentIntent } from "../services/PaymentService/MercadoPagoService";
+import Plan from "../models/Plan";
+import { hash } from "bcryptjs";
 
 type IndexQuery = {
   searchParam: string;
@@ -182,39 +184,21 @@ export const indexPlan = async (req: Request, res: Response): Promise<Response> 
 
 };
 
-export const storeWithPayment = async (req: Request, res: Response): Promise<Response> => {
-  logger.info("=== storeWithPayment chamado ===");
+export const createPaymentPreference = async (req: Request, res: Response): Promise<Response> => {
+  logger.info("=== createPaymentPreference chamado ===");
   logger.info("Body recebido:", {
-    companyName: req.body.companyData?.name,
-    companyEmail: req.body.companyData?.email,
-    planId: req.body.companyData?.planId,
-    transactionAmount: req.body.paymentData?.transactionAmount,
+    companyName: req.body.name,
+    companyEmail: req.body.email,
+    planId: req.body.planId,
   });
-  
-  const { companyData, paymentData } = req.body;
 
   const schema = Yup.object().shape({
-    companyData: Yup.object().shape({
-      name: Yup.string().required("Nome da empresa é obrigatório"),
-      email: Yup.string().email("Email inválido").required("Email é obrigatório"),
-      phone: Yup.string().required("Telefone é obrigatório"),
-      password: Yup.string().required("Senha é obrigatória"),
-      planId: Yup.number().required("Plano é obrigatório"),
-    }).required("Dados da empresa são obrigatórios"),
-    paymentData: Yup.object().shape({
-      transactionAmount: Yup.number().required("Valor da transação é obrigatório").positive("Valor deve ser positivo"),
-      paymentMethodId: Yup.string().required("Método de pagamento é obrigatório"),
-      token: Yup.string().required("Token do cartão é obrigatório"),
-      installments: Yup.number().required("Número de parcelas é obrigatório").min(1, "Mínimo 1 parcela").max(12, "Máximo 12 parcelas"),
-      identificationType: Yup.string().required("Tipo de identificação é obrigatório"),
-      identificationNumber: Yup.string().required("Número de identificação é obrigatório"),
-      payer: Yup.object().shape({
-        email: Yup.string().email("Email do pagador inválido").required("Email do pagador é obrigatório"),
-        firstName: Yup.string().optional(),
-        lastName: Yup.string().optional(),
-      }).required("Dados do pagador são obrigatórios"),
-      issuerId: Yup.string().optional(),
-    }).required("Dados de pagamento são obrigatórios"),
+    name: Yup.string().required("Nome da empresa é obrigatório"),
+    email: Yup.string().email("Email inválido").required("Email é obrigatório"),
+    phone: Yup.string().required("Telefone é obrigatório"),
+    password: Yup.string().required("Senha é obrigatória"),
+    planId: Yup.number().required("Plano é obrigatório"),
+    recurrence: Yup.string().optional(),
   });
 
   try {
@@ -236,41 +220,57 @@ export const storeWithPayment = async (req: Request, res: Response): Promise<Res
   }
 
   try {
-    logger.info("Iniciando CreateCompanyWithPaymentService...");
-    const result = await CreateCompanyWithPaymentService({
-      companyData,
-      paymentData,
+    // Buscar plano para obter valor
+    const plan = await Plan.findByPk(req.body.planId);
+    if (!plan) {
+      throw new AppError("Plano não encontrado", 404);
+    }
+
+    // Hash da senha antes de salvar no metadata
+    const passwordHash = await hash(req.body.password, 8);
+
+    // Criar preferência de pagamento
+    const preference = await createPaymentIntent({
+      transactionAmount: plan.value,
+      description: `Pagamento plano - ${plan.name}`,
+      metadata: {
+        companyName: req.body.name,
+        companyEmail: req.body.email,
+        companyPhone: req.body.phone,
+        companyPasswordHash: passwordHash,
+        planId: req.body.planId,
+        recurrence: req.body.recurrence || "MENSAL",
+        campaignsEnabled: true,
+      },
+      payer: {
+        email: req.body.email,
+        name: req.body.name,
+      },
+      notification_url: `${process.env.BACKEND_URL}/mercadopago/webhook`,
     });
 
-    logger.info("✓ Empresa criada com sucesso:", {
-      companyId: result.company.id,
-      companyName: result.company.name,
-      paymentStatus: result.payment?.status,
-      paymentId: result.payment?.id,
-      invoiceId: result.invoice.id,
+    logger.info("✓ Preferência criada com sucesso:", {
+      preferenceId: preference.preferenceId,
+      initPoint: preference.initPoint,
     });
 
     return res.status(200).json({
-      company: result.company,
-      payment: result.payment,
-      invoice: result.invoice,
-      success: result.payment.status === "approved",
+      initPoint: preference.initPoint,
+      preferenceId: preference.preferenceId,
     });
   } catch (error: any) {
-    logger.error("✗ Erro ao criar empresa com pagamento:", {
+    logger.error("✗ Erro ao criar preferência de pagamento:", {
       error: error.message,
       statusCode: error.statusCode,
-      companyName: companyData?.name,
-      companyEmail: companyData?.email,
+      companyName: req.body?.name,
+      companyEmail: req.body?.email,
     });
     
-    // Se for um AppError, apenas relançar (já tem mensagem amigável)
     if (error instanceof AppError) {
       throw error;
     }
     
-    // Caso contrário, criar um novo AppError com a mensagem do erro
-    const errorMessage = error.message || "Erro ao criar empresa com pagamento. Por favor, tente novamente.";
+    const errorMessage = error.message || "Erro ao criar preferência de pagamento. Por favor, tente novamente.";
     throw new AppError(errorMessage, error.statusCode || 400);
   }
 };

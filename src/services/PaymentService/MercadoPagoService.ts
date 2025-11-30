@@ -274,7 +274,19 @@ interface PaymentIntentData {
     companyId?: number;
     invoiceId?: number;
     planId?: number;
+    companyName?: string;
+    companyEmail?: string;
+    companyPhone?: string;
+    companyPasswordHash?: string;
+    recurrence?: string;
+    campaignsEnabled?: boolean;
+    [key: string]: any;
   };
+  payer?: {
+    email: string;
+    name: string;
+  };
+  notification_url?: string;
 }
 
 export const createPaymentIntent = async (
@@ -291,7 +303,7 @@ export const createPaymentIntent = async (
     }
 
     // Criar preferência de pagamento para obter public key e outros dados necessários
-    const preferenceData = {
+    const preferenceData: any = {
       items: [
         {
           id: `item-${Date.now()}`,
@@ -308,6 +320,19 @@ export const createPaymentIntent = async (
       },
       auto_return: "approved",
     };
+
+    // Adicionar payer se fornecido
+    if (data.payer) {
+      preferenceData.payer = {
+        email: data.payer.email,
+        name: data.payer.name,
+      };
+    }
+
+    // Adicionar notification_url se fornecido
+    if (data.notification_url) {
+      preferenceData.notification_url = data.notification_url;
+    }
 
     const response = await preference.create({ body: preferenceData });
 

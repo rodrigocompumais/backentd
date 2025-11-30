@@ -2,16 +2,87 @@ import { MercadoPagoConfig, Payment, Preference } from "mercadopago";
 import AppError from "../../errors/AppError";
 import { logger } from "../../utils/logger";
 
-const client = new MercadoPagoConfig({
-  accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN || "",
-  options: {
-    timeout: 5000,
-    idempotencyKey: "abc",
-  },
-});
+// Validar credenciais do Mercado Pago
+const validateMercadoPagoCredentials = (): void => {
+  const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
+  
+  if (!accessToken || accessToken.trim() === "") {
+    logger.error("MERCADOPAGO_ACCESS_TOKEN não configurado");
+    throw new AppError("Configuração de pagamento incompleta. Entre em contato com o suporte.", 500);
+  }
 
-const payment = new Payment(client);
-const preference = new Preference(client);
+  // Detectar ambiente baseado no token (test tokens geralmente começam com TEST_)
+  const isTestToken = accessToken.startsWith("TEST_");
+  const isProductionToken = accessToken.startsWith("APP_USR_");
+  
+  if (process.env.NODE_ENV === "production" && isTestToken) {
+    logger.warn("⚠️ ATENÇÃO: Usando credenciais de TESTE em PRODUÇÃO!");
+  }
+  
+  if (process.env.NODE_ENV !== "production" && isProductionToken) {
+    logger.warn("⚠️ ATENÇÃO: Usando credenciais de PRODUÇÃO em ambiente de desenvolvimento!");
+  }
+};
+
+// Traduzir erros do Mercado Pago para mensagens amigáveis
+const translateMercadoPagoError = (error: any): string => {
+  const errorMessage = error.message || "";
+  const errorCause = error.cause?.[0]?.description || error.cause?.[0]?.message || "";
+  const fullError = `${errorMessage} ${errorCause}`.trim();
+
+  const errorMessages: Record<string, string> = {
+    "Unauthorized use of live credentials": "Erro de configuração do pagamento. Verifique as credenciais do Mercado Pago.",
+    "Different parameters for the bin": "Dados do cartão inválidos. Verifique os dados informados e tente novamente.",
+    "invalid_card_data": "Dados do cartão inválidos. Verifique os dados informados.",
+    "invalid_card_number": "Número do cartão inválido. Verifique e tente novamente.",
+    "invalid_security_code": "Código de segurança inválido. Verifique o CVV do cartão.",
+    "invalid_expiration_date": "Data de expiração inválida. Verifique a data de validade do cartão.",
+    "insufficient_amount": "Saldo insuficiente no cartão.",
+    "card_disabled": "Cartão desabilitado. Entre em contato com o banco emissor.",
+    "card_error": "Erro ao processar cartão. Tente novamente ou use outro cartão.",
+    "invalid_token": "Token do cartão inválido. Por favor, preencha os dados novamente.",
+    "expired_token": "Token do cartão expirado. Por favor, preencha os dados novamente.",
+  };
+
+  // Procurar por chaves parciais
+  for (const [key, message] of Object.entries(errorMessages)) {
+    if (fullError.toLowerCase().includes(key.toLowerCase())) {
+      return message;
+    }
+  }
+
+  // Se não encontrou tradução, retornar mensagem genérica ou original
+  if (errorCause) {
+    return errorCause;
+  }
+  
+  if (errorMessage) {
+    return errorMessage;
+  }
+
+  return "Erro ao processar pagamento. Por favor, tente novamente ou entre em contato com o suporte.";
+};
+
+// Inicializar cliente do Mercado Pago
+let client: MercadoPagoConfig;
+let payment: Payment;
+let preference: Preference;
+
+try {
+  validateMercadoPagoCredentials();
+  client = new MercadoPagoConfig({
+    accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN || "",
+    options: {
+      timeout: 5000,
+      idempotencyKey: "abc",
+    },
+  });
+  payment = new Payment(client);
+  preference = new Preference(client);
+} catch (error: any) {
+  logger.error("Erro ao inicializar Mercado Pago:", error);
+  // Continuar mesmo com erro para não quebrar a aplicação, mas logar o erro
+}
 
 interface PaymentData {
   transactionAmount: number;
@@ -87,6 +158,32 @@ export const processPayment = async (
   paymentData: PaymentData
 ): Promise<any> => {
   try {
+    // Validar credenciais antes de processar
+    validateMercadoPagoCredentials();
+
+    // Validar token do cartão
+    if (!paymentData.token || paymentData.token.trim() === "") {
+      logger.error("Token do cartão vazio ou inválido");
+      throw new AppError("Token do cartão inválido. Por favor, preencha os dados novamente.", 400);
+    }
+
+    // Validar dados básicos
+    if (!paymentData.transactionAmount || paymentData.transactionAmount <= 0) {
+      throw new AppError("Valor da transação inválido.", 400);
+    }
+
+    if (!paymentData.paymentMethodId) {
+      throw new AppError("Método de pagamento não informado.", 400);
+    }
+
+    logger.info("Processando pagamento:", {
+      transactionAmount: paymentData.transactionAmount,
+      paymentMethodId: paymentData.paymentMethodId,
+      installments: paymentData.installments,
+      hasToken: !!paymentData.token,
+      payerEmail: paymentData.payer.email,
+    });
+
     const paymentBody: any = {
       transaction_amount: paymentData.transactionAmount,
       description: paymentData.description,
@@ -99,14 +196,14 @@ export const processPayment = async (
           number: paymentData.identificationNumber,
         },
         email: paymentData.payer.email,
-        first_name: paymentData.payer.firstName,
-        last_name: paymentData.payer.lastName,
+        first_name: paymentData.payer.firstName || "",
+        last_name: paymentData.payer.lastName || "",
       },
       metadata: paymentData.metadata || {},
     };
 
     // issuer_id precisa ser number ou não ser incluído se não existir
-    if (paymentData.issuerId) {
+    if (paymentData.issuerId && paymentData.issuerId.trim() !== "") {
       const issuerIdNumber = parseInt(paymentData.issuerId, 10);
       if (!isNaN(issuerIdNumber)) {
         paymentBody.issuer_id = issuerIdNumber;
@@ -114,6 +211,12 @@ export const processPayment = async (
     }
 
     const response = await payment.create({ body: paymentBody });
+
+    logger.info("Pagamento processado com sucesso:", {
+      paymentId: response.id,
+      status: response.status,
+      statusDetail: response.status_detail,
+    });
 
     return {
       id: response.id,
@@ -124,17 +227,15 @@ export const processPayment = async (
       dateApproved: response.date_approved,
     };
   } catch (error: any) {
-    logger.error("Erro ao processar pagamento:", error);
+    logger.error("Erro ao processar pagamento:", {
+      message: error.message,
+      cause: error.cause,
+      stack: error.stack,
+    });
     
-    // Extrair mensagem de erro mais amigável
-    let errorMessage = "Erro ao processar pagamento";
-    if (error.cause && error.cause.length > 0) {
-      errorMessage = error.cause[0].description || errorMessage;
-    } else if (error.message) {
-      errorMessage = error.message;
-    }
-
-    throw new AppError(errorMessage, 400);
+    // Traduzir erro para mensagem amigável
+    const friendlyMessage = translateMercadoPagoError(error);
+    throw new AppError(friendlyMessage, 400);
   }
 };
 

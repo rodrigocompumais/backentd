@@ -17,6 +17,7 @@ import User from "../models/User";
 import ShowPlanCompanyService from "../services/CompanyService/ShowPlanCompanyService";
 import ListCompaniesPlanService from "../services/CompanyService/ListCompaniesPlanService";
 import CreateCompanyWithPaymentService from "../services/CompanyService/CreateCompanyWithPaymentService";
+import { logger } from "../utils/logger";
 
 type IndexQuery = {
   searchParam: string;
@@ -182,8 +183,13 @@ export const indexPlan = async (req: Request, res: Response): Promise<Response> 
 };
 
 export const storeWithPayment = async (req: Request, res: Response): Promise<Response> => {
-  console.log("=== storeWithPayment chamado ===");
-  console.log("Body recebido:", JSON.stringify(req.body, null, 2));
+  logger.info("=== storeWithPayment chamado ===");
+  logger.info("Body recebido:", {
+    companyName: req.body.companyData?.name,
+    companyEmail: req.body.companyData?.email,
+    planId: req.body.companyData?.planId,
+    transactionAmount: req.body.paymentData?.transactionAmount,
+  });
   
   const { companyData, paymentData } = req.body;
 
@@ -213,13 +219,16 @@ export const storeWithPayment = async (req: Request, res: Response): Promise<Res
 
   try {
     await schema.validate(req.body, { abortEarly: false });
-    console.log("✓ Validação do schema passou");
+    logger.info("✓ Validação do schema passou");
   } catch (err: any) {
-    console.error("✗ Erro na validação do schema:", err);
+    logger.error("✗ Erro na validação do schema:", {
+      error: err.message,
+      errors: err.inner,
+    });
     
     if (err.inner && err.inner.length > 0) {
       const errors = err.inner.map((e: any) => `${e.path}: ${e.message}`).join(", ");
-      console.error("Erros detalhados:", errors);
+      logger.error("Erros detalhados:", errors);
       throw new AppError(`Erro de validação: ${errors}`, 400);
     }
     
@@ -227,13 +236,19 @@ export const storeWithPayment = async (req: Request, res: Response): Promise<Res
   }
 
   try {
-    console.log("Iniciando CreateCompanyWithPaymentService...");
+    logger.info("Iniciando CreateCompanyWithPaymentService...");
     const result = await CreateCompanyWithPaymentService({
       companyData,
       paymentData,
     });
 
-    console.log("✓ Empresa criada com sucesso. Payment status:", result.payment?.status);
+    logger.info("✓ Empresa criada com sucesso:", {
+      companyId: result.company.id,
+      companyName: result.company.name,
+      paymentStatus: result.payment?.status,
+      paymentId: result.payment?.id,
+      invoiceId: result.invoice.id,
+    });
 
     return res.status(200).json({
       company: result.company,
@@ -242,16 +257,20 @@ export const storeWithPayment = async (req: Request, res: Response): Promise<Res
       success: result.payment.status === "approved",
     });
   } catch (error: any) {
-    console.error("✗ Erro ao criar empresa com pagamento:", error);
-    console.error("Erro completo:", JSON.stringify(error, null, 2));
+    logger.error("✗ Erro ao criar empresa com pagamento:", {
+      error: error.message,
+      statusCode: error.statusCode,
+      companyName: companyData?.name,
+      companyEmail: companyData?.email,
+    });
     
-    // Se for um AppError, apenas relançar
+    // Se for um AppError, apenas relançar (já tem mensagem amigável)
     if (error instanceof AppError) {
       throw error;
     }
     
     // Caso contrário, criar um novo AppError com a mensagem do erro
-    const errorMessage = error.message || "Erro ao criar empresa com pagamento";
+    const errorMessage = error.message || "Erro ao criar empresa com pagamento. Por favor, tente novamente.";
     throw new AppError(errorMessage, error.statusCode || 400);
   }
 };

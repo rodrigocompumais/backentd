@@ -31,8 +31,9 @@ const translateMercadoPagoError = (error: any): string => {
   const fullError = `${errorMessage} ${errorCause}`.trim();
 
   const errorMessages: Record<string, string> = {
-    "Unauthorized use of live credentials": "Erro de configuração do pagamento. Verifique as credenciais do Mercado Pago.",
+    "Unauthorized use of live credentials": "Erro de configuração do pagamento. Verifique as credenciais do Mercado Pago. Se estiver em ambiente de teste, use credenciais de teste.",
     "Different parameters for the bin": "Os dados do cartão não correspondem. Por favor, verifique o número do cartão e tente novamente. Se o problema persistir, tente com outro cartão.",
+    "Bin not found": "Não foi possível identificar o cartão. Por favor, verifique se o número do cartão está correto e tente novamente. Se estiver usando cartão de teste, certifique-se de usar um cartão de teste válido do Mercado Pago.",
     "invalid_card_data": "Dados do cartão inválidos. Verifique os dados informados.",
     "invalid_card_number": "Número do cartão inválido. Verifique e tente novamente.",
     "invalid_security_code": "Código de segurança inválido. Verifique o CVV do cartão.",
@@ -168,6 +169,18 @@ export const processPayment = async (
       throw new AppError("Token do cartão inválido. Por favor, preencha os dados novamente.", 400);
     }
 
+    // Validar formato do token (geralmente começa com caracteres alfanuméricos)
+    const tokenPattern = /^[a-zA-Z0-9_-]+$/;
+    if (!tokenPattern.test(paymentData.token)) {
+      logger.error("Token do cartão com formato inválido:", paymentData.token.substring(0, 10) + "...");
+      throw new AppError("Token do cartão com formato inválido. Por favor, preencha os dados novamente.", 400);
+    }
+
+    logger.info("Token do cartão recebido:", {
+      tokenLength: paymentData.token.length,
+      tokenPrefix: paymentData.token.substring(0, 10) + "...",
+    });
+
     // Validar dados básicos
     if (!paymentData.transactionAmount || paymentData.transactionAmount <= 0) {
       throw new AppError("Valor da transação inválido.", 400);
@@ -268,6 +281,7 @@ export const processPayment = async (
 
     // Extrair mensagem de erro mais específica
     let errorMessage = error.message || "Erro ao processar pagamento";
+    let errorCode = null;
     
     // Tentar extrair mensagem do cause array
     if (Array.isArray(error.cause) && error.cause.length > 0) {
@@ -277,10 +291,25 @@ export const processPayment = async (
       } else if (firstCause.message) {
         errorMessage = firstCause.message;
       }
+      if (firstCause.code) {
+        errorCode = firstCause.code;
+      }
     } else if (error.cause?.description) {
       errorMessage = error.cause.description;
+      errorCode = error.cause.code;
     } else if (error.cause?.message) {
       errorMessage = error.cause.message;
+      errorCode = error.cause.code;
+    }
+    
+    // Se for erro "Bin not found", adicionar informações adicionais
+    if (errorMessage.toLowerCase().includes("bin not found") || errorCode === "bin_not_found") {
+      logger.error("Erro 'Bin not found' - possíveis causas:", {
+        tokenLength: paymentData.token?.length,
+        paymentMethodId: paymentData.paymentMethodId,
+        hasIssuerId: !!paymentData.issuerId,
+        suggestion: "O token pode estar inválido ou o número do cartão pode estar incorreto. Tente recriar o token.",
+      });
     }
     
     // Traduzir erro para mensagem amigável
@@ -288,6 +317,7 @@ export const processPayment = async (
     
     logger.error("Erro traduzido:", {
       original: errorMessage,
+      errorCode: errorCode,
       translated: friendlyMessage,
     });
     
@@ -367,19 +397,46 @@ export const createCardToken = async (cardData: {
     // AVISO: Esta implementação viola PCI DSS pois os dados do cartão passam pelo servidor
     // O ideal é usar Secure Fields no frontend
     
+    // Validar dados antes de criar token
+    const cardNumberClean = cardData.cardNumber.replace(/\s|-/g, "");
+    if (cardNumberClean.length < 13 || cardNumberClean.length > 19) {
+      throw new AppError("Número do cartão inválido. Verifique e tente novamente.", 400);
+    }
+
+    if (!cardData.cardholderName || cardData.cardholderName.trim().length < 3) {
+      throw new AppError("Nome do titular inválido. Verifique e tente novamente.", 400);
+    }
+
+    if (!cardData.securityCode || cardData.securityCode.length < 3 || cardData.securityCode.length > 4) {
+      throw new AppError("Código de segurança (CVV) inválido. Verifique e tente novamente.", 400);
+    }
+
+    const identificationNumberClean = cardData.identificationNumber.replace(/\D/g, "");
+    if (identificationNumberClean.length < 11) {
+      throw new AppError("CPF/CNPJ inválido. Verifique e tente novamente.", 400);
+    }
+
     const tokenData = {
-      card_number: cardData.cardNumber.replace(/\s/g, ""),
+      card_number: cardNumberClean,
       cardholder: {
-        name: cardData.cardholderName,
+        name: cardData.cardholderName.trim(),
         identification: {
           type: cardData.identificationType,
-          number: cardData.identificationNumber.replace(/\D/g, ""),
+          number: identificationNumberClean,
         },
       },
       security_code: cardData.securityCode,
-      expiration_month: cardData.expirationMonth,
-      expiration_year: `20${cardData.expirationYear}`,
+      expiration_month: cardData.expirationMonth.padStart(2, "0"),
+      expiration_year: cardData.expirationYear.length === 2 ? `20${cardData.expirationYear}` : cardData.expirationYear,
     };
+
+    logger.info("Criando token do cartão:", {
+      cardNumberLength: cardNumberClean.length,
+      cardNumberPrefix: cardNumberClean.substring(0, 6) + "****",
+      hasCardholderName: !!tokenData.cardholder.name,
+      expirationMonth: tokenData.expiration_month,
+      expirationYear: tokenData.expiration_year,
+    });
 
     // Usar API REST do Mercado Pago para criar token
     const response = await fetch("https://api.mercadopago.com/v1/card_tokens", {
@@ -393,19 +450,45 @@ export const createCardToken = async (cardData: {
 
     if (!response.ok) {
       const errorData = await response.json();
-      logger.error("Erro ao criar token:", errorData);
+      logger.error("Erro ao criar token do Mercado Pago:", {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorData,
+      });
+      
+      // Traduzir erro específico
+      let errorMessage = errorData.message || "Erro ao criar token do cartão";
+      if (errorData.cause && Array.isArray(errorData.cause) && errorData.cause.length > 0) {
+        errorMessage = errorData.cause[0].description || errorMessage;
+      }
+      
       throw new AppError(
-        errorData.message || "Erro ao criar token do cartão",
+        translateMercadoPagoError({ message: errorMessage, cause: errorData.cause }) || errorMessage,
         400
       );
     }
 
     const token = await response.json();
+    
+    logger.info("Token criado com sucesso:", {
+      tokenId: token.id,
+      hasFirstSixDigits: !!token.first_six_digits,
+      hasLastFourDigits: !!token.last_four_digits,
+    });
+
     return token;
   } catch (error: any) {
-    logger.error("Erro ao criar card token:", error);
+    logger.error("Erro ao criar card token:", {
+      error: error.message,
+      stack: error.stack?.substring(0, 300),
+    });
+    
+    if (error instanceof AppError) {
+      throw error;
+    }
+    
     throw new AppError(
-      error.message || "Erro ao criar token do cartão",
+      error.message || "Erro ao criar token do cartão. Por favor, verifique os dados e tente novamente.",
       400
     );
   }

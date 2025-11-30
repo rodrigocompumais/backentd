@@ -189,33 +189,41 @@ export const storeWithPayment = async (req: Request, res: Response): Promise<Res
 
   const schema = Yup.object().shape({
     companyData: Yup.object().shape({
-      name: Yup.string().required(),
-      email: Yup.string().email().required(),
-      phone: Yup.string().required(),
-      password: Yup.string().required(),
-      planId: Yup.number().required(),
-    }).required(),
+      name: Yup.string().required("Nome da empresa é obrigatório"),
+      email: Yup.string().email("Email inválido").required("Email é obrigatório"),
+      phone: Yup.string().required("Telefone é obrigatório"),
+      password: Yup.string().required("Senha é obrigatória"),
+      planId: Yup.number().required("Plano é obrigatório"),
+    }).required("Dados da empresa são obrigatórios"),
     paymentData: Yup.object().shape({
-      transactionAmount: Yup.number().required().positive(),
-      paymentMethodId: Yup.string().required(),
-      token: Yup.string().required(),
-      installments: Yup.number().required().min(1).max(12),
-      identificationType: Yup.string().required(),
-      identificationNumber: Yup.string().required(),
+      transactionAmount: Yup.number().required("Valor da transação é obrigatório").positive("Valor deve ser positivo"),
+      paymentMethodId: Yup.string().required("Método de pagamento é obrigatório"),
+      token: Yup.string().required("Token do cartão é obrigatório"),
+      installments: Yup.number().required("Número de parcelas é obrigatório").min(1, "Mínimo 1 parcela").max(12, "Máximo 12 parcelas"),
+      identificationType: Yup.string().required("Tipo de identificação é obrigatório"),
+      identificationNumber: Yup.string().required("Número de identificação é obrigatório"),
       payer: Yup.object().shape({
-        email: Yup.string().email().required(),
+        email: Yup.string().email("Email do pagador inválido").required("Email do pagador é obrigatório"),
         firstName: Yup.string().optional(),
         lastName: Yup.string().optional(),
-      }).required(),
-    }).required(),
+      }).required("Dados do pagador são obrigatórios"),
+      issuerId: Yup.string().optional(),
+    }).required("Dados de pagamento são obrigatórios"),
   });
 
   try {
-    await schema.validate(req.body);
+    await schema.validate(req.body, { abortEarly: false });
     console.log("✓ Validação do schema passou");
   } catch (err: any) {
-    console.error("✗ Erro na validação do schema:", err.message);
-    throw new AppError(err.message, 400);
+    console.error("✗ Erro na validação do schema:", err);
+    
+    if (err.inner && err.inner.length > 0) {
+      const errors = err.inner.map((e: any) => `${e.path}: ${e.message}`).join(", ");
+      console.error("Erros detalhados:", errors);
+      throw new AppError(`Erro de validação: ${errors}`, 400);
+    }
+    
+    throw new AppError(err.message || "Erro de validação", 400);
   }
 
   try {
@@ -236,6 +244,14 @@ export const storeWithPayment = async (req: Request, res: Response): Promise<Res
   } catch (error: any) {
     console.error("✗ Erro ao criar empresa com pagamento:", error);
     console.error("Erro completo:", JSON.stringify(error, null, 2));
-    throw new AppError(error.message || "Erro ao criar empresa com pagamento", 400);
+    
+    // Se for um AppError, apenas relançar
+    if (error instanceof AppError) {
+      throw error;
+    }
+    
+    // Caso contrário, criar um novo AppError com a mensagem do erro
+    const errorMessage = error.message || "Erro ao criar empresa com pagamento";
+    throw new AppError(errorMessage, error.statusCode || 400);
   }
 };

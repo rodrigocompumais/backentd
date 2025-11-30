@@ -65,24 +65,37 @@ const translateMercadoPagoError = (error: any): string => {
 };
 
 // Inicializar cliente do Mercado Pago
-let client: MercadoPagoConfig;
-let payment: Payment;
-let preference: Preference;
+let client: MercadoPagoConfig | null = null;
+let payment: Payment | null = null;
+let preference: Preference | null = null;
 
+const initializeMercadoPago = (): void => {
+  if (client && payment && preference) {
+    return; // Já inicializado
+  }
+
+  try {
+    validateMercadoPagoCredentials();
+    client = new MercadoPagoConfig({
+      accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN || "",
+      options: {
+        timeout: 5000,
+        idempotencyKey: "abc",
+      },
+    });
+    payment = new Payment(client);
+    preference = new Preference(client);
+  } catch (error: any) {
+    logger.error("Erro ao inicializar Mercado Pago:", error);
+    throw error; // Relançar para que o erro seja tratado adequadamente
+  }
+};
+
+// Tentar inicializar na importação do módulo
 try {
-  validateMercadoPagoCredentials();
-  client = new MercadoPagoConfig({
-    accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN || "",
-    options: {
-      timeout: 5000,
-      idempotencyKey: "abc",
-    },
-  });
-  payment = new Payment(client);
-  preference = new Preference(client);
+  initializeMercadoPago();
 } catch (error: any) {
-  logger.error("Erro ao inicializar Mercado Pago:", error);
-  // Continuar mesmo com erro para não quebrar a aplicação, mas logar o erro
+  logger.warn("Mercado Pago não inicializado na importação do módulo. Será inicializado quando necessário.");
 }
 
 interface PaymentData {
@@ -121,6 +134,15 @@ export const createPaymentIntent = async (
   data: PaymentIntentData
 ): Promise<any> => {
   try {
+    // Inicializar Mercado Pago se ainda não foi inicializado
+    if (!preference) {
+      initializeMercadoPago();
+    }
+
+    if (!preference) {
+      throw new AppError("Erro ao inicializar serviço de pagamento. Entre em contato com o suporte.", 500);
+    }
+
     // Criar preferência de pagamento para obter public key e outros dados necessários
     const preferenceData = {
       items: [
@@ -160,8 +182,14 @@ export const processPayment = async (
   paymentData: PaymentData
 ): Promise<any> => {
   try {
-    // Validar credenciais antes de processar
-    validateMercadoPagoCredentials();
+    // Inicializar Mercado Pago se ainda não foi inicializado
+    if (!payment) {
+      initializeMercadoPago();
+    }
+
+    if (!payment) {
+      throw new AppError("Erro ao inicializar serviço de pagamento. Entre em contato com o suporte.", 500);
+    }
 
     // Validar token do cartão
     if (!paymentData.token || paymentData.token.trim() === "") {
@@ -248,6 +276,10 @@ export const processPayment = async (
       hasIssuerId: !!paymentBody.issuer_id,
     });
 
+    if (!payment) {
+      throw new AppError("Serviço de pagamento não inicializado.", 500);
+    }
+
     const response = await payment.create({ body: paymentBody });
 
     logger.info("Pagamento processado com sucesso:", {
@@ -327,6 +359,15 @@ export const processPayment = async (
 
 export const getPaymentStatus = async (paymentId: string): Promise<any> => {
   try {
+    // Inicializar Mercado Pago se ainda não foi inicializado
+    if (!payment) {
+      initializeMercadoPago();
+    }
+
+    if (!payment) {
+      throw new AppError("Erro ao inicializar serviço de pagamento. Entre em contato com o suporte.", 500);
+    }
+
     const response = await payment.get({ id: paymentId });
 
     return {

@@ -205,6 +205,17 @@ export const processPayment = async (
       throw new AppError("Erro ao inicializar serviço de pagamento. Entre em contato com o suporte.", 500);
     }
 
+    // Log das credenciais sendo usadas (sem expor o token completo)
+    const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN || "NÃO CONFIGURADO";
+    const tokenType = accessToken.startsWith("TEST_") ? "TESTE" : 
+                     accessToken.startsWith("APP_USR_") ? "PRODUÇÃO" : "DESCONHECIDO";
+    
+    logger.info("Credenciais do Mercado Pago em uso:", {
+      tokenType,
+      tokenPrefix: accessToken.substring(0, 15) + "...",
+      nodeEnv: process.env.NODE_ENV,
+    });
+
     // Validar token do cartão
     if (!paymentData.token || paymentData.token.trim() === "") {
       logger.error("Token do cartão vazio ou inválido");
@@ -360,9 +371,35 @@ export const processPayment = async (
 
     // Capturar todas as propriedades do erro
     errorDetails.allProperties = Object.keys(error);
-    errorDetails.errorString = JSON.stringify(error, Object.getOwnPropertyNames(error), 2);
+    
+    // Tentar serializar o erro completo (pode falhar se tiver referências circulares)
+    try {
+      errorDetails.errorString = JSON.stringify(error, Object.getOwnPropertyNames(error), 2);
+    } catch (e) {
+      errorDetails.errorString = "Erro ao serializar: " + String(error);
+    }
 
-    logger.error("Erro COMPLETO do Mercado Pago:", errorDetails);
+    // Log detalhado - usar múltiplos métodos para garantir que apareça
+    console.error("\n=== ERRO COMPLETO DO MERCADO PAGO ===");
+    console.error(JSON.stringify(errorDetails, null, 2));
+    console.error("=== FIM DO ERRO ===\n");
+    
+    // Log usando logger também
+    logger.error({
+      msg: "Erro COMPLETO do Mercado Pago",
+      errorDetails: errorDetails
+    });
+    
+    // Log separado para cada parte importante
+    if (errorDetails.causeArray && errorDetails.causeArray.length > 0) {
+      logger.error("Causas do erro:", errorDetails.causeArray);
+    }
+    if (errorDetails.cause) {
+      logger.error("Causa do erro:", errorDetails.cause);
+    }
+    if (errorDetails.response) {
+      logger.error("Response do erro:", errorDetails.response);
+    }
 
     // Extrair mensagem de erro mais específica
     let errorMessage = error.message || "Erro ao processar pagamento";

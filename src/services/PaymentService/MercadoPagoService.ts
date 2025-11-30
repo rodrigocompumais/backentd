@@ -379,27 +379,49 @@ export const processPayment = async (
       errorDetails.errorString = "Erro ao serializar: " + String(error);
     }
 
-    // Log detalhado - usar múltiplos métodos para garantir que apareça
-    console.error("\n=== ERRO COMPLETO DO MERCADO PAGO ===");
-    console.error(JSON.stringify(errorDetails, null, 2));
-    console.error("=== FIM DO ERRO ===\n");
+    // Log detalhado - usar console.error diretamente para garantir que apareça
+    console.error("\n╔═══════════════════════════════════════════════════════════════╗");
+    console.error("║          ERRO COMPLETO DO MERCADO PAGO                      ║");
+    console.error("╚═══════════════════════════════════════════════════════════════╝");
+    console.error("\nMensagem:", errorDetails.message);
+    console.error("Nome:", errorDetails.name);
+    console.error("Status:", errorDetails.status);
+    console.error("Status Code:", errorDetails.statusCode);
+    console.error("\n--- CAUSE ---");
+    if (errorDetails.causeArray && errorDetails.causeArray.length > 0) {
+      errorDetails.causeArray.forEach((cause: any, idx: number) => {
+        console.error(`Cause[${idx}]:`, JSON.stringify(cause, null, 2));
+      });
+    } else if (errorDetails.cause) {
+      console.error("Cause:", JSON.stringify(errorDetails.cause, null, 2));
+    } else {
+      console.error("Cause: não encontrado");
+    }
+    console.error("\n--- RESPONSE ---");
+    if (errorDetails.response) {
+      console.error("Response:", JSON.stringify(errorDetails.response, null, 2));
+    } else {
+      console.error("Response: não encontrado");
+    }
+    console.error("\n--- TODAS AS PROPRIEDADES ---");
+    console.error("Propriedades:", errorDetails.allProperties?.join(", ") || "nenhuma");
+    console.error("\n--- ERRO COMPLETO (JSON) ---");
+    console.error(errorDetails.errorString || "Não foi possível serializar");
+    console.error("\n╔═══════════════════════════════════════════════════════════════╗");
+    console.error("║                    FIM DO ERRO                             ║");
+    console.error("╚═══════════════════════════════════════════════════════════════╝\n");
     
-    // Log usando logger também
+    // Log usando logger também (formato que pino entende melhor)
     logger.error({
       msg: "Erro COMPLETO do Mercado Pago",
-      errorDetails: errorDetails
+      errorName: errorDetails.name,
+      errorMessage: errorDetails.message,
+      errorStatus: errorDetails.status,
+      errorStatusCode: errorDetails.statusCode,
+      causeArray: errorDetails.causeArray,
+      cause: errorDetails.cause,
+      response: errorDetails.response,
     });
-    
-    // Log separado para cada parte importante
-    if (errorDetails.causeArray && errorDetails.causeArray.length > 0) {
-      logger.error("Causas do erro:", errorDetails.causeArray);
-    }
-    if (errorDetails.cause) {
-      logger.error("Causa do erro:", errorDetails.cause);
-    }
-    if (errorDetails.response) {
-      logger.error("Response do erro:", errorDetails.response);
-    }
 
     // Extrair mensagem de erro mais específica
     let errorMessage = error.message || "Erro ao processar pagamento";
@@ -423,7 +445,21 @@ export const processPayment = async (
       const tokenType = accessToken.startsWith("TEST_") ? "TESTE" : 
                        accessToken.startsWith("APP_USR_") ? "PRODUÇÃO" : "DESCONHECIDO";
       
-      logger.error("⚠️ ERRO DE CREDENCIAIS DETECTADO:", {
+      // Log direto no console para garantir que apareça
+      console.error("\n⚠️⚠️⚠️ ERRO DE CREDENCIAIS DETECTADO ⚠️⚠️⚠️");
+      console.error("Token Type:", tokenType);
+      console.error("Token Prefix:", accessToken.substring(0, 15) + "...");
+      console.error("NODE_ENV:", process.env.NODE_ENV);
+      console.error("Problema:", tokenType === "PRODUÇÃO" 
+        ? "Credenciais de PRODUÇÃO detectadas. Use credenciais de TESTE para desenvolvimento."
+        : tokenType === "TESTE"
+        ? "Credenciais de TESTE detectadas. Certifique-se de usar cartões de teste válidos."
+        : "Formato de token não reconhecido.");
+      console.error("Solução: Verifique o arquivo MERCADOPAGO_SETUP.md para instruções detalhadas.");
+      console.error("⚠️⚠️⚠️ FIM DO ERRO DE CREDENCIAIS ⚠️⚠️⚠️\n");
+      
+      logger.error({
+        msg: "⚠️ ERRO DE CREDENCIAIS DETECTADO",
         accessTokenPrefix: accessToken.substring(0, 15) + "...",
         tokenType,
         nodeEnv: process.env.NODE_ENV,

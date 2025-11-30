@@ -32,7 +32,7 @@ const translateMercadoPagoError = (error: any): string => {
 
   const errorMessages: Record<string, string> = {
     "Unauthorized use of live credentials": "Erro de configuração do pagamento. Verifique as credenciais do Mercado Pago.",
-    "Different parameters for the bin": "Dados do cartão inválidos. Verifique os dados informados e tente novamente.",
+    "Different parameters for the bin": "Os dados do cartão não correspondem. Por favor, verifique o número do cartão e tente novamente. Se o problema persistir, tente com outro cartão.",
     "invalid_card_data": "Dados do cartão inválidos. Verifique os dados informados.",
     "invalid_card_number": "Número do cartão inválido. Verifique e tente novamente.",
     "invalid_security_code": "Código de segurança inválido. Verifique o CVV do cartão.",
@@ -177,11 +177,18 @@ export const processPayment = async (
       throw new AppError("Método de pagamento não informado.", 400);
     }
 
+    // Validar paymentMethodId
+    if (!paymentData.paymentMethodId || paymentData.paymentMethodId.trim() === "") {
+      logger.error("paymentMethodId não informado ou vazio");
+      throw new AppError("Método de pagamento não identificado. Verifique os dados do cartão.", 400);
+    }
+
     logger.info("Processando pagamento:", {
       transactionAmount: paymentData.transactionAmount,
       paymentMethodId: paymentData.paymentMethodId,
       installments: paymentData.installments,
       hasToken: !!paymentData.token,
+      hasIssuerId: !!paymentData.issuerId && paymentData.issuerId.trim() !== "",
       payerEmail: paymentData.payer.email,
     });
 
@@ -203,13 +210,30 @@ export const processPayment = async (
       metadata: paymentData.metadata || {},
     };
 
-    // issuer_id precisa ser number ou não ser incluído se não existir
+    // issuer_id: Por padrão, NÃO enviamos issuer_id para evitar erro "Different parameters for the bin"
+    // O Mercado Pago geralmente consegue processar o pagamento sem issuer_id
+    // Só incluímos se for explicitamente necessário e válido
+    // NOTA: O erro "Different parameters for the bin" geralmente ocorre quando o issuer_id não corresponde ao BIN do cartão
+    // Por segurança, vamos omitir o issuer_id na maioria dos casos
     if (paymentData.issuerId && paymentData.issuerId.trim() !== "") {
       const issuerIdNumber = parseInt(paymentData.issuerId, 10);
-      if (!isNaN(issuerIdNumber)) {
-        paymentBody.issuer_id = issuerIdNumber;
+      if (!isNaN(issuerIdNumber) && issuerIdNumber > 0) {
+        // Por enquanto, vamos NÃO incluir issuer_id para evitar erros
+        // Se necessário no futuro, podemos adicionar lógica específica
+        logger.info("issuerId fornecido mas omitindo para evitar erro 'Different parameters for the bin':", issuerIdNumber);
+        // paymentBody.issuer_id = issuerIdNumber; // Comentado para evitar erros
       }
     }
+    
+    logger.info("Processando pagamento SEM issuer_id para evitar conflitos com BIN do cartão");
+
+    logger.info("Enviando requisição ao Mercado Pago:", {
+      transactionAmount: paymentBody.transaction_amount,
+      paymentMethodId: paymentBody.payment_method_id,
+      installments: paymentBody.installments,
+      hasToken: !!paymentBody.token,
+      hasIssuerId: !!paymentBody.issuer_id,
+    });
 
     const response = await payment.create({ body: paymentBody });
 
@@ -228,14 +252,45 @@ export const processPayment = async (
       dateApproved: response.date_approved,
     };
   } catch (error: any) {
-    logger.error("Erro ao processar pagamento:", {
+    // Log detalhado do erro do Mercado Pago
+    logger.error("Erro detalhado do Mercado Pago:", {
       message: error.message,
       cause: error.cause,
-      stack: error.stack,
+      causeArray: Array.isArray(error.cause) ? error.cause.map((c: any) => ({
+        code: c.code,
+        description: c.description,
+        data: c.data,
+      })) : error.cause,
+      status: error.status,
+      statusCode: error.statusCode,
+      stack: error.stack?.substring(0, 500), // Limitar stack trace
     });
+
+    // Extrair mensagem de erro mais específica
+    let errorMessage = error.message || "Erro ao processar pagamento";
+    
+    // Tentar extrair mensagem do cause array
+    if (Array.isArray(error.cause) && error.cause.length > 0) {
+      const firstCause = error.cause[0];
+      if (firstCause.description) {
+        errorMessage = firstCause.description;
+      } else if (firstCause.message) {
+        errorMessage = firstCause.message;
+      }
+    } else if (error.cause?.description) {
+      errorMessage = error.cause.description;
+    } else if (error.cause?.message) {
+      errorMessage = error.cause.message;
+    }
     
     // Traduzir erro para mensagem amigável
-    const friendlyMessage = translateMercadoPagoError(error);
+    const friendlyMessage = translateMercadoPagoError({ message: errorMessage, cause: error.cause });
+    
+    logger.error("Erro traduzido:", {
+      original: errorMessage,
+      translated: friendlyMessage,
+    });
+    
     throw new AppError(friendlyMessage, 400);
   }
 };

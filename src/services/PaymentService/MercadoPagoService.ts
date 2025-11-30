@@ -102,6 +102,7 @@ interface PaymentData {
     companyId?: number;
     invoiceId?: number;
     planId?: number;
+    [key: string]: any; // Permite campos adicionais para flexibilidade
   };
 }
 

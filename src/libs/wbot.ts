@@ -275,8 +275,8 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
               // Aguardar um pequeno delay para garantir que a conexão está estável
               await new Promise(resolve => setTimeout(resolve, 2000));
               
-              // Verificar se a conexão ainda está aberta após o delay
-              if (wsocket && !wsocket.ws.closed) {
+              // Verificar se o socket ainda existe após o delay
+              if (wsocket) {
                 logger.info(`✅ Conexão estável confirmada para ${name}. Atualizando status para CONNECTED.`);
                 
                 await whatsapp.update({
@@ -300,7 +300,7 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
 
                 resolve(wsocket);
               } else {
-                logger.warn(`⚠️ Conexão foi fechada durante estabilização para ${name}.`);
+                logger.warn(`⚠️ Socket não encontrado após estabilização para ${name}.`);
               }
             }
 

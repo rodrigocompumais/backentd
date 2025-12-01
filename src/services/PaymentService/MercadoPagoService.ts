@@ -303,6 +303,9 @@ export const createPaymentIntent = async (
     }
 
     // Criar preferência de pagamento para obter public key e outros dados necessários
+    // Usar external_reference para identificar a preferência depois
+    const externalReference = `pref_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
     const preferenceData: any = {
       items: [
         {
@@ -312,7 +315,11 @@ export const createPaymentIntent = async (
           unit_price: data.transactionAmount,
         },
       ],
-      metadata: data.metadata || {},
+      metadata: {
+        ...data.metadata,
+        external_reference: externalReference,
+      },
+      external_reference: externalReference,
       back_urls: {
         success: `${process.env.FRONTEND_URL}/signup/success`,
         failure: `${process.env.FRONTEND_URL}/signup/failure`,
@@ -335,11 +342,30 @@ export const createPaymentIntent = async (
     }
 
     const response = await preference.create({ body: preferenceData });
+    const preferenceId = response.id;
+
+    // Tentar atualizar as URLs com preference_id (pode não funcionar, mas tentamos)
+    try {
+      await preference.update({ 
+        id: preferenceId, 
+        body: {
+          back_urls: {
+            success: `${process.env.FRONTEND_URL}/signup/success?preference_id=${preferenceId}`,
+            failure: `${process.env.FRONTEND_URL}/signup/failure?preference_id=${preferenceId}`,
+            pending: `${process.env.FRONTEND_URL}/signup/pending?preference_id=${preferenceId}`,
+          },
+        }
+      });
+    } catch (updateError: any) {
+      logger.warn("Não foi possível atualizar URLs da preferência (não crítico):", updateError.message);
+      // Continuar mesmo se não conseguir atualizar
+    }
 
     return {
-      preferenceId: response.id,
+      preferenceId: preferenceId,
       publicKey: process.env.MERCADOPAGO_PUBLIC_KEY,
       initPoint: response.init_point,
+      externalReference: externalReference,
     };
   } catch (error: any) {
     logger.error("Erro ao criar payment intent:", error);
@@ -748,6 +774,81 @@ export const getPaymentStatus = async (paymentId: string): Promise<any> => {
     logger.error("Erro ao consultar status do pagamento:", error);
     throw new AppError(
       error.message || "Erro ao consultar status do pagamento",
+      400
+    );
+  }
+};
+
+export const getPreferenceStatus = async (preferenceId: string): Promise<any> => {
+  try {
+    // Inicializar Mercado Pago se ainda não foi inicializado
+    if (!preference || !payment) {
+      initializeMercadoPago();
+    }
+
+    if (!preference || !payment) {
+      throw new AppError("Erro ao inicializar serviço de pagamento. Entre em contato com o suporte.", 500);
+    }
+
+    // Buscar preferência
+    const preferenceData = await preference.get({ id: preferenceId });
+
+    // Buscar pagamentos associados à preferência
+    // O Mercado Pago retorna os pagamentos na resposta da preference quando disponíveis
+    let latestPayment = null;
+    let latestStatus = "pending";
+
+    // Primeiro, tentar obter external_reference da preferência
+    const externalReference = preferenceData.external_reference;
+    
+    if (externalReference) {
+      try {
+        // Buscar pagamentos usando search API por external_reference
+        const searchResponse = await payment.search({
+          options: {
+            qs: {
+              "external_reference": externalReference,
+              "sort": "date_created",
+              "criteria": "desc"
+            }
+          }
+        });
+
+        if (searchResponse && searchResponse.results && searchResponse.results.length > 0) {
+          // Pegar o pagamento mais recente
+          latestPayment = searchResponse.results[0];
+          latestStatus = latestPayment.status || "pending";
+        }
+      } catch (searchError: any) {
+        logger.warn("Erro ao buscar pagamentos por external_reference (não crítico):", searchError.message);
+      }
+    }
+
+    // Se não encontrou pagamento, verificar se há payment_id na metadata
+    if (!latestPayment && preferenceData.metadata) {
+      const paymentIdFromMetadata = preferenceData.metadata.payment_id;
+      if (paymentIdFromMetadata) {
+        try {
+          const paymentData = await payment.get({ id: paymentIdFromMetadata });
+          latestPayment = paymentData;
+          latestStatus = paymentData.status || "pending";
+        } catch (paymentError: any) {
+          logger.warn("Erro ao buscar pagamento por ID da metadata:", paymentError.message);
+        }
+      }
+    }
+
+    return {
+      preferenceId: preferenceData.id,
+      status: latestStatus,
+      payment: latestPayment,
+      initPoint: preferenceData.init_point,
+      sandboxInitPoint: preferenceData.sandbox_init_point,
+    };
+  } catch (error: any) {
+    logger.error("Erro ao consultar status da preferência:", error);
+    throw new AppError(
+      error.message || "Erro ao consultar status da preferência",
       400
     );
   }

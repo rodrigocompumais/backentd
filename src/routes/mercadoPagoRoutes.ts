@@ -21,6 +21,12 @@ mercadoPagoRoutes.get(
   MercadoPagoController.getPaymentStatusController
 );
 
+// Consultar status da preferência (para verificar pagamentos PIX)
+mercadoPagoRoutes.get(
+  "/mercadopago/preference-status/:preferenceId",
+  MercadoPagoController.getPreferenceStatusController
+);
+
 mercadoPagoRoutes.get(
   "/diagnostic/mercadopago",
   MercadoPagoController.getMercadoPagoDiagnostic

@@ -4,6 +4,7 @@ import AppError from "../errors/AppError";
 import {
   createPaymentIntent,
   getPaymentStatus,
+  getPreferenceStatus,
   processWebhook,
 } from "../services/PaymentService/MercadoPagoService";
 import { logger } from "../utils/logger";
@@ -232,6 +233,28 @@ export const getPaymentStatusController = async (
     logger.error("Erro no getPaymentStatusController:", error);
     throw new AppError(
       error.message || "Erro ao consultar status do pagamento",
+      400
+    );
+  }
+};
+
+export const getPreferenceStatusController = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  const { preferenceId } = req.params;
+
+  if (!preferenceId) {
+    throw new AppError("Preference ID é obrigatório", 400);
+  }
+
+  try {
+    const preferenceStatus = await getPreferenceStatus(preferenceId);
+    return res.status(200).json(preferenceStatus);
+  } catch (error: any) {
+    logger.error("Erro no getPreferenceStatusController:", error);
+    throw new AppError(
+      error.message || "Erro ao consultar status da preferência",
       400
     );
   }

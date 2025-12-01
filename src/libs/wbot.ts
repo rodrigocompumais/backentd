@@ -183,6 +183,12 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
             }
 
             if (connection === "open") {
+              logger.info(`✅ Sessão validada e aberta para ${name}`);
+              
+              // AGORA SIM - salvar sessão apenas após conexão estar realmente aberta
+              await saveState();
+              logger.info(`✅ Estado da sessão salvo para ${name}`);
+
               await whatsapp.update({
                 status: "CONNECTED",
                 qrcode: "",
@@ -246,7 +252,8 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
             }
           }
         );
-        wsocket.ev.on("creds.update", saveState);
+        // REMOVIDO: wsocket.ev.on("creds.update", saveState);
+        // Agora salvamos apenas quando connection === "open" para evitar salvar sessão incompleta
 
         //store.bind(wsocket.ev);
       })();

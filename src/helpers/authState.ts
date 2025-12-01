@@ -25,6 +25,12 @@ const authState = async (
 
   const saveState = async () => {
     try {
+      // Proteger contra gravações inválidas - só salvar se credenciais estiverem completas
+      if (!creds || !creds.me) {
+        console.log("⚠️ Credenciais incompletas, não salvando sessão.");
+        return;
+      }
+
       await whatsapp.update({
         session: JSON.stringify({ creds, keys }, BufferJSON.replacer, 0)
       });
@@ -67,9 +73,8 @@ const authState = async (
             keys[key] = keys[key] || {};
             Object.assign(keys[key], data[i]);
           }
-          // Salvar estado de forma assíncrona para não bloquear
-          // O BufferJSON.replacer garante serialização correta
-          setImmediate(() => saveState());
+          // NÃO salvar aqui - será salvo apenas após connection === "open"
+          // Isso evita salvar sessão incompleta durante o handshake
         }
       }
     },

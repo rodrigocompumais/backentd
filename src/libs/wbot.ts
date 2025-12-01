@@ -91,6 +91,9 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
         const { state, saveState } = await authState(whatsapp);
 
         const msgRetryCounterCache = new NodeCache();
+        
+        // Variável para rastrear se já salvamos após creds.me estar definido
+        let hasSavedAfterMe = false;
 
         wsocket = makeWASocket({
           logger: loggerBaileys,
@@ -317,8 +320,27 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
             }
           }
         );
-        // REMOVIDO: wsocket.ev.on("creds.update", saveState);
-        // Agora salvamos apenas quando connection === "open" para evitar salvar sessão incompleta
+        // Salvar credenciais quando forem atualizadas, mas apenas se creds.me estiver definido
+        // Isso permite salvar durante o handshake quando as credenciais estão completas
+        // IMPORTANTE: Isso evita perder credenciais se a conexão fechar antes de "open"
+        wsocket.ev.on("creds.update", async () => {
+          console.log(`🔑 creds.update recebido para ${name}`);
+          
+          // Recarregar o state para pegar credenciais atualizadas
+          const { state: currentState } = await authState(whatsapp);
+          
+          if (currentState.creds && currentState.creds.me && !hasSavedAfterMe) {
+            console.log(`💾 Credenciais completas detectadas (creds.me definido), salvando sessão...`);
+            console.log(`💾 Me ID: ${currentState.creds.me.id}, Me Name: ${currentState.creds.me.name || 'N/A'}`);
+            await saveState();
+            hasSavedAfterMe = true;
+            console.log(`✅ Sessão salva após creds.update com creds.me definido`);
+          } else if (!currentState.creds || !currentState.creds.me) {
+            console.log(`⚠️ creds.update recebido mas creds.me ainda não está definido`);
+          } else if (hasSavedAfterMe) {
+            console.log(`ℹ️ creds.update recebido mas já salvamos anteriormente`);
+          }
+        });
 
         //store.bind(wsocket.ev);
       })();

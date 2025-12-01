@@ -92,6 +92,9 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
 
         const msgRetryCounterCache = new NodeCache();
 
+        // Flag para controlar quando salvar o estado (só após conexão estar aberta)
+        let canSaveState = false;
+
         wsocket = makeWASocket({
           logger: loggerBaileys,
           printQRInTerminal: false,
@@ -183,6 +186,17 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
             }
 
             if (connection === "open") {
+              logger.info(`✅ Connection opened for ${name}, waiting for handshake to complete...`);
+              
+              // Aguardar um pequeno delay para garantir que o handshake está completo
+              // antes de marcar como conectado e permitir salvamento de estado
+              await new Promise(resolve => setTimeout(resolve, 2000));
+              
+              // Agora permitir salvamento de estado e salvar imediatamente
+              canSaveState = true;
+              await saveState();
+              logger.info(`✅ State saved for ${name} after connection established`);
+
               await whatsapp.update({
                 status: "CONNECTED",
                 qrcode: "",
@@ -246,7 +260,14 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
             }
           }
         );
-        wsocket.ev.on("creds.update", saveState);
+        // Só salvar estado quando a conexão estiver aberta e estável
+        wsocket.ev.on("creds.update", async () => {
+          if (canSaveState) {
+            await saveState();
+          } else {
+            logger.debug(`Skipping state save for ${name} - connection not yet open`);
+          }
+        });
 
         //store.bind(wsocket.ev);
       })();

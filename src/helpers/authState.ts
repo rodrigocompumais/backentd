@@ -67,7 +67,8 @@ const authState = async (
             keys[key] = keys[key] || {};
             Object.assign(keys[key], data[i]);
           }
-          saveState();
+          // NÃO salvar automaticamente aqui - será salvo apenas após connection === "open"
+          // Isso evita salvar credenciais incompletas durante o handshake
         }
       }
     },

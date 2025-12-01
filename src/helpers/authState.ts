@@ -53,9 +53,8 @@ const authState = async (
           return ids.reduce((dict: any, id) => {
             let value = keys[key]?.[id];
             if (value) {
-              if (type === "app-state-sync-key") {
-                value = proto.Message.AppStateSyncKeyData.fromObject(value);
-              }
+              // No Baileys v7, o BufferJSON.reviver já faz a conversão necessária
+              // Não precisamos mais converter app-state-sync-key manualmente
               dict[id] = value;
             }
             return dict;

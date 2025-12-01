@@ -146,66 +146,162 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
         wsocket.ev.on(
           "connection.update",
           async ({ connection, lastDisconnect, qr }) => {
+            const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+            const errorData = (lastDisconnect?.error as Boom)?.data;
+            
             logger.info(
-              `Socket  ${name} Connection Update ${connection || ""} ${lastDisconnect || ""
-              }`
+              `Socket  ${name} Connection Update ${connection || ""} ${lastDisconnect ? `[Status: ${statusCode}]` : ""}`
             );
 
             if (connection === "close") {
-              if ((lastDisconnect?.error as Boom)?.output?.statusCode === 403) {
-                await whatsapp.update({ status: "PENDING", session: "" });
-                await DeleteBaileysService(whatsapp.id);
-                io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
-                  action: "update",
-                  session: whatsapp
-                });
-                removeWbot(id, false);
-              }
-              if (
-                (lastDisconnect?.error as Boom)?.output?.statusCode !==
-                DisconnectReason.loggedOut
-              ) {
+              // Log detalhado do erro de desconexão
+              if (lastDisconnect?.error) {
+                const error = lastDisconnect.error as Boom;
+                logger.info(`Socket  ${name} Connection Update close [Status: ${statusCode}]`);
+                
+                // Verificar se há conflito de dispositivo removido
+                const hasDeviceRemoved = errorData?.content?.some?.(
+                  (item: any) => item?.tag === "conflict" && item?.attrs?.type === "device_removed"
+                );
+                
+                if (hasDeviceRemoved) {
+                  logger.warn(`⚠️ Dispositivo removido detectado para ${name}. Limpando sessão completamente.`);
+                  // Forçar limpeza completa quando dispositivo é removido
+                  await whatsapp.update({ 
+                    status: "DISCONNECTED", 
+                    session: "",
+                    qrcode: ""
+                  });
+                  await DeleteBaileysService(whatsapp.id);
+                  io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
+                    action: "update",
+                    session: whatsapp
+                  });
+                  removeWbot(id, false);
+                  retriesQrCodeMap.delete(id);
+                  // Aguardar mais tempo antes de gerar novo QR code
+                  setTimeout(
+                    () => StartWhatsAppSession(whatsapp, whatsapp.companyId),
+                    5000
+                  );
+                  return;
+                }
+
+                // Tratamento específico para erro 403 (Forbidden)
+                if (statusCode === 403) {
+                  logger.warn(`Erro 403 detectado para ${name}. Limpando sessão.`);
+                  await whatsapp.update({ status: "PENDING", session: "" });
+                  await DeleteBaileysService(whatsapp.id);
+                  io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
+                    action: "update",
+                    session: whatsapp
+                  });
+                  removeWbot(id, false);
+                  // Aguardar mais tempo antes de reconectar após erro 403
+                  setTimeout(
+                    () => StartWhatsAppSession(whatsapp, whatsapp.companyId),
+                    5000
+                  );
+                  return;
+                }
+
+                // Tratamento para erro 401 (Connection Replaced) - dispositivo removido ou sessão duplicada
+                if (statusCode === DisconnectReason.connectionReplaced || statusCode === 401) {
+                  logger.warn(`⚠️ Erro 401 (Connection Replaced) detectado para ${name}. Sessão inválida - limpando completamente.`);
+                  await whatsapp.update({ 
+                    status: "DISCONNECTED", 
+                    session: "",
+                    qrcode: ""
+                  });
+                  await DeleteBaileysService(whatsapp.id);
+                  io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
+                    action: "update",
+                    session: whatsapp
+                  });
+                  removeWbot(id, false);
+                  retriesQrCodeMap.delete(id);
+                  // Aguardar mais tempo antes de gerar novo QR code
+                  setTimeout(
+                    () => StartWhatsAppSession(whatsapp, whatsapp.companyId),
+                    5000
+                  );
+                  return;
+                }
+
+                // Tratamento para erro 515 (Logged Out) - sessão expirada
+                if (statusCode === DisconnectReason.loggedOut || statusCode === 515) {
+                  logger.warn(`⚠️ Erro 515 (Logged Out) detectado para ${name}. Sessão expirada - limpando completamente.`);
+                  await whatsapp.update({ 
+                    status: "DISCONNECTED", 
+                    session: "",
+                    qrcode: ""
+                  });
+                  await DeleteBaileysService(whatsapp.id);
+                  io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
+                    action: "update",
+                    session: whatsapp
+                  });
+                  removeWbot(id, false);
+                  retriesQrCodeMap.delete(id);
+                  // Aguardar mais tempo antes de gerar novo QR code
+                  setTimeout(
+                    () => StartWhatsAppSession(whatsapp, whatsapp.companyId),
+                    5000
+                  );
+                  return;
+                }
+
+                // Para outros erros, tentar reconectar normalmente
+                logger.info(`Reconectando ${name} após desconexão (Status: ${statusCode})`);
                 removeWbot(id, false);
                 setTimeout(
                   () => StartWhatsAppSession(whatsapp, whatsapp.companyId),
-                  2000
+                  3000
                 );
               } else {
-                await whatsapp.update({ status: "PENDING", session: "" });
-                await DeleteBaileysService(whatsapp.id);
-                io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
-                  action: "update",
-                  session: whatsapp
-                });
+                // Desconexão sem erro específico
+                logger.info(`Desconexão normal para ${name}. Tentando reconectar.`);
                 removeWbot(id, false);
                 setTimeout(
                   () => StartWhatsAppSession(whatsapp, whatsapp.companyId),
-                  2000
+                  3000
                 );
               }
             }
 
             if (connection === "open") {
-              await whatsapp.update({
-                status: "CONNECTED",
-                qrcode: "",
-                retries: 0
-              });
+              logger.info(`✅ Conexão aberta para ${name}. Aguardando estabilização...`);
+              
+              // Aguardar um pequeno delay para garantir que a conexão está estável
+              await new Promise(resolve => setTimeout(resolve, 2000));
+              
+              // Verificar se a conexão ainda está aberta após o delay
+              if (wsocket && !wsocket.ws.closed) {
+                logger.info(`✅ Conexão estável confirmada para ${name}. Atualizando status para CONNECTED.`);
+                
+                await whatsapp.update({
+                  status: "CONNECTED",
+                  qrcode: "",
+                  retries: 0
+                });
 
-              io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
-                action: "update",
-                session: whatsapp
-              });
+                io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
+                  action: "update",
+                  session: whatsapp
+                });
 
-              const sessionIndex = sessions.findIndex(
-                s => s.id === whatsapp.id
-              );
-              if (sessionIndex === -1) {
-                wsocket.id = whatsapp.id;
-                sessions.push(wsocket);
+                const sessionIndex = sessions.findIndex(
+                  s => s.id === whatsapp.id
+                );
+                if (sessionIndex === -1) {
+                  wsocket.id = whatsapp.id;
+                  sessions.push(wsocket);
+                }
+
+                resolve(wsocket);
+              } else {
+                logger.warn(`⚠️ Conexão foi fechada durante estabilização para ${name}.`);
               }
-
-              resolve(wsocket);
             }
 
             if (qr !== undefined) {

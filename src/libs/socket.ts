@@ -12,12 +12,37 @@ import { CounterManager } from "./counter";
 let io: SocketIO;
 
 export const initIO = (httpServer: Server): SocketIO => {
+  // Configurar CORS para permitir o frontend
+  // Quando credentials: true, não podemos usar origin: "*"
+  const allowedOrigins = [
+    "https://www.compuchat.cloud",
+    "https://compuchat.cloud",
+    "http://localhost:3000",
+    "http://localhost:3001",
+    process.env.FRONTEND_URL
+  ].filter(Boolean);
+
   io = new SocketIO(httpServer, {
     cors: {
-      origin: "*",
+      origin: allowedOrigins.length > 0 
+        ? (origin, callback) => {
+            // Permitir requisições sem origin (mobile apps, Postman, etc)
+            if (!origin) {
+              return callback(null, true);
+            }
+            
+            // Verificar se a origin está na lista de permitidas
+            if (allowedOrigins.some(allowed => origin.includes(allowed) || origin === allowed)) {
+              callback(null, true);
+            } else {
+              logger.warn(`CORS bloqueado para origin: ${origin}`);
+              callback(new Error("Not allowed by CORS"));
+            }
+          }
+        : true, // Se não houver origins configuradas, permitir todas (apenas para desenvolvimento)
       credentials: true,
       methods: ["GET", "POST", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
+      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"]
     },
     allowEIO3: true,
     transports: ['websocket', 'polling']

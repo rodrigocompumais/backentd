@@ -5,10 +5,8 @@ import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
-  isJidBroadcast,
-  CacheStore,
-  isPnUser,
-  WAMessageAddressingMode
+  // makeInMemoryStore,
+  isJidBroadcast
 } from "baileys";
 
 import Whatsapp from "../models/Whatsapp";
@@ -34,9 +32,6 @@ type Session = WASocket & {
 const sessions: Session[] = [];
 
 const retriesQrCodeMap = new Map<number, number>();
-
-// Mapa para rastrear sessões em processo de inicialização
-const initializingSessions = new Map<number, boolean>();
 
 export const getWbot = (whatsappId: number): Session => {
   const sessionIndex = sessions.findIndex(s => s.id === whatsappId);
@@ -80,34 +75,6 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
 
         const { id, name, provider } = whatsappUpdate;
 
-        // Verificar se já existe uma sessão ativa ou em inicialização
-        const existingSession = sessions.find(s => s.id === id);
-        if (existingSession) {
-          logger.info(`Sessão ${name} já existe. Retornando sessão existente.`);
-          resolve(existingSession as Session);
-          return;
-        }
-
-        // Verificar se já está em processo de inicialização
-        if (initializingSessions.get(id)) {
-          logger.warn(`Sessão ${name} já está em processo de inicialização. Aguardando...`);
-          // Aguardar até 10 segundos para a inicialização completar
-          let attempts = 0;
-          while (initializingSessions.get(id) && attempts < 20) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-            const session = sessions.find(s => s.id === id);
-            if (session) {
-              resolve(session as Session);
-              return;
-            }
-            attempts++;
-          }
-          logger.warn(`Timeout aguardando inicialização da sessão ${name}.`);
-        }
-
-        // Marcar como em inicialização
-        initializingSessions.set(id, true);
-
         const { version, isLatest } = await fetchLatestBaileysVersion();
         const isLegacy = provider === "stable" ? true : false;
 
@@ -124,7 +91,6 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
         const { state, saveState } = await authState(whatsapp);
 
         const msgRetryCounterCache = new NodeCache();
-        const userDevicesCache: CacheStore = new NodeCache();
 
         wsocket = makeWASocket({
           logger: loggerBaileys,
@@ -135,11 +101,11 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
             keys: makeCacheableSignalKeyStore(state.keys, logger),
           },
           version,
+          // defaultQueryTimeoutMs: 60000,
+          // retryRequestDelayMs: 250,
+          // keepAliveIntervalMs: 1000 * 60 * 10 * 3,
           msgRetryCounterCache,
           shouldIgnoreJid: jid => isJidBroadcast(jid),
-          generateHighQualityLinkPreview: false,
-          // Suporte para LIDs no Baileys v7
-          markOnlineOnConnect: false,
         });
 
         // wsocket = makeWASocket({
@@ -177,224 +143,66 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
         wsocket.ev.on(
           "connection.update",
           async ({ connection, lastDisconnect, qr }) => {
-            const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-            const errorData = (lastDisconnect?.error as Boom)?.data;
-            
             logger.info(
-              `Socket  ${name} Connection Update ${connection || ""} ${lastDisconnect ? `[Status: ${statusCode}]` : ""}`
+              `Socket  ${name} Connection Update ${connection || ""} ${lastDisconnect || ""
+              }`
             );
 
-            // Log de estados intermediários para debug
-            if (connection === "connecting") {
-              logger.info(`🔄 ${name} está conectando...`);
-            }
-
             if (connection === "close") {
-              // Log detalhado do erro de desconexão
-              if (lastDisconnect?.error) {
-                const error = lastDisconnect.error as Boom;
-                logger.info(`Socket  ${name} Connection Update close [Status: ${statusCode}]`);
-                
-                // Verificar se há conflito de dispositivo removido
-                const hasDeviceRemoved = errorData?.content?.some?.(
-                  (item: any) => item?.tag === "conflict" && item?.attrs?.type === "device_removed"
-                );
-                
-                if (hasDeviceRemoved) {
-                  logger.warn(`⚠️ Dispositivo removido detectado para ${name}. Limpando sessão completamente.`);
-                  // Forçar limpeza completa quando dispositivo é removido
-                  await whatsapp.update({ 
-                    status: "DISCONNECTED", 
-                    session: "",
-                    qrcode: ""
-                  });
-                  await DeleteBaileysService(whatsapp.id);
-                  io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
-                    action: "update",
-                    session: whatsapp
-                  });
-                  removeWbot(id, false);
-                  retriesQrCodeMap.delete(id);
-                  initializingSessions.delete(id);
-                  // Aguardar mais tempo antes de gerar novo QR code
-                  setTimeout(
-                    () => StartWhatsAppSession(whatsapp, whatsapp.companyId),
-                    5000
-                  );
-                  return;
-                }
-
-                // Tratamento específico para erro 403 (Forbidden)
-                if (statusCode === 403) {
-                  logger.warn(`Erro 403 detectado para ${name}. Limpando sessão.`);
-                  await whatsapp.update({ status: "PENDING", session: "" });
-                  await DeleteBaileysService(whatsapp.id);
-                  io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
-                    action: "update",
-                    session: whatsapp
-                  });
-                  removeWbot(id, false);
-                  initializingSessions.delete(id);
-                  // Aguardar mais tempo antes de reconectar após erro 403
-                  setTimeout(
-                    () => StartWhatsAppSession(whatsapp, whatsapp.companyId),
-                    5000
-                  );
-                  return;
-                }
-
-                // Tratamento para erro 401 (Connection Replaced) - dispositivo removido ou sessão duplicada
-                if (statusCode === DisconnectReason.connectionReplaced || statusCode === 401) {
-                  logger.warn(`⚠️ Erro 401 (Connection Replaced) detectado para ${name}. Sessão inválida - limpando completamente.`);
-                  await whatsapp.update({ 
-                    status: "DISCONNECTED", 
-                    session: "",
-                    qrcode: ""
-                  });
-                  await DeleteBaileysService(whatsapp.id);
-                  io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
-                    action: "update",
-                    session: whatsapp
-                  });
-                  removeWbot(id, false);
-                  retriesQrCodeMap.delete(id);
-                  initializingSessions.delete(id);
-                  // Aguardar mais tempo antes de gerar novo QR code
-                  setTimeout(
-                    () => StartWhatsAppSession(whatsapp, whatsapp.companyId),
-                    5000
-                  );
-                  return;
-                }
-
-                // Tratamento para erro 515 (Logged Out) - sessão expirada
-                if (statusCode === DisconnectReason.loggedOut || statusCode === 515) {
-                  logger.warn(`⚠️ Erro 515 (Logged Out) detectado para ${name}. Sessão expirada - limpando completamente.`);
-                  await whatsapp.update({ 
-                    status: "DISCONNECTED", 
-                    session: "",
-                    qrcode: ""
-                  });
-                  await DeleteBaileysService(whatsapp.id);
-                  io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
-                    action: "update",
-                    session: whatsapp
-                  });
-                  removeWbot(id, false);
-                  retriesQrCodeMap.delete(id);
-                  initializingSessions.delete(id);
-                  // Aguardar mais tempo antes de gerar novo QR code
-                  setTimeout(
-                    () => StartWhatsAppSession(whatsapp, whatsapp.companyId),
-                    5000
-                  );
-                  return;
-                }
-
-                // Para outros erros, tentar reconectar normalmente
-                logger.info(`Reconectando ${name} após desconexão (Status: ${statusCode})`);
+              if ((lastDisconnect?.error as Boom)?.output?.statusCode === 403) {
+                await whatsapp.update({ status: "PENDING", session: "" });
+                await DeleteBaileysService(whatsapp.id);
+                io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
+                  action: "update",
+                  session: whatsapp
+                });
                 removeWbot(id, false);
-                initializingSessions.delete(id);
+              }
+              if (
+                (lastDisconnect?.error as Boom)?.output?.statusCode !==
+                DisconnectReason.loggedOut
+              ) {
+                removeWbot(id, false);
                 setTimeout(
                   () => StartWhatsAppSession(whatsapp, whatsapp.companyId),
-                  3000
+                  2000
                 );
               } else {
-                // Desconexão sem erro específico
-                logger.info(`Desconexão normal para ${name}. Tentando reconectar.`);
+                await whatsapp.update({ status: "PENDING", session: "" });
+                await DeleteBaileysService(whatsapp.id);
+                io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
+                  action: "update",
+                  session: whatsapp
+                });
                 removeWbot(id, false);
-                initializingSessions.delete(id);
                 setTimeout(
                   () => StartWhatsAppSession(whatsapp, whatsapp.companyId),
-                  3000
+                  2000
                 );
               }
             }
 
             if (connection === "open") {
-              logger.info(`✅ Conexão aberta para ${name}. Aguardando estabilização...`);
-              
-              try {
-                // Salvar o estado imediatamente quando a conexão abre
-                await saveState();
-                logger.info(`✅ Estado da sessão salvo para ${name}.`);
-                
-                // Aguardar um pequeno delay para garantir que a conexão está estável
-                await new Promise(resolve => setTimeout(resolve, 3000));
-                
-                // Verificar se o socket ainda existe após o delay
-                if (wsocket) {
-                  // Salvar o estado novamente antes de marcar como conectado
-                  await saveState();
-                  
-                  logger.info(`✅ Conexão estável confirmada para ${name}. Atualizando status para CONNECTED.`);
-                  
-                  await whatsapp.update({
-                    status: "CONNECTED",
-                    qrcode: "",
-                    retries: 0
-                  });
+              await whatsapp.update({
+                status: "CONNECTED",
+                qrcode: "",
+                retries: 0
+              });
 
-                  // Recarregar o whatsapp do banco para garantir que temos os dados mais recentes
-                  const updatedWhatsapp = await Whatsapp.findByPk(whatsapp.id);
-                  if (updatedWhatsapp) {
-                    io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
-                      action: "update",
-                      session: updatedWhatsapp
-                    });
-                  } else {
-                    io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
-                      action: "update",
-                      session: whatsapp
-                    });
-                  }
+              io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
+                action: "update",
+                session: whatsapp
+              });
 
-                  const sessionIndex = sessions.findIndex(
-                    s => s.id === whatsapp.id
-                  );
-                  if (sessionIndex === -1) {
-                    wsocket.id = whatsapp.id;
-                    sessions.push(wsocket);
-                  }
-
-                  // Remover do mapa de inicialização
-                  initializingSessions.delete(id);
-                  
-                  resolve(wsocket);
-                } else {
-                  logger.warn(`⚠️ Socket não encontrado após estabilização para ${name}.`);
-                  initializingSessions.delete(id);
-                }
-              } catch (error) {
-                logger.error(`❌ Erro ao processar conexão aberta para ${name}:`, error);
-                initializingSessions.delete(id);
-                // Mesmo com erro, tentar atualizar o status
-                try {
-                  await whatsapp.update({
-                    status: "CONNECTED",
-                    qrcode: "",
-                    retries: 0
-                  });
-                  io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
-                    action: "update",
-                    session: whatsapp
-                  });
-                  if (wsocket) {
-                    const sessionIndex = sessions.findIndex(
-                      s => s.id === whatsapp.id
-                    );
-                    if (sessionIndex === -1) {
-                      wsocket.id = whatsapp.id;
-                      sessions.push(wsocket);
-                    }
-                    initializingSessions.delete(id);
-                    resolve(wsocket);
-                  }
-                } catch (updateError) {
-                  logger.error(`❌ Erro ao atualizar status após erro:`, updateError);
-                  initializingSessions.delete(id);
-                }
+              const sessionIndex = sessions.findIndex(
+                s => s.id === whatsapp.id
+              );
+              if (sessionIndex === -1) {
+                wsocket.id = whatsapp.id;
+                sessions.push(wsocket);
               }
+
+              resolve(wsocket);
             }
 
             if (qr !== undefined) {
@@ -416,59 +224,11 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
                 logger.info(`Session QRCode Generate ${name}`);
                 retriesQrCodeMap.set(id, (retriesQrCode += 1));
 
-                // Log detalhado do QR code recebido do Baileys
-                logger.info(`QR Code recebido do Baileys - Tipo: ${typeof qr}, Valor bruto: ${JSON.stringify(qr)}`);
-                logger.info(`QR Code recebido do Baileys - Primeiros 100 caracteres: ${typeof qr === 'string' ? qr.substring(0, 100) : 'N/A'}`);
-                
-                // Validar e tratar o QR code antes de salvar
-                const qrCodeValue = typeof qr === 'string' ? qr.trim() : String(qr || '').trim();
-                
-                // Verificar se o QR code contém URLs suspeitas - REJEITAR se contiver
-                const hasSuspiciousURL = qrCodeValue.includes('linktr.ee') || 
-                                         qrCodeValue.includes('http://') || 
-                                         qrCodeValue.includes('https://') ||
-                                         qrCodeValue.startsWith('http') ||
-                                         qrCodeValue.match(/^https?:\/\//i);
-                
-                if (hasSuspiciousURL) {
-                  logger.error(`⚠️ ERRO CRÍTICO: QR Code contém URL suspeita e será REJEITADO!`);
-                  logger.error(`QR Code suspeito recebido: ${qrCodeValue.substring(0, 200)}`);
-                  logger.error(`QR Code completo: ${qrCodeValue}`);
-                  // NÃO salvar QR codes com URLs suspeitas
-                  logger.error(`QR Code rejeitado - não será salvo no banco de dados.`);
-                  return; // Não processar este QR code
-                }
-                
-                // Log do valor processado
-                logger.info(`QR Code processado - Tipo: ${typeof qrCodeValue}, Tamanho: ${qrCodeValue.length}, Primeiros 100 caracteres: ${qrCodeValue.substring(0, 100)}`);
-
-                // Verificar se o QR code parece ser um código válido do WhatsApp
-                // QR codes do WhatsApp geralmente começam com algo como "2@" ou são base64
-                const isValidWhatsAppQR = qrCodeValue.length > 20 && 
-                  (qrCodeValue.startsWith('2@') || 
-                   qrCodeValue.includes('@') || 
-                   /^[A-Za-z0-9+/=_-]+$/.test(qrCodeValue));
-                
-                if (!isValidWhatsAppQR && qrCodeValue.length > 0) {
-                  logger.warn(`⚠️ QR Code pode não ser válido para WhatsApp. Formato suspeito detectado.`);
-                  logger.warn(`QR Code recebido: ${qrCodeValue.substring(0, 150)}`);
-                }
-
                 await whatsapp.update({
-                  qrcode: qrCodeValue,
+                  qrcode: qr,
                   status: "qrcode",
                   retries: 0
                 });
-                
-                // Verificar o valor salvo no banco
-                const whatsappAfterUpdate = await Whatsapp.findByPk(whatsapp.id);
-                if (whatsappAfterUpdate) {
-                  logger.info(`QR Code salvo no banco - Tamanho: ${whatsappAfterUpdate.qrcode?.length || 0}, Primeiros 100 caracteres: ${whatsappAfterUpdate.qrcode?.substring(0, 100) || 'VAZIO'}`);
-                  if (whatsappAfterUpdate.qrcode !== qrCodeValue) {
-                    logger.error(`⚠️ ERRO: QR Code foi modificado após salvar! Esperado: ${qrCodeValue.substring(0, 100)}, Obtido: ${whatsappAfterUpdate.qrcode?.substring(0, 100)}`);
-                  }
-                }
-                
                 const sessionIndex = sessions.findIndex(
                   s => s.id === whatsapp.id
                 );
@@ -487,20 +247,10 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
           }
         );
         wsocket.ev.on("creds.update", saveState);
-        
-        // Suporte para LID mapping no Baileys v7
-        wsocket.ev.on("lid-mapping.update", (mapping) => {
-          logger.info("New LID mapping received:", mapping);
-          // Aqui você pode processar os novos mapeamentos LID/PN
-        });
 
         //store.bind(wsocket.ev);
       })();
     } catch (error) {
-      // Limpar o mapa de inicialização em caso de erro
-      if (whatsapp?.id) {
-        initializingSessions.delete(whatsapp.id);
-      }
       Sentry.captureException(error);
       console.log(error);
       reject(error);

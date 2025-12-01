@@ -54,13 +54,7 @@ const authState = async (
             let value = keys[key]?.[id];
             if (value) {
               if (type === "app-state-sync-key") {
-                // value = proto.Message.AppStateSyncKeyData.fromObject(value);
-                  // Use fromObject if it exists, otherwise fallback to fromJSON or assign directly
-                if (typeof (proto as any).AppStateSyncKeyData?.fromObject === "function") {
-                  value = (proto as any).AppStateSyncKeyData.fromObject(value);
-                } else if (typeof (proto as any).AppStateSyncKeyData?.fromJSON === "function") {
-                  value = (proto as any).AppStateSyncKeyData.fromJSON(value);
-                }
+                value = proto.Message.AppStateSyncKeyData.fromObject(value);
               }
               dict[id] = value;
             }

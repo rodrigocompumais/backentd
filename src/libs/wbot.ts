@@ -91,9 +91,6 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
         const { state, saveState } = await authState(whatsapp);
 
         const msgRetryCounterCache = new NodeCache();
-        
-        // Variável para rastrear se já salvamos após creds.me estar definido
-        let hasSavedAfterMe = false;
 
         wsocket = makeWASocket({
           logger: loggerBaileys,
@@ -145,36 +142,13 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
 
         wsocket.ev.on(
           "connection.update",
-          async (update) => {
-            const { connection, lastDisconnect, qr } = update;
-            const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-            
-            // LOG DETALHADO PARA DIAGNÓSTICO
-            console.log("🔍 CONNECTION UPDATE:", {
-              connection: connection || "undefined",
-              statusCode: statusCode || "N/A",
-              hasLastDisconnect: !!lastDisconnect,
-              hasQr: qr !== undefined,
-              qrLength: qr ? (typeof qr === 'string' ? qr.length : 'not-string') : 0,
-              name: name
-            });
-            
+          async ({ connection, lastDisconnect, qr }) => {
             logger.info(
-              `Socket  ${name} Connection Update ${connection || ""} ${lastDisconnect ? `[Status: ${statusCode}]` : ""}`
+              `Socket  ${name} Connection Update ${connection || ""} ${lastDisconnect || ""
+              }`
             );
 
-            // Log estados intermediários
-            if (connection === "connecting") {
-              console.log(`🔄 ${name} está conectando...`);
-              logger.info(`🔄 ${name} está conectando...`);
-            }
-
             if (connection === "close") {
-              console.log(`❌ CONEXÃO FECHADA para ${name}:`, {
-                statusCode: statusCode,
-                error: lastDisconnect?.error ? String(lastDisconnect.error) : "N/A"
-              });
-              logger.info(`❌ CONEXÃO FECHADA para ${name} - Status: ${statusCode}`);
               if ((lastDisconnect?.error as Boom)?.output?.statusCode === 403) {
                 await whatsapp.update({ status: "PENDING", session: "" });
                 await DeleteBaileysService(whatsapp.id);
@@ -209,41 +183,16 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
             }
 
             if (connection === "open") {
-              console.log(`✅ CONEXÃO ABERTA para ${name}`);
-              logger.info(`✅ CONEXÃO ABERTA para ${name}`);
-              logger.info(`✅ Sessão validada e aberta para ${name}`);
-              
-              // AGORA SIM - salvar sessão apenas após conexão estar realmente aberta
-              console.log(`💾 Tentando salvar estado para ${name}...`);
-              await saveState();
-              console.log(`✅ Estado da sessão salvo para ${name}`);
-              logger.info(`✅ Estado da sessão salvo para ${name}`);
-
-              console.log(`📝 Atualizando status no banco para CONNECTED...`);
               await whatsapp.update({
                 status: "CONNECTED",
                 qrcode: "",
                 retries: 0
               });
-              console.log(`✅ Status atualizado no banco para CONNECTED`);
 
-              // Recarregar whatsapp do banco para garantir dados atualizados
-              const updatedWhatsapp = await Whatsapp.findByPk(whatsapp.id);
-              const sessionToEmit = updatedWhatsapp || whatsapp;
-              
-              console.log(`📡 Emitindo evento Socket.IO: company-${whatsapp.companyId}-whatsappSession`, {
-                action: "update",
-                sessionId: sessionToEmit.id,
-                sessionStatus: sessionToEmit.status,
-                sessionQrcode: sessionToEmit.qrcode ? "presente" : "vazio"
-              });
-              
               io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
                 action: "update",
-                session: sessionToEmit
+                session: whatsapp
               });
-              
-              console.log(`✅ Evento Socket.IO emitido com sucesso`);
 
               const sessionIndex = sessions.findIndex(
                 s => s.id === whatsapp.id
@@ -257,13 +206,6 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
             }
 
             if (qr !== undefined) {
-              console.log(`📱 QR CODE recebido para ${name}:`, {
-                qrType: typeof qr,
-                qrLength: typeof qr === 'string' ? qr.length : 'not-string',
-                qrPreview: typeof qr === 'string' ? qr.substring(0, 50) : 'N/A',
-                retries: retriesQrCodeMap.get(id) || 0
-              });
-              
               if (retriesQrCodeMap.get(id) && retriesQrCodeMap.get(id) >= 3) {
                 await whatsappUpdate.update({
                   status: "DISCONNECTED",
@@ -282,14 +224,11 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
                 logger.info(`Session QRCode Generate ${name}`);
                 retriesQrCodeMap.set(id, (retriesQrCode += 1));
 
-                console.log(`📝 Atualizando QR code no banco...`);
                 await whatsapp.update({
                   qrcode: qr,
                   status: "qrcode",
                   retries: 0
                 });
-                console.log(`✅ QR code atualizado no banco`);
-                
                 const sessionIndex = sessions.findIndex(
                   s => s.id === whatsapp.id
                 );
@@ -299,48 +238,15 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
                   sessions.push(wsocket);
                 }
 
-                // Recarregar whatsapp do banco para garantir dados atualizados
-                const updatedWhatsappForQr = await Whatsapp.findByPk(whatsapp.id);
-                const sessionToEmitQr = updatedWhatsappForQr || whatsapp;
-                
-                console.log(`📡 Emitindo evento Socket.IO para QR: company-${whatsapp.companyId}-whatsappSession`, {
-                  action: "update",
-                  sessionId: sessionToEmitQr.id,
-                  sessionStatus: sessionToEmitQr.status,
-                  hasQrcode: !!sessionToEmitQr.qrcode
-                });
-                
                 io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
                   action: "update",
-                  session: sessionToEmitQr
+                  session: whatsapp
                 });
-                
-                console.log(`✅ Evento Socket.IO para QR emitido com sucesso`);
               }
             }
           }
         );
-        // Salvar credenciais quando forem atualizadas, mas apenas se creds.me estiver definido
-        // Isso permite salvar durante o handshake quando as credenciais estão completas
-        // IMPORTANTE: Isso evita perder credenciais se a conexão fechar antes de "open"
-        wsocket.ev.on("creds.update", async () => {
-          console.log(`🔑 creds.update recebido para ${name}`);
-          
-          // Recarregar o state para pegar credenciais atualizadas
-          const { state: currentState } = await authState(whatsapp);
-          
-          if (currentState.creds && currentState.creds.me && !hasSavedAfterMe) {
-            console.log(`💾 Credenciais completas detectadas (creds.me definido), salvando sessão...`);
-            console.log(`💾 Me ID: ${currentState.creds.me.id}, Me Name: ${currentState.creds.me.name || 'N/A'}`);
-            await saveState();
-            hasSavedAfterMe = true;
-            console.log(`✅ Sessão salva após creds.update com creds.me definido`);
-          } else if (!currentState.creds || !currentState.creds.me) {
-            console.log(`⚠️ creds.update recebido mas creds.me ainda não está definido`);
-          } else if (hasSavedAfterMe) {
-            console.log(`ℹ️ creds.update recebido mas já salvamos anteriormente`);
-          }
-        });
+        wsocket.ev.on("creds.update", saveState);
 
         //store.bind(wsocket.ev);
       })();

@@ -67,8 +67,9 @@ const authState = async (
             keys[key] = keys[key] || {};
             Object.assign(keys[key], data[i]);
           }
-          // NÃO salvar automaticamente aqui - será salvo apenas após connection === "open"
-          // Isso evita salvar credenciais incompletas durante o handshake
+          // Salvar estado de forma assíncrona para não bloquear
+          // O BufferJSON.replacer garante serialização correta
+          setImmediate(() => saveState());
         }
       }
     },

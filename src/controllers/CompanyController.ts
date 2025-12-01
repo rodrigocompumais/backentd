@@ -229,7 +229,7 @@ export const createPaymentPreference = async (req: Request, res: Response): Prom
     // Hash da senha antes de salvar no metadata
     const passwordHash = await hash(req.body.password, 8);
 
-    // Criar preferência de pagamento
+    // Criar preferência de pagamento com personalização alinhada ao design da plataforma
     const preference = await createPaymentIntent({
       transactionAmount: plan.value,
       description: `Pagamento plano - ${plan.name}`,
@@ -247,6 +247,25 @@ export const createPaymentPreference = async (req: Request, res: Response): Prom
         name: req.body.name,
       },
       notification_url: `${process.env.BACKEND_URL}/mercadopago/webhook`,
+      // Personalização do Checkout Pro alinhada ao design da plataforma
+      customization: {
+        theme: {
+          elementsColor: process.env.MP_CHECKOUT_COLOR || "#00D9FF", // Cor primária da plataforma
+          headerColor: process.env.MP_CHECKOUT_HEADER_COLOR || "#0A0A0F", // Cor do fundo escuro
+        },
+        texts: {
+          valueProp: "Sistema completo de atendimento ao cliente com segurança e agilidade",
+          securityCode: "Código de segurança do cartão",
+        },
+        installments: parseInt(process.env.MP_MAX_INSTALLMENTS || "12", 10),
+        excludedPaymentMethods: process.env.MP_EXCLUDED_PAYMENT_METHODS
+          ? process.env.MP_EXCLUDED_PAYMENT_METHODS.split(",").map((m: string) => m.trim())
+          : [],
+        excludedPaymentTypes: process.env.MP_EXCLUDED_PAYMENT_TYPES
+          ? process.env.MP_EXCLUDED_PAYMENT_TYPES.split(",").map((t: string) => t.trim())
+          : [],
+        binaryMode: process.env.MP_BINARY_MODE === "true",
+      },
     });
 
     logger.info("✓ Preferência criada com sucesso:", {

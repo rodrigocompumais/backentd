@@ -287,6 +287,26 @@ interface PaymentIntentData {
     name: string;
   };
   notification_url?: string;
+  // Opções de personalização do Checkout Pro
+  customization?: {
+    // Cores do tema
+    theme?: {
+      elementsColor?: string; // Cor dos elementos (botões, links) - formato hex: "#00D9FF"
+      headerColor?: string; // Cor do cabeçalho - formato hex
+    };
+    // Textos personalizados
+    texts?: {
+      valueProp?: string; // Texto de proposta de valor
+      securityCode?: string; // Texto sobre código de segurança
+    };
+    // Configurações de parcelas
+    installments?: number; // Número máximo de parcelas
+    // Excluir métodos de pagamento específicos
+    excludedPaymentMethods?: string[]; // IDs dos métodos a excluir
+    excludedPaymentTypes?: string[]; // Tipos de pagamento a excluir
+    // Modo binário (aprovado ou rejeitado, sem pendente)
+    binaryMode?: boolean;
+  };
 }
 
 export const createPaymentIntent = async (
@@ -326,6 +346,35 @@ export const createPaymentIntent = async (
         pending: `${process.env.FRONTEND_URL}/signup/pending`,
       },
       auto_return: "approved",
+      // Personalização visual do checkout alinhada ao design da plataforma
+      ...(data.customization?.theme && {
+        theme: {
+          elementsColor: data.customization.theme.elementsColor || "#00D9FF",
+          headerColor: data.customization.theme.headerColor || "#0A0A0F",
+        },
+      }),
+      // Configurações de métodos de pagamento
+      payment_methods: {
+        excluded_payment_types: data.customization?.excludedPaymentTypes || [],
+        excluded_payment_methods: data.customization?.excludedPaymentMethods || [],
+        installments: data.customization?.installments || 12,
+      },
+      // Textos personalizados
+      ...(data.customization?.texts && {
+        texts: {
+          valueProp: data.customization.texts.valueProp || "Segurança e agilidade em seus pagamentos",
+          securityCode: data.customization.texts.securityCode || "Código de segurança",
+        },
+      }),
+      // Modo binário (opcional - apenas aprovado ou rejeitado)
+      ...(data.customization?.binaryMode !== undefined && {
+        binary_mode: data.customization.binaryMode,
+      }),
+      // Configurações adicionais
+      statement_descriptor: "COMPUCHAT",
+      expires: true,
+      expiration_date_from: new Date().toISOString(),
+      expiration_date_to: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 horas
     };
 
     // Adicionar payer se fornecido

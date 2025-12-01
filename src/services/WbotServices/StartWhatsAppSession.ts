@@ -10,6 +10,17 @@ export const StartWhatsAppSession = async (
   whatsapp: Whatsapp,
   companyId: number
 ): Promise<void> => {
+  // Verificar se já existe uma sessão ativa antes de iniciar nova
+  try {
+    const { getWbot } = await import("../../libs/wbot");
+    getWbot(whatsapp.id);
+    // Se chegou aqui, a sessão já existe
+    logger.info(`Sessão ${whatsapp.name} já está ativa. Não iniciando nova sessão.`);
+    return;
+  } catch (err) {
+    // Se não existe sessão (erro ERR_WAPP_NOT_INITIALIZED), continuar com a inicialização
+  }
+
   await whatsapp.update({ status: "OPENING" });
 
   const io = getIO();

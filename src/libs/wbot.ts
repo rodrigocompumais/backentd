@@ -33,6 +33,9 @@ const sessions: Session[] = [];
 
 const retriesQrCodeMap = new Map<number, number>();
 
+// Mapa para rastrear sessões em processo de inicialização
+const initializingSessions = new Map<number, boolean>();
+
 export const getWbot = (whatsappId: number): Session => {
   const sessionIndex = sessions.findIndex(s => s.id === whatsappId);
 
@@ -74,6 +77,34 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
         if (!whatsappUpdate) return;
 
         const { id, name, provider } = whatsappUpdate;
+
+        // Verificar se já existe uma sessão ativa
+        const existingSession = sessions.find(s => s.id === id);
+        if (existingSession) {
+          logger.info(`Sessão ${name} já existe. Retornando sessão existente.`);
+          resolve(existingSession as Session);
+          return;
+        }
+
+        // Verificar se já está em processo de inicialização
+        if (initializingSessions.get(id)) {
+          logger.warn(`Sessão ${name} já está em processo de inicialização. Aguardando...`);
+          // Aguardar até 10 segundos para a inicialização completar
+          let attempts = 0;
+          while (initializingSessions.get(id) && attempts < 20) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            const session = sessions.find(s => s.id === id);
+            if (session) {
+              resolve(session as Session);
+              return;
+            }
+            attempts++;
+          }
+          logger.warn(`Timeout aguardando inicialização da sessão ${name}.`);
+        }
+
+        // Marcar como em inicialização
+        initializingSessions.set(id, true);
 
         const { version, isLatest } = await fetchLatestBaileysVersion();
         const isLegacy = provider === "stable" ? true : false;
@@ -149,6 +180,9 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
             );
 
             if (connection === "close") {
+              // Limpar flag de inicialização
+              initializingSessions.delete(id);
+              
               if ((lastDisconnect?.error as Boom)?.output?.statusCode === 403) {
                 await whatsapp.update({ status: "PENDING", session: "" });
                 await DeleteBaileysService(whatsapp.id);
@@ -163,8 +197,14 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
                 DisconnectReason.loggedOut
               ) {
                 removeWbot(id, false);
+                // Aguardar um pouco antes de reconectar para evitar múltiplas inicializações
                 setTimeout(
-                  () => StartWhatsAppSession(whatsapp, whatsapp.companyId),
+                  () => {
+                    // Verificar se não está já inicializando antes de reconectar
+                    if (!initializingSessions.get(id)) {
+                      StartWhatsAppSession(whatsapp, whatsapp.companyId);
+                    }
+                  },
                   2000
                 );
               } else {
@@ -175,8 +215,14 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
                   session: whatsapp
                 });
                 removeWbot(id, false);
+                // Aguardar um pouco antes de reconectar para evitar múltiplas inicializações
                 setTimeout(
-                  () => StartWhatsAppSession(whatsapp, whatsapp.companyId),
+                  () => {
+                    // Verificar se não está já inicializando antes de reconectar
+                    if (!initializingSessions.get(id)) {
+                      StartWhatsAppSession(whatsapp, whatsapp.companyId);
+                    }
+                  },
                   2000
                 );
               }
@@ -202,6 +248,9 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
                 sessions.push(wsocket);
               }
 
+              // Remover do mapa de inicialização
+              initializingSessions.delete(id);
+              
               resolve(wsocket);
             }
 
@@ -251,6 +300,10 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
         //store.bind(wsocket.ev);
       })();
     } catch (error) {
+      // Limpar flag de inicialização em caso de erro
+      if (whatsapp?.id) {
+        initializingSessions.delete(whatsapp.id);
+      }
       Sentry.captureException(error);
       console.log(error);
       reject(error);

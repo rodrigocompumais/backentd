@@ -344,22 +344,10 @@ export const createPaymentIntent = async (
     const response = await preference.create({ body: preferenceData });
     const preferenceId = response.id;
 
-    // Tentar atualizar as URLs com preference_id (pode não funcionar, mas tentamos)
-    try {
-      await preference.update({ 
-        id: preferenceId, 
-        body: {
-          back_urls: {
-            success: `${process.env.FRONTEND_URL}/signup/success?preference_id=${preferenceId}`,
-            failure: `${process.env.FRONTEND_URL}/signup/failure?preference_id=${preferenceId}`,
-            pending: `${process.env.FRONTEND_URL}/signup/pending?preference_id=${preferenceId}`,
-          },
-        }
-      });
-    } catch (updateError: any) {
-      logger.warn("Não foi possível atualizar URLs da preferência (não crítico):", updateError.message);
-      // Continuar mesmo se não conseguir atualizar
-    }
+    // Nota: Não tentamos atualizar a preferência após criação porque:
+    // 1. O Mercado Pago pode não permitir atualizar preferências após criação
+    // 2. O preference_id será salvo no sessionStorage antes do redirecionamento
+    // 3. As páginas de callback podem obter o preference_id do sessionStorage se não vier na URL
 
     return {
       preferenceId: preferenceId,
@@ -791,7 +779,7 @@ export const getPreferenceStatus = async (preferenceId: string): Promise<any> =>
     }
 
     // Buscar preferência
-    const preferenceData = await preference.get({ id: preferenceId });
+    const preferenceData = await preference.get({ preferenceId: preferenceId });
 
     // Buscar pagamentos associados à preferência
     // O Mercado Pago retorna os pagamentos na resposta da preference quando disponíveis
@@ -804,13 +792,10 @@ export const getPreferenceStatus = async (preferenceId: string): Promise<any> =>
     if (externalReference) {
       try {
         // Buscar pagamentos usando search API por external_reference
+        // O SDK do Mercado Pago usa query string direta
         const searchResponse = await payment.search({
           options: {
-            qs: {
-              "external_reference": externalReference,
-              "sort": "date_created",
-              "criteria": "desc"
-            }
+            qs: `external_reference=${externalReference}&sort=date_created&criteria=desc`
           }
         });
 

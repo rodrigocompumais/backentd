@@ -25,16 +25,28 @@ const authState = async (
 
   const saveState = async () => {
     try {
-      // Proteger contra gravações inválidas - só salvar se credenciais estiverem completas
-      if (!creds || !creds.me) {
-        console.log("⚠️ Credenciais incompletas, não salvando sessão.");
+      console.log("💾 saveState() chamado para:", whatsapp.name || whatsapp.id);
+      console.log("💾 Estado das credenciais:", {
+        hasCreds: !!creds,
+        hasMe: !!(creds && creds.me),
+        meId: creds?.me?.id || "N/A",
+        meName: creds?.me?.name || "N/A"
+      });
+      
+      // TEMPORÁRIO: Remover bloqueio de creds.me para diagnóstico
+      // Apenas verificar se creds existe
+      if (!creds) {
+        console.log("⚠️ Sem creds ainda, não salvando sessão.");
         return;
       }
-
+      
+      console.log("💾 Salvando sessão...");
       await whatsapp.update({
         session: JSON.stringify({ creds, keys }, BufferJSON.replacer, 0)
       });
+      console.log("✅ Sessão salva com sucesso!");
     } catch (error) {
+      console.error("❌ Erro ao salvar sessão:", error);
       console.log(error);
     }
   };

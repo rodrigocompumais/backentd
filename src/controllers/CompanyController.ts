@@ -220,26 +220,23 @@ export const createFreeAccount = async (req: Request, res: Response): Promise<Re
   }
 
   try {
-    // Buscar plano para verificar se é gratuito
+    // Buscar plano (pode ser qualquer plano - pago ou gratuito)
+    // No fluxo gratuito, o usuário seleciona o plano que deseja usar após o período de teste
     const plan = await Plan.findByPk(req.body.planId);
     if (!plan) {
       throw new AppError("Plano não encontrado", 404);
     }
 
-    // Verificar se o plano é realmente gratuito (valor 0 ou null)
-    if (plan.value !== 0 && plan.value !== null) {
-      throw new AppError("Este endpoint é apenas para planos gratuitos. Use o endpoint de pagamento para planos pagos.", 400);
-    }
-
-    // Criar empresa diretamente sem pagamento
+    // Criar empresa diretamente sem pagamento (período de teste de 7 dias)
+    // O plano selecionado será associado à conta e será ativado após o período de teste
     const company = await CreateCompanyService({
       name: req.body.name,
       email: req.body.email,
       phone: req.body.phone,
       password: req.body.password,
       planId: req.body.planId,
-      status: true, // Ativar imediatamente para planos gratuitos
-      dueDate: moment().add(7, "days").format(), // 7 dias grátis
+      status: true, // Ativar imediatamente para período de teste
+      dueDate: moment().add(7, "days").format(), // 7 dias grátis de teste
       recurrence: "MENSAL",
     });
 

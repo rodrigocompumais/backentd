@@ -479,7 +479,11 @@ const getContactMessage = async (msg: proto.IWebMessageInfo, wbot: Session) => {
 const downloadMedia = async (msg: proto.IWebMessageInfo) => {
   let buffer;
   try {
-    buffer = await downloadMediaMessage(msg, "buffer", {});
+    // Garantir que msg tem key antes de passar para downloadMediaMessage
+    if (!msg.key) {
+      throw new Error("Message key is missing");
+    }
+    buffer = await downloadMediaMessage(msg as WAMessage, "buffer", {});
   } catch (err) {
     console.error("Erro ao baixar mídia:", err);
 
@@ -2799,14 +2803,14 @@ const handleMessage = async (
     }
 
     if (whatsapp.queues.length == 1 && ticket.queue) {
-      if (ticket.chatbot && !msg.key.fromMe) {
-        await handleChartbot(ticket, msg, wbot);
+      if (ticket.chatbot && !msg.key.fromMe && msg.key) {
+        await handleChartbot(ticket, msg as WAMessage, wbot);
       }
     }
 
     if (whatsapp.queues.length > 1 && ticket.queue) {
-      if (ticket.chatbot && !msg.key.fromMe) {
-        await handleChartbot(ticket, msg, wbot, dontReadTheFirstQuestion);
+      if (ticket.chatbot && !msg.key.fromMe && msg.key) {
+        await handleChartbot(ticket, msg as WAMessage, wbot, dontReadTheFirstQuestion);
       }
     }
 

@@ -20,6 +20,7 @@ import { logger } from "../utils/logger";
 import { createPaymentIntent } from "../services/PaymentService/MercadoPagoService";
 import Plan from "../models/Plan";
 import { hash } from "bcryptjs";
+import moment from "moment";
 
 type IndexQuery = {
   searchParam: string;
@@ -184,6 +185,94 @@ export const indexPlan = async (req: Request, res: Response): Promise<Response> 
 
 };
 
+export const createFreeAccount = async (req: Request, res: Response): Promise<Response> => {
+  logger.info("=== createFreeAccount chamado ===");
+  logger.info("Body recebido:", {
+    companyName: req.body.name,
+    companyEmail: req.body.email,
+    planId: req.body.planId,
+  });
+
+  const schema = Yup.object().shape({
+    name: Yup.string().required("Nome da empresa é obrigatório"),
+    email: Yup.string().email("Email inválido").required("Email é obrigatório"),
+    phone: Yup.string().required("Telefone é obrigatório"),
+    password: Yup.string().required("Senha é obrigatória"),
+    planId: Yup.number().required("Plano é obrigatório"),
+  });
+
+  try {
+    await schema.validate(req.body, { abortEarly: false });
+    logger.info("✓ Validação do schema passou");
+  } catch (err: any) {
+    logger.error("✗ Erro na validação do schema:", {
+      error: err.message,
+      errors: err.inner,
+    });
+    
+    if (err.inner && err.inner.length > 0) {
+      const errors = err.inner.map((e: any) => `${e.path}: ${e.message}`).join(", ");
+      logger.error("Erros detalhados:", errors);
+      throw new AppError(`Erro de validação: ${errors}`, 400);
+    }
+    
+    throw new AppError(err.message || "Erro de validação", 400);
+  }
+
+  try {
+    // Buscar plano para verificar se é gratuito
+    const plan = await Plan.findByPk(req.body.planId);
+    if (!plan) {
+      throw new AppError("Plano não encontrado", 404);
+    }
+
+    // Verificar se o plano é realmente gratuito (valor 0 ou null)
+    if (plan.value !== 0 && plan.value !== null) {
+      throw new AppError("Este endpoint é apenas para planos gratuitos. Use o endpoint de pagamento para planos pagos.", 400);
+    }
+
+    // Criar empresa diretamente sem pagamento
+    const company = await CreateCompanyService({
+      name: req.body.name,
+      email: req.body.email,
+      phone: req.body.phone,
+      password: req.body.password,
+      planId: req.body.planId,
+      status: true, // Ativar imediatamente para planos gratuitos
+      dueDate: moment().add(7, "days").format(), // 7 dias grátis
+      recurrence: "MENSAL",
+    });
+
+    logger.info("✓ Conta gratuita criada com sucesso:", {
+      companyId: company.id,
+      companyName: company.name,
+    });
+
+    return res.status(200).json({
+      success: true,
+      company: {
+        id: company.id,
+        name: company.name,
+        email: company.email,
+      },
+      message: "Conta criada com sucesso! Você pode fazer login agora.",
+    });
+  } catch (error: any) {
+    logger.error("✗ Erro ao criar conta gratuita:", {
+      error: error.message,
+      companyName: req.body?.name,
+      companyEmail: req.body?.email,
+    });
+    
+    if (error instanceof AppError) {
+      throw error;
+    }
+    
+    const errorMessage = error.message || "Erro ao criar conta. Por favor, tente novamente.";
+    throw new AppError(errorMessage, error.statusCode || 400);
+  }
+};
+
 export const createPaymentPreference = async (req: Request, res: Response): Promise<Response> => {
   logger.info("=== createPaymentPreference chamado ===");
   logger.info("Body recebido:", {
@@ -224,6 +313,11 @@ export const createPaymentPreference = async (req: Request, res: Response): Prom
     const plan = await Plan.findByPk(req.body.planId);
     if (!plan) {
       throw new AppError("Plano não encontrado", 404);
+    }
+
+    // Verificar se o plano é gratuito - se for, redirecionar para criação gratuita
+    if (plan.value === 0 || plan.value === null) {
+      throw new AppError("Para planos gratuitos, use o endpoint de criação gratuita.", 400);
     }
 
     // Hash da senha antes de salvar no metadata

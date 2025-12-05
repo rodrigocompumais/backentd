@@ -22,7 +22,6 @@ import AppError from "../../errors/AppError";
 import { logger } from "../../utils/logger";
 import CreateMessageService, { MessageData } from "../MessageServices/CreateMessageService";
 import generateContextSummary from "../AiServices/GenerateContextSummaryService";
-import findOnlineAgent from "../TicketServices/FindOnlineAgentService";
 import UpdateTicketService from "../TicketServices/UpdateTicketService";
 import GetTicketWbot from "../../helpers/GetTicketWbot";
 import Company from "../../models/Company";
@@ -385,9 +384,12 @@ export const handleGemini = async (
         }
       }
 
-      // Verificar se precisa transferir para fila/atendente
+      // Verificar se precisa transferir para fila
       if (response.includes("Ação: Transferir para o setor de atendimento")) {
-        // Se canTransferToAgent estiver habilitado, gerar resumo e buscar atendente online
+        // Determinar fila de destino
+        const targetQueueId = geminiSettings.transferQueueId || geminiSettings.queueId;
+
+        // Se canTransferToAgent estiver habilitado, gerar resumo antes de transferir
         if (geminiSettings.canTransferToAgent) {
           try {
             // Gerar resumo do contexto
@@ -410,52 +412,19 @@ export const handleGemini = async (
               mediaType: "conversation"
             };
             await CreateMessageService({ messageData: summaryMessageData, companyId: ticket.companyId });
-
-            // Buscar atendente online
-            const targetQueueId = geminiSettings.transferQueueId || geminiSettings.queueId;
-            const onlineAgent = await findOnlineAgent({
-              companyId: ticket.companyId,
-              queueId: targetQueueId
-            });
-
-            if (onlineAgent) {
-              // Transferir para atendente online
-              await UpdateTicketService({
-                ticketData: {
-                  userId: onlineAgent.id,
-                  queueId: targetQueueId,
-                  status: "open"
-                },
-                ticketId: ticket.id,
-                companyId: ticket.companyId
-              });
-              logger.info(`Ticket ${ticket.id} transferido para atendente online ${onlineAgent.name} (ID: ${onlineAgent.id})`);
-              
-              // Enviar mensagem automática de transferência
-              await sendTransferMessage(ticket, contact, targetQueueId, onlineAgent.id);
-            } else {
-              // Se não encontrar atendente online, transferir apenas para fila
-              await transferQueue(targetQueueId, ticket, contact);
-              logger.info(`Nenhum atendente online encontrado. Ticket ${ticket.id} transferido para fila ${targetQueueId}`);
-              
-              // Enviar mensagem automática de transferência
-              await sendTransferMessage(ticket, contact, targetQueueId, null);
-            }
+            logger.info(`Resumo do contexto gerado antes da transferência do ticket ${ticket.id}`);
           } catch (err: any) {
-            logger.error(`Erro ao processar transferência com resumo: ${err.message}`);
-            // Fallback: transferir normalmente
-            await transferQueue(geminiSettings.queueId, ticket, contact);
-            
-            // Enviar mensagem automática de transferência
-            await sendTransferMessage(ticket, contact, geminiSettings.queueId, null);
+            logger.error(`Erro ao gerar resumo antes da transferência: ${err.message}`);
+            // Continua com a transferência mesmo se o resumo falhar
           }
-        } else {
-          // Transferência normal (sem resumo)
-          await transferQueue(geminiSettings.queueId, ticket, contact);
-          
-          // Enviar mensagem automática de transferência
-          await sendTransferMessage(ticket, contact, geminiSettings.queueId, null);
         }
+
+        // Transferir para a fila
+        await transferQueue(targetQueueId, ticket, contact);
+        logger.info(`Ticket ${ticket.id} transferido para fila ${targetQueueId}`);
+        
+        // Enviar mensagem automática de transferência
+        await sendTransferMessage(ticket, contact, targetQueueId, null);
 
         cleanedResponse = cleanedResponse
           .replace("Ação: Transferir para o setor de atendimento", "")

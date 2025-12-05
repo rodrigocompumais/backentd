@@ -24,7 +24,7 @@ import Ticket from "../../models/Ticket";
 import Message from "../../models/Message";
 
 import { getIO } from "../../libs/socket";
-import CreateMessageService from "../MessageServices/CreateMessageService";
+import CreateMessageService, { MessageData } from "../MessageServices/CreateMessageService";
 import { logger } from "../../utils/logger";
 import CreateOrUpdateContactService from "../ContactServices/CreateOrUpdateContactService";
 import FindOrCreateTicketService from "../TicketServices/FindOrCreateTicketService";
@@ -63,6 +63,8 @@ import { FlowCampaignModel } from "../../models/FlowCampaign";
 import { IOpenAi } from "../../@types/openai";
 import { handleGemini } from "../IntegrationsServices/GeminiService";
 import ShowPromptService from "../PromptServices/ShowPromptService";
+import generateContextSummary from "../AiServices/GenerateContextSummaryService";
+import findOnlineAgent from "../TicketServices/FindOnlineAgentService";
 
 import { IConnections, INodes } from "../WebhookService/DispatchWebHookService";
 import { ActionsWebhookService } from "../WebhookService/ActionsWebhookService";
@@ -714,7 +716,10 @@ const handleGeminiInListener = async (
     maxTokens: prompt.maxTokens,
     temperature: prompt.temperature,
     queueId: prompt.queueId,
-    maxMessages: prompt.maxMessages
+    maxMessages: prompt.maxMessages,
+    canSendInternalMessages: prompt.canSendInternalMessages || false,
+    canTransferToAgent: prompt.canTransferToAgent || false,
+    transferQueueId: prompt.transferQueueId || null
   };
 
   await handleGemini(
@@ -790,12 +795,17 @@ const handleOpenAi = async (
     limit: maxMessages
   });
 
-  const promptSystem = `Nas respostas utilize o nome ${sanitizeName(
+  let promptSystem = `Nas respostas utilize o nome ${sanitizeName(
     contact.name || "Amigo(a)"
   )} para identificar o cliente.\nSua resposta deve usar no máximo ${
     prompt.maxTokens
   } tokens e cuide para não truncar o final.\nSempre que possível, mencione o nome dele para ser mais personalizado o atendimento e mais educado. Quando a resposta requer uma transferência para o setor de atendimento, comece sua resposta com 'Ação: Transferir para o setor de atendimento'.\n
   ${prompt.prompt}\n`;
+  
+  // Adicionar instruções sobre mensagens internas se habilitado
+  if (prompt.canSendInternalMessages) {
+    promptSystem += `\n\nVocê pode fazer anotações internas quando necessário. Para isso, use o formato [INTERNA] seguido do conteúdo da anotação. Exemplo: [INTERNA] Cliente interessado em produto X, aguardando confirmação de estoque.`;
+  }
 
   let messagesOpenAi: ChatCompletionRequestMessage[] = [];
 
@@ -826,17 +836,115 @@ const handleOpenAi = async (
 
     let response = chat.data.choices[0].message?.content;
 
+    // Detectar e processar mensagens internas
+    const internalMessageRegex = /\[INTERNA\](.*?)(?=\[INTERNA\]|$)/gs;
+    const internalMessages: string[] = [];
+    let cleanedResponse = response || "";
+
+    if (prompt.canSendInternalMessages) {
+      let match;
+      while ((match = internalMessageRegex.exec(response || "")) !== null) {
+        const internalContent = match[1].trim();
+        if (internalContent) {
+          internalMessages.push(internalContent);
+          // Remover da resposta que será enviada ao cliente
+          cleanedResponse = cleanedResponse.replace(match[0], "").trim();
+        }
+      }
+
+      // Enviar mensagens internas
+      for (const internalContent of internalMessages) {
+        try {
+          const messageData: MessageData = {
+            id: `${ticket.id}-${Date.now()}-${Math.random()}`,
+            body: internalContent,
+            ticketId: ticket.id,
+            contactId: ticket.contactId,
+            fromMe: true,
+            read: true,
+            isInternal: true,
+            mediaType: "conversation"
+          };
+          await CreateMessageService({ messageData, companyId: ticket.companyId });
+          logger.info(`Mensagem interna enviada: ${internalContent.substring(0, 50)}...`);
+        } catch (err: any) {
+          logger.error(`Erro ao enviar mensagem interna: ${err.message}`);
+        }
+      }
+    }
+
+    // Verificar se precisa transferir para fila/atendente
     if (response?.includes("Ação: Transferir para o setor de atendimento")) {
-      await transferQueue(prompt.queueId, ticket, contact);
-      response = response
+      // Se canTransferToAgent estiver habilitado, gerar resumo e buscar atendente online
+      if (prompt.canTransferToAgent) {
+        try {
+          // Gerar resumo do contexto
+          const summary = await generateContextSummary({
+            ticketId: ticket.id,
+            companyId: ticket.companyId,
+            provider: "openai",
+            maxMessages: prompt.maxMessages
+          });
+
+          // Enviar resumo como mensagem interna
+          const summaryMessageData: MessageData = {
+            id: `${ticket.id}-${Date.now()}-summary`,
+            body: `📋 RESUMO DO CONTEXTO (antes da transferência):\n\n${summary}`,
+            ticketId: ticket.id,
+            contactId: ticket.contactId,
+            fromMe: true,
+            read: true,
+            isInternal: true,
+            mediaType: "conversation"
+          };
+          await CreateMessageService({ messageData: summaryMessageData, companyId: ticket.companyId });
+
+          // Buscar atendente online
+          const targetQueueId = prompt.transferQueueId || prompt.queueId;
+          const onlineAgent = await findOnlineAgent({
+            companyId: ticket.companyId,
+            queueId: targetQueueId
+          });
+
+          if (onlineAgent) {
+            // Transferir para atendente online
+            await UpdateTicketService({
+              ticketData: {
+                userId: onlineAgent.id,
+                queueId: targetQueueId,
+                status: "open"
+              },
+              ticketId: ticket.id,
+              companyId: ticket.companyId
+            });
+            logger.info(`Ticket ${ticket.id} transferido para atendente online ${onlineAgent.name} (ID: ${onlineAgent.id})`);
+          } else {
+            // Se não encontrar atendente online, transferir apenas para fila
+            await transferQueue(targetQueueId, ticket, contact);
+            logger.info(`Nenhum atendente online encontrado. Ticket ${ticket.id} transferido para fila ${targetQueueId}`);
+          }
+        } catch (err: any) {
+          logger.error(`Erro ao processar transferência com resumo: ${err.message}`);
+          // Fallback: transferir normalmente
+          await transferQueue(prompt.queueId, ticket, contact);
+        }
+      } else {
+        // Transferência normal (sem resumo)
+        await transferQueue(prompt.queueId, ticket, contact);
+      }
+
+      cleanedResponse = cleanedResponse
         .replace("Ação: Transferir para o setor de atendimento", "")
         .trim();
     }
 
-    const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
-      text: response!
-    });
-    await verifyMessage(sentMessage!, ticket, contact);
+    // Enviar resposta (sem mensagens internas)
+    if (cleanedResponse.trim()) {
+      const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
+        text: cleanedResponse
+      });
+      await verifyMessage(sentMessage!, ticket, contact);
+    }
 
   } else if (msg.message?.audioMessage) {
     const mediaUrl = mediaSent!.mediaUrl!.split("/").pop();
@@ -867,11 +975,99 @@ const handleOpenAi = async (
     });
     let response = chat.data.choices[0].message?.content;
 
+    // Aplicar mesma lógica de mensagens internas e transferência para áudio
+    let cleanedAudioResponse = response || "";
+    
+    if (prompt.canSendInternalMessages && response) {
+      const internalMessageRegex = /\[INTERNA\](.*?)(?=\[INTERNA\]|$)/gs;
+      const internalMessages: string[] = [];
+      let match;
+      while ((match = internalMessageRegex.exec(response)) !== null) {
+        const internalContent = match[1].trim();
+        if (internalContent) {
+          internalMessages.push(internalContent);
+          cleanedAudioResponse = cleanedAudioResponse.replace(match[0], "").trim();
+        }
+      }
+
+      for (const internalContent of internalMessages) {
+        try {
+          const messageData: MessageData = {
+            id: `${ticket.id}-${Date.now()}-${Math.random()}`,
+            body: internalContent,
+            ticketId: ticket.id,
+            contactId: ticket.contactId,
+            fromMe: true,
+            read: true,
+            isInternal: true,
+            mediaType: "conversation"
+          };
+          await CreateMessageService({ messageData, companyId: ticket.companyId });
+        } catch (err: any) {
+          logger.error(`Erro ao enviar mensagem interna: ${err.message}`);
+        }
+      }
+    }
+
     if (response?.includes("Ação: Transferir para o setor de atendimento")) {
-      await transferQueue(prompt.queueId, ticket, contact);
-      response = response
+      if (prompt.canTransferToAgent) {
+        try {
+          const summary = await generateContextSummary({
+            ticketId: ticket.id,
+            companyId: ticket.companyId,
+            provider: "openai",
+            maxMessages: prompt.maxMessages
+          });
+
+          const summaryMessageData: MessageData = {
+            id: `${ticket.id}-${Date.now()}-summary`,
+            body: `📋 RESUMO DO CONTEXTO (antes da transferência):\n\n${summary}`,
+            ticketId: ticket.id,
+            contactId: ticket.contactId,
+            fromMe: true,
+            read: true,
+            isInternal: true,
+            mediaType: "conversation"
+          };
+          await CreateMessageService({ messageData: summaryMessageData, companyId: ticket.companyId });
+
+          const targetQueueId = prompt.transferQueueId || prompt.queueId;
+          const onlineAgent = await findOnlineAgent({
+            companyId: ticket.companyId,
+            queueId: targetQueueId
+          });
+
+          if (onlineAgent) {
+            await UpdateTicketService({
+              ticketData: {
+                userId: onlineAgent.id,
+                queueId: targetQueueId,
+                status: "open"
+              },
+              ticketId: ticket.id,
+              companyId: ticket.companyId
+            });
+          } else {
+            await transferQueue(targetQueueId, ticket, contact);
+          }
+        } catch (err: any) {
+          logger.error(`Erro ao processar transferência com resumo: ${err.message}`);
+          await transferQueue(prompt.queueId, ticket, contact);
+        }
+      } else {
+        await transferQueue(prompt.queueId, ticket, contact);
+      }
+      cleanedAudioResponse = cleanedAudioResponse
         .replace("Ação: Transferir para o setor de atendimento", "")
         .trim();
+    }
+    
+    // Enviar resposta de áudio (sem mensagens internas)
+    if (cleanedAudioResponse.trim()) {
+      const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
+        text: cleanedAudioResponse
+      });
+      await verifyMessage(sentMessage!, ticket, contact);
     }
   }
   messagesOpenAi = [];

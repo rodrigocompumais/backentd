@@ -20,6 +20,10 @@ import Setting from "../../models/Setting";
 import { GEMINI_MODEL, GEMINI_BASE_URL, validateGeminiApiKey, interpretGeminiError } from "../../config/gemini";
 import AppError from "../../errors/AppError";
 import { logger } from "../../utils/logger";
+import CreateMessageService, { MessageData } from "../MessageServices/CreateMessageService";
+import generateContextSummary from "../AiServices/GenerateContextSummaryService";
+import findOnlineAgent from "../TicketServices/FindOnlineAgentService";
+import UpdateTicketService from "../TicketServices/UpdateTicketService";
 
 type Session = WASocket & {
   id?: number;
@@ -35,6 +39,9 @@ interface IGemini {
   temperature: number;
   queueId: number;
   maxMessages: number;
+  canSendInternalMessages?: boolean;
+  canTransferToAgent?: boolean;
+  transferQueueId?: number | null;
 }
 
 const sanitizeName = (name: string): string => {
@@ -100,9 +107,14 @@ export const handleGemini = async (
   });
 
   // Prompt do sistema otimizado e mais curto
-  const promptSystem = `Você é um assistente de atendimento. Use o nome ${sanitizeName(
+  let promptSystem = `Você é um assistente de atendimento. Use o nome ${sanitizeName(
     contact.name || "Amigo(a)"
   )} para personalizar.\n${geminiSettings.prompt}\n\nIMPORTANTE: Seja direto e objetivo. Para transferir, comece com 'Ação: Transferir para o setor de atendimento'.`;
+  
+  // Adicionar instruções sobre mensagens internas se habilitado
+  if (geminiSettings.canSendInternalMessages) {
+    promptSystem += `\n\nVocê pode fazer anotações internas quando necessário. Para isso, use o formato [INTERNA] seguido do conteúdo da anotação. Exemplo: [INTERNA] Cliente interessado em produto X, aguardando confirmação de estoque.`;
+  }
 
   if (msg.message?.conversation || msg.message?.extendedTextMessage?.text) {
     // Construir histórico de conversa no formato Gemini
@@ -229,24 +241,119 @@ export const handleGemini = async (
 
       logger.info(`✅ Resposta recebida do Gemini (${response.length} caracteres)`);
 
-      // Verificar se precisa transferir para fila
+      // Detectar e processar mensagens internas
+      const internalMessageRegex = /\[INTERNA\](.*?)(?=\[INTERNA\]|$)/gs;
+      const internalMessages: string[] = [];
+      let cleanedResponse = response;
+
+      if (geminiSettings.canSendInternalMessages) {
+        let match;
+        while ((match = internalMessageRegex.exec(response)) !== null) {
+          const internalContent = match[1].trim();
+          if (internalContent) {
+            internalMessages.push(internalContent);
+            // Remover da resposta que será enviada ao cliente
+            cleanedResponse = cleanedResponse.replace(match[0], "").trim();
+          }
+        }
+
+        // Enviar mensagens internas
+        for (const internalContent of internalMessages) {
+          try {
+            const messageData: MessageData = {
+              id: `${ticket.id}-${Date.now()}-${Math.random()}`,
+              body: internalContent,
+              ticketId: ticket.id,
+              contactId: ticket.contactId,
+              fromMe: true,
+              read: true,
+              isInternal: true,
+              mediaType: "conversation"
+            };
+            await CreateMessageService({ messageData, companyId: ticket.companyId });
+            logger.info(`Mensagem interna enviada: ${internalContent.substring(0, 50)}...`);
+          } catch (err: any) {
+            logger.error(`Erro ao enviar mensagem interna: ${err.message}`);
+          }
+        }
+      }
+
+      // Verificar se precisa transferir para fila/atendente
       if (response.includes("Ação: Transferir para o setor de atendimento")) {
-        await transferQueue(geminiSettings.queueId, ticket, contact);
-        response = response
+        // Se canTransferToAgent estiver habilitado, gerar resumo e buscar atendente online
+        if (geminiSettings.canTransferToAgent) {
+          try {
+            // Gerar resumo do contexto
+            const summary = await generateContextSummary({
+              ticketId: ticket.id,
+              companyId: ticket.companyId,
+              provider: "gemini",
+              maxMessages: geminiSettings.maxMessages
+            });
+
+            // Enviar resumo como mensagem interna
+            const summaryMessageData: MessageData = {
+              id: `${ticket.id}-${Date.now()}-summary`,
+              body: `📋 RESUMO DO CONTEXTO (antes da transferência):\n\n${summary}`,
+              ticketId: ticket.id,
+              contactId: ticket.contactId,
+              fromMe: true,
+              read: true,
+              isInternal: true,
+              mediaType: "conversation"
+            };
+            await CreateMessageService({ messageData: summaryMessageData, companyId: ticket.companyId });
+
+            // Buscar atendente online
+            const targetQueueId = geminiSettings.transferQueueId || geminiSettings.queueId;
+            const onlineAgent = await findOnlineAgent({
+              companyId: ticket.companyId,
+              queueId: targetQueueId
+            });
+
+            if (onlineAgent) {
+              // Transferir para atendente online
+              await UpdateTicketService({
+                ticketData: {
+                  userId: onlineAgent.id,
+                  queueId: targetQueueId,
+                  status: "open"
+                },
+                ticketId: ticket.id,
+                companyId: ticket.companyId
+              });
+              logger.info(`Ticket ${ticket.id} transferido para atendente online ${onlineAgent.name} (ID: ${onlineAgent.id})`);
+            } else {
+              // Se não encontrar atendente online, transferir apenas para fila
+              await transferQueue(targetQueueId, ticket, contact);
+              logger.info(`Nenhum atendente online encontrado. Ticket ${ticket.id} transferido para fila ${targetQueueId}`);
+            }
+          } catch (err: any) {
+            logger.error(`Erro ao processar transferência com resumo: ${err.message}`);
+            // Fallback: transferir normalmente
+            await transferQueue(geminiSettings.queueId, ticket, contact);
+          }
+        } else {
+          // Transferência normal (sem resumo)
+          await transferQueue(geminiSettings.queueId, ticket, contact);
+        }
+
+        cleanedResponse = cleanedResponse
           .replace("Ação: Transferir para o setor de atendimento", "")
           .trim();
       }
 
-      // Enviar resposta
+      // Enviar resposta (sem mensagens internas)
+      if (cleanedResponse.trim()) {
       if (geminiSettings.voice === "texto") {
         const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
           text: `\u200e ${response}`
         });
         await verifyMessage(sentMessage!, ticket, contact);
-      } else {
-        const fileNameWithOutExtension = `${ticket.id}_${Date.now()}`;
-        convertTextToSpeechAndSaveToFile(
-          keepOnlySpecifiedChars(response),
+        } else {
+          const fileNameWithOutExtension = `${ticket.id}_${Date.now()}`;
+          convertTextToSpeechAndSaveToFile(
+            keepOnlySpecifiedChars(cleanedResponse),
           `${publicFolder}/${fileNameWithOutExtension}`,
           geminiSettings.voiceKey,
           geminiSettings.voiceRegion,

@@ -20,6 +20,9 @@ interface PromptData {
     companyId: string | number;
     model: string;
     provider?: string;
+    canSendInternalMessages?: boolean;
+    canTransferToAgent?: boolean;
+    transferQueueId?: number | null;
 }
 
 interface Request {
@@ -51,7 +54,7 @@ const UpdatePromptService = async ({
         promptSchema.fields.apiKey = Yup.string().required("ERR_PROMPT_APIKEY_INVALID");
     }
 
-    const { name, apiKey, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, model } = promptData;
+    const { name, apiKey, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, model, canSendInternalMessages, canTransferToAgent, transferQueueId } = promptData;
 
     try {
         await promptSchema.validate({ name, apiKey, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, provider });
@@ -79,7 +82,22 @@ const UpdatePromptService = async ({
     }
 
     // Garantir que provider tenha valor
-    const updateData: any = { name, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, model, provider };
+    const updateData: any = { 
+        name, 
+        prompt, 
+        maxTokens, 
+        temperature, 
+        promptTokens, 
+        completionTokens, 
+        totalTokens, 
+        queueId, 
+        maxMessages, 
+        model, 
+        provider,
+        canSendInternalMessages: canSendInternalMessages !== undefined ? canSendInternalMessages : false,
+        canTransferToAgent: canTransferToAgent !== undefined ? canTransferToAgent : false,
+        transferQueueId: transferQueueId || null
+    };
     
     // Só incluir apiKey se for OpenAI
     if (provider === "openai" && apiKey) {

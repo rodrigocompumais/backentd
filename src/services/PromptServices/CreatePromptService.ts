@@ -19,6 +19,9 @@ interface PromptData {
     companyId: string | number;
     model: string;
     provider?: string;
+    canSendInternalMessages?: boolean;
+    canTransferToAgent?: boolean;
+    transferQueueId?: number | null;
 }
 
 const CreatePromptService = async (promptData: PromptData): Promise<Prompt> => {

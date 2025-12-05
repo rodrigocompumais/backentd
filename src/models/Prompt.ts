@@ -56,6 +56,20 @@ class Prompt extends Model<Prompt> {
   @Column({ defaultValue: "openai" })
   provider: string;
 
+  @Column({ defaultValue: false })
+  canSendInternalMessages: boolean;
+
+  @Column({ defaultValue: false })
+  canTransferToAgent: boolean;
+
+  @AllowNull
+  @ForeignKey(() => Queue)
+  @Column
+  transferQueueId: number;
+
+  @BelongsTo(() => Queue, "transferQueueId")
+  transferQueue: Queue;
+
   @AllowNull
   @ForeignKey(() => Queue)
   @Column

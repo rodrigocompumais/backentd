@@ -4,7 +4,7 @@ import * as Yup from "yup";
 import Gerencianet from "gn-api-sdk-typescript";
 import AppError from "../errors/AppError";
 
-import options from "../config/Gn";
+import getGerencianetConfig from "../config/Gn";
 import Company from "../models/Company";
 import Invoices from "../models/Invoices";
 import { getIO } from "../libs/socket";
@@ -15,14 +15,32 @@ const app = express();
 
 
 export const index = async (req: Request, res: Response): Promise<Response> => {
-  const gerencianet = Gerencianet(options);
-  return res.json(gerencianet.getSubscriptions());
+  try {
+    const options = getGerencianetConfig();
+    const gerencianet = Gerencianet(options);
+    return res.json(gerencianet.getSubscriptions());
+  } catch (error: any) {
+    logger.error("Erro ao obter configuração do Gerencianet:", error.message);
+    throw new AppError("Configuração do Gerencianet não encontrada. Entre em contato com o suporte.", 500);
+  }
 };
 
 export const createSubscription = async (
   req: Request,
   res: Response
   ): Promise<Response> => {
+    // Obter e validar configuração do Gerencianet
+    let options;
+    try {
+      options = getGerencianetConfig();
+    } catch (error: any) {
+      logger.error("Erro ao obter configuração do Gerencianet:", error.message);
+      throw new AppError(
+        `Configuração do Gerencianet incompleta: ${error.message}. Entre em contato com o suporte.`,
+        500
+      );
+    }
+
     const gerencianet = Gerencianet(options);
     const { companyId } = req.user;
 
@@ -114,11 +132,16 @@ export const  createWebhook = async (
   };
 
   try {
+    const options = getGerencianetConfig();
     const gerencianet = Gerencianet(options);
     const create = await gerencianet.pixConfigWebhook(params, body);
     return res.json(create);
-  } catch (error) {
-    console.log(error);
+  } catch (error: any) {
+    logger.error("Erro ao configurar webhook:", error.message);
+    throw new AppError(
+      `Erro ao configurar webhook: ${error.message}`,
+      500
+    );
   }
 };
 
@@ -140,6 +163,19 @@ export const webhook = async (
     if (!req.body.pix || !Array.isArray(req.body.pix) || req.body.pix.length === 0) {
       logger.warn("Webhook recebido sem array de PIX válido");
       return res.json({ ok: true, message: "Nenhum PIX para processar" });
+    }
+
+    // Obter configuração do Gerencianet
+    let options;
+    try {
+      options = getGerencianetConfig();
+    } catch (error: any) {
+      logger.error("Erro ao obter configuração do Gerencianet no webhook:", error.message);
+      // Retornar 200 para evitar reenvio do webhook mesmo com erro de configuração
+      return res.status(200).json({ 
+        ok: false, 
+        error: `Configuração do Gerencianet incompleta: ${error.message}` 
+      });
     }
 
     const gerencianet = Gerencianet(options);

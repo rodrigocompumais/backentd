@@ -329,58 +329,78 @@ export const handleGemini = async (
       logger.info(`✅ Resposta recebida do Gemini (${response.length} caracteres)`);
 
       // Detectar e processar mensagens internas
-      // Primeiro, procurar por mensagens internas com fechamento [/INTERNA]
       const internalMessages: string[] = [];
       let cleanedResponse = response;
 
       if (geminiSettings.canSendInternalMessages) {
-        // Regex para capturar [INTERNA]...[/INTERNA]
-        const closedInternalRegex = /\[INTERNA\](.*?)\[\/INTERNA\]/gs;
-        let match;
+        // Regex unificado que captura [INTERNA]...[/INTERNA] de forma não-gulosa
+        // Usa uma única passagem para evitar duplicação
+        const internalMessageRegex = /\[INTERNA\](.*?)\[\/INTERNA\]/gs;
+        const processedMatches = new Set<string>(); // Para evitar duplicação
         
-        // Processar todas as mensagens internas com fechamento
-        while ((match = closedInternalRegex.exec(response)) !== null) {
+        let match;
+        // Processar todas as mensagens internas com fechamento explícito
+        while ((match = internalMessageRegex.exec(response)) !== null) {
+          const fullMatch = match[0]; // [INTERNA]...[/INTERNA]
           const internalContent = match[1].trim();
-          if (internalContent) {
+          
+          // Evitar processar a mesma mensagem duas vezes
+          if (internalContent && !processedMatches.has(fullMatch)) {
+            processedMatches.add(fullMatch);
             internalMessages.push(internalContent);
-            // Remover o marcador completo [INTERNA]...[/INTERNA] da resposta
-            cleanedResponse = cleanedResponse.replace(match[0], "").trim();
+            // Remover o marcador completo da resposta
+            cleanedResponse = cleanedResponse.replace(fullMatch, "").trim();
           }
         }
 
-        // Depois, procurar por mensagens internas sem fechamento (até próximo [INTERNA] ou final)
-        const openInternalRegex = /\[INTERNA\]([^\[]*?)(?=\[INTERNA\]|$)/gs;
+        // Limpar qualquer [INTERNA] restante sem fechamento (caso a IA tenha esquecido de fechar)
+        // Isso garante que nenhum marcador [INTERNA] seja enviado ao cliente
+        const openInternalRegex = /\[INTERNA\][^\[]*?(?=\[INTERNA\]|$)/gs;
         while ((match = openInternalRegex.exec(cleanedResponse)) !== null) {
-          const internalContent = match[1].trim();
-          // Só adicionar se não contiver [/INTERNA] (já processado acima)
-          if (internalContent && !internalContent.includes("[/INTERNA]")) {
+          const fullMatch = match[0];
+          const internalContent = match[0].replace(/\[INTERNA\]/g, "").trim();
+          
+          // Só processar se não foi já processado e não contém [/INTERNA]
+          if (internalContent && !fullMatch.includes("[/INTERNA]") && !processedMatches.has(fullMatch)) {
+            processedMatches.add(fullMatch);
             internalMessages.push(internalContent);
-            // Remover o marcador [INTERNA] e conteúdo da resposta
-            cleanedResponse = cleanedResponse.replace(match[0], "").trim();
+            cleanedResponse = cleanedResponse.replace(fullMatch, "").trim();
           }
         }
 
-        // Limpar espaços em branco extras e quebras de linha duplas
-        cleanedResponse = cleanedResponse.replace(/\n\s*\n\s*\n/g, "\n\n").trim();
+        // Limpeza final: remover qualquer ocorrência restante de [INTERNA] ou [/INTERNA]
+        cleanedResponse = cleanedResponse
+          .replace(/\[INTERNA\][^\[]*?/g, "") // Remove qualquer [INTERNA] restante
+          .replace(/\[\/INTERNA\]/g, "") // Remove qualquer [/INTERNA] solto
+          .replace(/\n\s*\n\s*\n/g, "\n\n") // Limpa quebras de linha múltiplas
+          .trim();
 
-        // Enviar mensagens internas
-        for (const internalContent of internalMessages) {
-          try {
-            const messageData: MessageData = {
-              id: `${ticket.id}-${Date.now()}-${Math.random()}`,
-              body: internalContent,
-              ticketId: ticket.id,
-              contactId: ticket.contactId,
-              fromMe: true,
-              read: true,
-              isInternal: true,
-              mediaType: "conversation"
-            };
-            await CreateMessageService({ messageData, companyId: ticket.companyId });
-            logger.info(`Mensagem interna enviada: ${internalContent.substring(0, 50)}...`);
-          } catch (err: any) {
-            logger.error(`Erro ao enviar mensagem interna: ${err.message}`);
+        // Enviar mensagens internas (apenas uma vez cada)
+        const uniqueInternalMessages = [...new Set(internalMessages)]; // Garantir unicidade
+        for (const internalContent of uniqueInternalMessages) {
+          if (internalContent.trim()) {
+            try {
+              const messageData: MessageData = {
+                id: `${ticket.id}-${Date.now()}-${Math.random()}`,
+                body: internalContent.trim(),
+                ticketId: ticket.id,
+                contactId: ticket.contactId,
+                fromMe: true,
+                read: true,
+                isInternal: true,
+                mediaType: "conversation"
+              };
+              await CreateMessageService({ messageData, companyId: ticket.companyId });
+              logger.info(`✅ Mensagem interna enviada: ${internalContent.substring(0, 50)}...`);
+            } catch (err: any) {
+              logger.error(`❌ Erro ao enviar mensagem interna: ${err.message}`);
+            }
           }
+        }
+        
+        // Log para debug
+        if (internalMessages.length > 0) {
+          logger.info(`📝 Processadas ${uniqueInternalMessages.length} mensagem(ns) interna(s). Resposta limpa: ${cleanedResponse.substring(0, 100)}...`);
         }
       }
 
@@ -428,6 +448,15 @@ export const handleGemini = async (
 
         cleanedResponse = cleanedResponse
           .replace("Ação: Transferir para o setor de atendimento", "")
+          .trim();
+      }
+
+      // Validação final: garantir que nenhum marcador [INTERNA] seja enviado ao cliente
+      if (cleanedResponse.includes("[INTERNA]") || cleanedResponse.includes("[/INTERNA]")) {
+        logger.error(`⚠️ ATENÇÃO: Marcadores [INTERNA] ainda presentes na resposta! Removendo...`);
+        cleanedResponse = cleanedResponse
+          .replace(/\[INTERNA\][^\[]*?/g, "")
+          .replace(/\[\/INTERNA\]/g, "")
           .trim();
       }
 

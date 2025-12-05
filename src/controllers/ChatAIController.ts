@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { analyzeChatContext, summarizeUnreadAudios, improveMessage } from "../services/AiServices/ChatAIService";
+import transcribeAudio from "../services/AiServices/TranscribeAudioService";
 import AppError from "../errors/AppError";
 
 export const analyze = async (
@@ -120,6 +121,44 @@ export const improve = async (
     return res.status(500).json({
       error: "ERR_CHAT_AI_IMPROVE",
       message: err.message || "Erro ao melhorar mensagem com IA"
+    });
+  }
+};
+
+export const transcribe = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  try {
+    const { companyId } = req.user;
+    const { messageId } = req.params;
+
+    if (!messageId) {
+      return res.status(400).json({ error: "messageId é obrigatório" });
+    }
+
+    const result = await transcribeAudio({
+      messageId,
+      companyId
+    });
+
+    return res.status(200).json(result);
+  } catch (err: any) {
+    console.error("Erro ao transcrever áudio:", err);
+    
+    if (err.message?.includes("GEMINI_KEY") || err.message?.includes("Chave da API")) {
+      return res.status(400).json({ error: "GEMINI_KEY_MISSING" });
+    }
+    
+    if (err instanceof AppError) {
+      return res.status(err.statusCode || 500).json({
+        error: err.message || "Erro ao transcrever áudio"
+      });
+    }
+    
+    return res.status(500).json({
+      error: "ERR_CHAT_AI_TRANSCRIBE",
+      message: err.message || "Erro ao transcrever áudio com IA"
     });
   }
 };

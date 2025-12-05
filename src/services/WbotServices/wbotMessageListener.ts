@@ -923,58 +923,78 @@ const handleOpenAi = async (
     let response = chat.data.choices[0].message?.content;
 
     // Detectar e processar mensagens internas
-    // Primeiro, procurar por mensagens internas com fechamento [/INTERNA]
     const internalMessages: string[] = [];
     let cleanedResponse = response || "";
 
     if (prompt.canSendInternalMessages) {
-      // Regex para capturar [INTERNA]...[/INTERNA]
-      const closedInternalRegex = /\[INTERNA\](.*?)\[\/INTERNA\]/gs;
-      let match;
+      // Regex unificado que captura [INTERNA]...[/INTERNA] de forma não-gulosa
+      // Usa uma única passagem para evitar duplicação
+      const internalMessageRegex = /\[INTERNA\](.*?)\[\/INTERNA\]/gs;
+      const processedMatches = new Set<string>(); // Para evitar duplicação
       
-      // Processar todas as mensagens internas com fechamento
-      while ((match = closedInternalRegex.exec(response || "")) !== null) {
+      let match;
+      // Processar todas as mensagens internas com fechamento explícito
+      while ((match = internalMessageRegex.exec(response || "")) !== null) {
+        const fullMatch = match[0]; // [INTERNA]...[/INTERNA]
         const internalContent = match[1].trim();
-        if (internalContent) {
+        
+        // Evitar processar a mesma mensagem duas vezes
+        if (internalContent && !processedMatches.has(fullMatch)) {
+          processedMatches.add(fullMatch);
           internalMessages.push(internalContent);
-          // Remover o marcador completo [INTERNA]...[/INTERNA] da resposta
-          cleanedResponse = cleanedResponse.replace(match[0], "").trim();
+          // Remover o marcador completo da resposta
+          cleanedResponse = cleanedResponse.replace(fullMatch, "").trim();
         }
       }
 
-      // Depois, procurar por mensagens internas sem fechamento (até próximo [INTERNA] ou final)
-      const openInternalRegex = /\[INTERNA\]([^\[]*?)(?=\[INTERNA\]|$)/gs;
+      // Limpar qualquer [INTERNA] restante sem fechamento (caso a IA tenha esquecido de fechar)
+      // Isso garante que nenhum marcador [INTERNA] seja enviado ao cliente
+      const openInternalRegex = /\[INTERNA\][^\[]*?(?=\[INTERNA\]|$)/gs;
       while ((match = openInternalRegex.exec(cleanedResponse)) !== null) {
-        const internalContent = match[1].trim();
-        // Só adicionar se não contiver [/INTERNA] (já processado acima)
-        if (internalContent && !internalContent.includes("[/INTERNA]")) {
+        const fullMatch = match[0];
+        const internalContent = match[0].replace(/\[INTERNA\]/g, "").trim();
+        
+        // Só processar se não foi já processado e não contém [/INTERNA]
+        if (internalContent && !fullMatch.includes("[/INTERNA]") && !processedMatches.has(fullMatch)) {
+          processedMatches.add(fullMatch);
           internalMessages.push(internalContent);
-          // Remover o marcador [INTERNA] e conteúdo da resposta
-          cleanedResponse = cleanedResponse.replace(match[0], "").trim();
+          cleanedResponse = cleanedResponse.replace(fullMatch, "").trim();
         }
       }
 
-      // Limpar espaços em branco extras e quebras de linha duplas
-      cleanedResponse = cleanedResponse.replace(/\n\s*\n\s*\n/g, "\n\n").trim();
+      // Limpeza final: remover qualquer ocorrência restante de [INTERNA] ou [/INTERNA]
+      cleanedResponse = cleanedResponse
+        .replace(/\[INTERNA\][^\[]*?/g, "") // Remove qualquer [INTERNA] restante
+        .replace(/\[\/INTERNA\]/g, "") // Remove qualquer [/INTERNA] solto
+        .replace(/\n\s*\n\s*\n/g, "\n\n") // Limpa quebras de linha múltiplas
+        .trim();
 
-      // Enviar mensagens internas
-      for (const internalContent of internalMessages) {
-        try {
-          const messageData: MessageData = {
-            id: `${ticket.id}-${Date.now()}-${Math.random()}`,
-            body: internalContent,
-            ticketId: ticket.id,
-            contactId: ticket.contactId,
-            fromMe: true,
-            read: true,
-            isInternal: true,
-            mediaType: "conversation"
-          };
-          await CreateMessageService({ messageData, companyId: ticket.companyId });
-          logger.info(`Mensagem interna enviada: ${internalContent.substring(0, 50)}...`);
-        } catch (err: any) {
-          logger.error(`Erro ao enviar mensagem interna: ${err.message}`);
+      // Enviar mensagens internas (apenas uma vez cada)
+      const uniqueInternalMessages = [...new Set(internalMessages)]; // Garantir unicidade
+      for (const internalContent of uniqueInternalMessages) {
+        if (internalContent.trim()) {
+          try {
+            const messageData: MessageData = {
+              id: `${ticket.id}-${Date.now()}-${Math.random()}`,
+              body: internalContent.trim(),
+              ticketId: ticket.id,
+              contactId: ticket.contactId,
+              fromMe: true,
+              read: true,
+              isInternal: true,
+              mediaType: "conversation"
+            };
+            await CreateMessageService({ messageData, companyId: ticket.companyId });
+            logger.info(`✅ Mensagem interna enviada: ${internalContent.substring(0, 50)}...`);
+          } catch (err: any) {
+            logger.error(`❌ Erro ao enviar mensagem interna: ${err.message}`);
+          }
         }
+      }
+      
+      // Log para debug
+      if (internalMessages.length > 0) {
+        logger.info(`📝 Processadas ${uniqueInternalMessages.length} mensagem(ns) interna(s). Resposta limpa: ${cleanedResponse.substring(0, 100)}...`);
       }
     }
 
@@ -1025,6 +1045,15 @@ const handleOpenAi = async (
         .trim();
     }
 
+    // Validação final: garantir que nenhum marcador [INTERNA] seja enviado ao cliente
+    if (cleanedResponse.includes("[INTERNA]") || cleanedResponse.includes("[/INTERNA]")) {
+      logger.error(`⚠️ ATENÇÃO: Marcadores [INTERNA] ainda presentes na resposta! Removendo...`);
+      cleanedResponse = cleanedResponse
+        .replace(/\[INTERNA\][^\[]*?/g, "")
+        .replace(/\[\/INTERNA\]/g, "")
+        .trim();
+    }
+
     // Enviar resposta (sem mensagens internas)
     // Se a resposta limpa estiver vazia mas havia mensagens internas, enviar mensagem padrão
     if (!cleanedResponse.trim() && internalMessages.length > 0) {
@@ -1033,10 +1062,10 @@ const handleOpenAi = async (
     }
 
     if (cleanedResponse.trim()) {
-      const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
+    const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
         text: cleanedResponse
-      });
-      await verifyMessage(sentMessage!, ticket, contact);
+    });
+    await verifyMessage(sentMessage!, ticket, contact);
     }
 
   } else if (msg.message?.audioMessage) {
@@ -1070,34 +1099,68 @@ const handleOpenAi = async (
 
     // Aplicar mesma lógica de mensagens internas e transferência para áudio
     let cleanedAudioResponse = response || "";
+    const audioInternalMessages: string[] = [];
     
     if (prompt.canSendInternalMessages && response) {
-      const internalMessageRegex = /\[INTERNA\](.*?)(?=\[INTERNA\]|$)/gs;
-      const internalMessages: string[] = [];
+      // Regex unificado que captura [INTERNA]...[/INTERNA] de forma não-gulosa
+      const internalMessageRegex = /\[INTERNA\](.*?)\[\/INTERNA\]/gs;
+      const processedMatches = new Set<string>(); // Para evitar duplicação
+      
       let match;
+      // Processar todas as mensagens internas com fechamento explícito
       while ((match = internalMessageRegex.exec(response)) !== null) {
+        const fullMatch = match[0]; // [INTERNA]...[/INTERNA]
         const internalContent = match[1].trim();
-        if (internalContent) {
-          internalMessages.push(internalContent);
-          cleanedAudioResponse = cleanedAudioResponse.replace(match[0], "").trim();
+        
+        // Evitar processar a mesma mensagem duas vezes
+        if (internalContent && !processedMatches.has(fullMatch)) {
+          processedMatches.add(fullMatch);
+          audioInternalMessages.push(internalContent);
+          // Remover o marcador completo da resposta
+          cleanedAudioResponse = cleanedAudioResponse.replace(fullMatch, "").trim();
         }
       }
 
-      for (const internalContent of internalMessages) {
-        try {
-          const messageData: MessageData = {
-            id: `${ticket.id}-${Date.now()}-${Math.random()}`,
-            body: internalContent,
-            ticketId: ticket.id,
-            contactId: ticket.contactId,
-            fromMe: true,
-            read: true,
-            isInternal: true,
-            mediaType: "conversation"
-          };
-          await CreateMessageService({ messageData, companyId: ticket.companyId });
-        } catch (err: any) {
-          logger.error(`Erro ao enviar mensagem interna: ${err.message}`);
+      // Limpar qualquer [INTERNA] restante sem fechamento
+      const openInternalRegex = /\[INTERNA\][^\[]*?(?=\[INTERNA\]|$)/gs;
+      while ((match = openInternalRegex.exec(cleanedAudioResponse)) !== null) {
+        const fullMatch = match[0];
+        const internalContent = match[0].replace(/\[INTERNA\]/g, "").trim();
+        
+        if (internalContent && !fullMatch.includes("[/INTERNA]") && !processedMatches.has(fullMatch)) {
+          processedMatches.add(fullMatch);
+          audioInternalMessages.push(internalContent);
+          cleanedAudioResponse = cleanedAudioResponse.replace(fullMatch, "").trim();
+        }
+      }
+
+      // Limpeza final
+      cleanedAudioResponse = cleanedAudioResponse
+        .replace(/\[INTERNA\][^\[]*?/g, "")
+        .replace(/\[\/INTERNA\]/g, "")
+        .replace(/\n\s*\n\s*\n/g, "\n\n")
+        .trim();
+
+      // Enviar mensagens internas (apenas uma vez cada)
+      const uniqueAudioInternalMessages = [...new Set(audioInternalMessages)];
+      for (const internalContent of uniqueAudioInternalMessages) {
+        if (internalContent.trim()) {
+          try {
+            const messageData: MessageData = {
+              id: `${ticket.id}-${Date.now()}-${Math.random()}`,
+              body: internalContent.trim(),
+              ticketId: ticket.id,
+              contactId: ticket.contactId,
+              fromMe: true,
+              read: true,
+              isInternal: true,
+              mediaType: "conversation"
+            };
+            await CreateMessageService({ messageData, companyId: ticket.companyId });
+            logger.info(`✅ Mensagem interna (áudio) enviada: ${internalContent.substring(0, 50)}...`);
+          } catch (err: any) {
+            logger.error(`❌ Erro ao enviar mensagem interna (áudio): ${err.message}`);
+          }
         }
       }
     }
@@ -1146,6 +1209,15 @@ const handleOpenAi = async (
         .trim();
     }
     
+    // Validação final para áudio: garantir que nenhum marcador [INTERNA] seja enviado ao cliente
+    if (cleanedAudioResponse.includes("[INTERNA]") || cleanedAudioResponse.includes("[/INTERNA]")) {
+      logger.error(`⚠️ ATENÇÃO: Marcadores [INTERNA] ainda presentes na resposta de áudio! Removendo...`);
+      cleanedAudioResponse = cleanedAudioResponse
+        .replace(/\[INTERNA\][^\[]*?/g, "")
+        .replace(/\[\/INTERNA\]/g, "")
+        .trim();
+    }
+
     // Enviar resposta de áudio (sem mensagens internas)
     if (cleanedAudioResponse.trim()) {
       const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
@@ -1467,13 +1539,13 @@ const verifyQueue = async (
         if (prompt.provider === "gemini") {
           await handleGeminiInListener(msg, wbot, ticket, contact, mediaSent);
         } else {
-          await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+      await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
         }
 
-        await ticket.update({
-          useIntegration: true,
-          promptId: queues[0]?.promptId
-        });
+      await ticket.update({
+        useIntegration: true,
+        promptId: queues[0]?.promptId
+      });
       } catch (err) {
         // Se não encontrar prompt, tentar OpenAI por compatibilidade
         await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
@@ -1620,13 +1692,13 @@ const verifyQueue = async (
           if (prompt.provider === "gemini") {
             await handleGeminiInListener(msg, wbot, ticket, contact, mediaSent);
           } else {
-            await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+        await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
           }
 
-          await ticket.update({
-            useIntegration: true,
-            promptId: choosenQueue?.promptId
-          });
+        await ticket.update({
+          useIntegration: true,
+          promptId: choosenQueue?.promptId
+        });
         } catch (err) {
           // Se não encontrar prompt, tentar OpenAI por compatibilidade
           await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
@@ -2983,28 +3055,28 @@ const handleMessage = async (
           geminiSettings,
         );
       } else {
-        let openAiSettings = {
-          name,
-          prompt,
-          voice,
-          voiceKey,
-          voiceRegion,
-          maxTokens: parseInt(maxTokens),
-          temperature: parseInt(temperature),
-          apiKey,
-          queueId: parseInt(queueId),
-          maxMessages: parseInt(maxMessages)
-        };
+      let openAiSettings = {
+        name,
+        prompt,
+        voice,
+        voiceKey,
+        voiceRegion,
+        maxTokens: parseInt(maxTokens),
+        temperature: parseInt(temperature),
+        apiKey,
+        queueId: parseInt(queueId),
+        maxMessages: parseInt(maxMessages)
+      };
 
-        await handleOpenAi(
-          msg,
-          wbot,
-          ticket,
-          contact,
-          mediaSent,
-          ticketTraking,
-          openAiSettings,
-        );
+      await handleOpenAi(
+        msg,
+        wbot,
+        ticket,
+        contact,
+        mediaSent,
+        ticketTraking,
+        openAiSettings,
+      );
       }
 
       return;
@@ -3028,7 +3100,7 @@ const handleMessage = async (
         if (prompt.provider === "gemini") {
           await handleGeminiInListener(msg, wbot, ticket, contact, mediaSent);
         } else {
-          await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+      await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
         }
       } catch (err) {
         // Se não encontrar prompt, tentar OpenAI por compatibilidade
@@ -3083,7 +3155,7 @@ const handleMessage = async (
         if (prompt.provider === "gemini") {
           await handleGeminiInListener(msg, wbot, ticket, contact, mediaSent);
         } else {
-          await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+      await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
         }
       } catch (err) {
         // Se não encontrar prompt, tentar OpenAI por compatibilidade

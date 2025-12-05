@@ -18,6 +18,7 @@ routes.post("/ai/chat", isAuth, validateGeminiApiKey, AiSummaryController.chat);
 routes.post("/chat-ai/analyze", isAuth, validateGeminiApiKey, ChatAIController.analyze);
 routes.post("/chat-ai/audio-summary", isAuth, validateGeminiApiKey, ChatAIController.audioSummary);
 routes.post("/chat-ai/improve", isAuth, validateGeminiApiKey, ChatAIController.improve);
+routes.post("/chat-ai/transcribe/:messageId", isAuth, validateGeminiApiKey, ChatAIController.transcribe);
 
 // Rotas para IA em campanhas
 routes.post("/ai/campaign/initial", isAuth, validateGeminiApiKey, CampaignAIController.generateCampaignInitialMessage);

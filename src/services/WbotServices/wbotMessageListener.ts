@@ -65,6 +65,10 @@ import { handleGemini } from "../IntegrationsServices/GeminiService";
 import ShowPromptService from "../PromptServices/ShowPromptService";
 import generateContextSummary from "../AiServices/GenerateContextSummaryService";
 import findOnlineAgent from "../TicketServices/FindOnlineAgentService";
+import GetTicketWbot from "../../helpers/GetTicketWbot";
+import Company from "../../models/Company";
+import ListSettingsServiceOne from "../SettingServices/ListSettingsServiceOne";
+import ShowUserService from "../UserServices/ShowUserService";
 
 import { IConnections, INodes } from "../WebhookService/DispatchWebHookService";
 import { ActionsWebhookService } from "../WebhookService/ActionsWebhookService";
@@ -733,6 +737,83 @@ const handleGeminiInListener = async (
   );
 };
 
+/**
+ * Envia mensagem automática de transferência para o cliente
+ */
+const sendTransferMessage = async (
+  ticket: Ticket,
+  contact: Contact,
+  queueId: number | null,
+  userId: number | null
+): Promise<void> => {
+  try {
+    // Verificar se a configuração de mensagem automática está habilitada
+    const settingsTransfTicket = await ListSettingsServiceOne({
+      companyId: ticket.companyId,
+      key: "sendMsgTransfTicket"
+    });
+
+    if (settingsTransfTicket?.value !== "enabled") {
+      logger.info(`Mensagem automática de transferência desabilitada para empresa ${ticket.companyId}`);
+      return;
+    }
+
+    const company = await Company.findByPk(ticket.companyId);
+    const language = company?.language || "pt";
+    const wbot = await GetTicketWbot(ticket);
+
+    let translatedMessage: string;
+
+    if (queueId && userId) {
+      // Transferência para fila E atendente
+      const queue = await Queue.findByPk(queueId);
+      const user = await User.findByPk(userId);
+
+      const messages = {
+        pt: `*Mensagem automática*:\nVocê foi transferido para o departamento *${queue?.name || "Atendimento"}* e contará com a presença de *${user?.name || "um atendente"}*\naguarde, já vamos te atender!`,
+        en: `*Automatic message*:\nYou have been transferred to the *${queue?.name || "Support"}* department and will be assisted by *${user?.name || "an agent"}*\nplease wait, we'll assist you soon!`,
+        es: `*Mensaje automático*:\nHas sido transferido al departamento *${queue?.name || "Atención"}* y serás atendido por *${user?.name || "un agente"}*\npor favor espera, ¡te atenderemos pronto!`
+      };
+      translatedMessage = messages[language as keyof typeof messages] || messages.pt;
+    } else if (userId) {
+      // Transferência apenas para atendente
+      const user = await User.findByPk(userId);
+
+      const messages = {
+        pt: `*Mensagem automática*:\nFoi transferido para o atendente *${user?.name || "Atendente"}*\naguarde, já vamos te atender!`,
+        en: `*Automatic message*:\nYou have been transferred to agent *${user?.name || "Agent"}*\nplease wait, we'll assist you soon!`,
+        es: `*Mensaje automático*:\nHas sido transferido al agente *${user?.name || "Agente"}*\npor favor espera, ¡te atenderemos pronto!`
+      };
+      translatedMessage = messages[language as keyof typeof messages] || messages.pt;
+    } else if (queueId) {
+      // Transferência apenas para fila
+      const queue = await Queue.findByPk(queueId);
+
+      const messages = {
+        pt: `*Mensagem automática*:\nVocê foi transferido para o departamento *${queue?.name || "Atendimento"}*\naguarde, já vamos te atender!`,
+        en: `*Automatic message*:\nYou have been transferred to the *${queue?.name || "Support"}* department\nplease wait, we'll assist you soon!`,
+        es: `*Mensaje automático*:\nHas sido transferido al departamento *${queue?.name || "Atención"}*\npor favor espera, ¡te atenderemos pronto!`
+      };
+      translatedMessage = messages[language as keyof typeof messages] || messages.pt;
+    } else {
+      // Sem informações suficientes
+      return;
+    }
+
+    const transferMessage = await wbot.sendMessage(
+      `${contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`,
+      {
+        text: translatedMessage
+      }
+    );
+    await verifyMessage(transferMessage!, ticket, contact);
+    logger.info(`Mensagem automática de transferência enviada para ticket ${ticket.id}`);
+  } catch (error: any) {
+    logger.error(`Erro ao enviar mensagem automática de transferência: ${error.message}`);
+    // Não lançar erro para não interromper o fluxo de transferência
+  }
+};
+
 const handleOpenAi = async (
   msg: proto.IWebMessageInfo,
   wbot: Session,
@@ -918,19 +999,31 @@ const handleOpenAi = async (
               companyId: ticket.companyId
             });
             logger.info(`Ticket ${ticket.id} transferido para atendente online ${onlineAgent.name} (ID: ${onlineAgent.id})`);
+            
+            // Enviar mensagem automática de transferência
+            await sendTransferMessage(ticket, contact, targetQueueId, onlineAgent.id);
           } else {
             // Se não encontrar atendente online, transferir apenas para fila
             await transferQueue(targetQueueId, ticket, contact);
             logger.info(`Nenhum atendente online encontrado. Ticket ${ticket.id} transferido para fila ${targetQueueId}`);
+            
+            // Enviar mensagem automática de transferência
+            await sendTransferMessage(ticket, contact, targetQueueId, null);
           }
         } catch (err: any) {
           logger.error(`Erro ao processar transferência com resumo: ${err.message}`);
           // Fallback: transferir normalmente
           await transferQueue(prompt.queueId, ticket, contact);
+          
+          // Enviar mensagem automática de transferência
+          await sendTransferMessage(ticket, contact, prompt.queueId, null);
         }
       } else {
         // Transferência normal (sem resumo)
         await transferQueue(prompt.queueId, ticket, contact);
+        
+        // Enviar mensagem automática de transferência
+        await sendTransferMessage(ticket, contact, prompt.queueId, null);
       }
 
       cleanedResponse = cleanedResponse

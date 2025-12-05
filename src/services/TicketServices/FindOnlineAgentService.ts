@@ -1,7 +1,7 @@
 import { Op } from "sequelize";
 import User from "../../models/User";
 import Ticket from "../../models/Ticket";
-import Queue from "../../models/Queue";
+import UserQueue from "../../models/UserQueue";
 import { logger } from "../../utils/logger";
 
 interface FindOnlineAgentParams {
@@ -11,6 +11,7 @@ interface FindOnlineAgentParams {
 
 /**
  * Busca um atendente online disponível para transferência
+ * Se queueId fornecido, busca apenas atendentes dessa fila
  * Considera carga de trabalho (tickets abertos) para balanceamento
  */
 export const findOnlineAgent = async ({
@@ -18,39 +19,48 @@ export const findOnlineAgent = async ({
   queueId
 }: FindOnlineAgentParams): Promise<User | null> => {
   try {
-    // Construir condições de busca
-    const whereConditions: any = {
-      companyId,
-      online: true,
-      profile: "user" // Apenas usuários, não admins
-    };
+    logger.info(`Buscando atendente online para empresa ${companyId}${queueId ? ` na fila ${queueId}` : ""}`);
 
-    // Se queueId fornecido, buscar apenas usuários dessa fila
-    let users: User[];
+    let users: User[] = [];
+
     if (queueId) {
-      users = await User.findAll({
-        where: whereConditions,
-        include: [
-          {
-            model: Queue,
-            as: "queues",
-            where: { id: queueId },
-            required: true
-          }
-        ]
+      // Buscar usuários que pertencem à fila específica e estão online
+      const userQueues = await UserQueue.findAll({
+        where: { queueId },
+        attributes: ["userId"]
       });
+
+      const userIds = userQueues.map(uq => uq.userId);
+
+      if (userIds.length === 0) {
+        logger.info(`Nenhum usuário encontrado na fila ${queueId}`);
+        return null;
+      }
+
+      // Buscar apenas os usuários que estão na fila e estão online
+      users = await User.findAll({
+        where: {
+          id: { [Op.in]: userIds },
+          companyId,
+          online: true,
+          profile: "user" // Apenas usuários, não admins
+        },
+        attributes: ["id", "name", "email", "online", "profile", "companyId"]
+      });
+
+      logger.info(`Encontrados ${users.length} atendente(s) online na fila ${queueId}`);
     } else {
       // Buscar todos os usuários online da empresa
       users = await User.findAll({
-        where: whereConditions,
-        include: [
-          {
-            model: Queue,
-            as: "queues",
-            required: false
-          }
-        ]
+        where: {
+          companyId,
+          online: true,
+          profile: "user" // Apenas usuários, não admins
+        },
+        attributes: ["id", "name", "email", "online", "profile", "companyId"]
       });
+
+      logger.info(`Encontrados ${users.length} atendente(s) online na empresa ${companyId}`);
     }
 
     if (users.length === 0) {
@@ -81,12 +91,13 @@ export const findOnlineAgent = async ({
 
     const selectedAgent = usersWithWorkload[0].user;
     logger.info(
-      `Atendente online encontrado: ${selectedAgent.name} (ID: ${selectedAgent.id}) com ${usersWithWorkload[0].workload} tickets abertos`
+      `✅ Atendente online selecionado: ${selectedAgent.name} (ID: ${selectedAgent.id}) com ${usersWithWorkload[0].workload} tickets abertos`
     );
 
     return selectedAgent;
   } catch (error: any) {
-    logger.error(`Erro ao buscar atendente online: ${error.message}`);
+    logger.error(`❌ Erro ao buscar atendente online: ${error.message}`);
+    logger.error(error.stack);
     return null;
   }
 };

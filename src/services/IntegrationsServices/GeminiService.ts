@@ -91,7 +91,7 @@ export const handleGemini = async (
 
   const messages = await Message.findAll({
     where: { ticketId: ticket.id },
-    order: [["createdAt", "ASC"]],
+    order: [["createdAt", "DESC"]],
     limit: geminiSettings.maxMessages
   });
 
@@ -116,13 +116,14 @@ export const handleGemini = async (
       parts: [{ text: "Entendido. Vou seguir essas instruções." }]
     });
 
-    // Adicionar histórico de mensagens
+    // Adicionar histórico de mensagens (inverter ordem para ter do mais antigo ao mais recente)
+    const sortedMessages = [...messages].reverse();
     for (
       let i = 0;
-      i < Math.min(geminiSettings.maxMessages, messages.length);
+      i < Math.min(geminiSettings.maxMessages, sortedMessages.length);
       i++
     ) {
-      const message = messages[i];
+      const message = sortedMessages[i];
       if (
         message.mediaType === "conversation" ||
         message.mediaType === "extendedTextMessage"
@@ -188,17 +189,44 @@ export const handleGemini = async (
       
       if (candidates.length === 0) {
         logger.error("Nenhum candidato retornado pelo Gemini");
+        logger.error("Resposta completa da API:", JSON.stringify(data, null, 2));
         return;
       }
 
       const first = candidates[0];
-      const parts = first?.content?.parts || [];
-      let response = parts.map((p: any) => p.text).join("\n");
+      
+      // Verificar finishReason
+      if (first?.finishReason && first.finishReason !== "STOP") {
+        logger.warn(`⚠️ finishReason: ${first.finishReason}`);
+        
+        if (first.finishReason === "SAFETY") {
+          logger.error("Conteúdo bloqueado pelos filtros de segurança");
+          return;
+        }
+        
+        if (first.finishReason === "MAX_TOKENS") {
+          logger.warn("⚠️ MAX_TOKENS atingido, resposta pode estar incompleta");
+          // Continua para tentar extrair o que foi gerado
+        }
+        
+        if (first.finishReason === "RECITATION") {
+          logger.warn("⚠️ RECITATION detectado, resposta pode estar vazia");
+        }
+      }
 
-      if (!response) {
+      const parts = first?.content?.parts || [];
+      let response = parts.map((p: any) => p.text || "").filter((t: string) => t.trim() !== "").join("\n");
+
+      if (!response || response.trim() === "") {
         logger.error("Resposta vazia do Gemini");
+        logger.error("Candidato completo:", JSON.stringify(first, null, 2));
+        logger.error("Parts:", JSON.stringify(parts, null, 2));
+        logger.error("FinishReason:", first?.finishReason);
+        logger.error("Resposta completa da API:", JSON.stringify(data, null, 2));
         return;
       }
+
+      logger.info(`✅ Resposta recebida do Gemini (${response.length} caracteres)`);
 
       // Verificar se precisa transferir para fila
       if (response.includes("Ação: Transferir para o setor de atendimento")) {

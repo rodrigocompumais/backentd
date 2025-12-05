@@ -885,7 +885,13 @@ const handleOpenAi = async (
   
   // Adicionar instruções sobre mensagens internas se habilitado
   if (prompt.canSendInternalMessages) {
-    promptSystem += `\n\nVocê pode fazer anotações internas quando necessário. Para isso, use o formato [INTERNA] seguido do conteúdo da anotação. Exemplo: [INTERNA] Cliente interessado em produto X, aguardando confirmação de estoque.`;
+    promptSystem += `\n\nREGRA CRÍTICA - Anotações Internas:
+- Use SEMPRE o formato [INTERNA]conteúdo[/INTERNA] para anotações internas
+- As anotações internas devem vir ANTES ou DEPOIS da resposta ao cliente, NUNCA no meio
+- SEMPRE forneça uma resposta ao cliente, mesmo que faça anotações internas
+- Exemplo CORRETO: "Entendo seu problema. Vou verificar. [INTERNA]Cliente relatou erro técnico, precisa de suporte especializado[/INTERNA] Em breve retorno com a solução."
+- Exemplo ERRADO: "Entendo [INTERNA]anotação[/INTERNA] seu problema."
+- Se fizer anotação interna, SEMPRE termine com [/INTERNA] antes de continuar a resposta ao cliente`;
   }
 
   let messagesOpenAi: ChatCompletionRequestMessage[] = [];
@@ -918,20 +924,39 @@ const handleOpenAi = async (
     let response = chat.data.choices[0].message?.content;
 
     // Detectar e processar mensagens internas
-    const internalMessageRegex = /\[INTERNA\](.*?)(?=\[INTERNA\]|$)/gs;
+    // Primeiro, procurar por mensagens internas com fechamento [/INTERNA]
     const internalMessages: string[] = [];
     let cleanedResponse = response || "";
 
     if (prompt.canSendInternalMessages) {
+      // Regex para capturar [INTERNA]...[/INTERNA]
+      const closedInternalRegex = /\[INTERNA\](.*?)\[\/INTERNA\]/gs;
       let match;
-      while ((match = internalMessageRegex.exec(response || "")) !== null) {
+      
+      // Processar todas as mensagens internas com fechamento
+      while ((match = closedInternalRegex.exec(response || "")) !== null) {
         const internalContent = match[1].trim();
         if (internalContent) {
           internalMessages.push(internalContent);
-          // Remover da resposta que será enviada ao cliente
+          // Remover o marcador completo [INTERNA]...[/INTERNA] da resposta
           cleanedResponse = cleanedResponse.replace(match[0], "").trim();
         }
       }
+
+      // Depois, procurar por mensagens internas sem fechamento (até próximo [INTERNA] ou final)
+      const openInternalRegex = /\[INTERNA\]([^\[]*?)(?=\[INTERNA\]|$)/gs;
+      while ((match = openInternalRegex.exec(cleanedResponse)) !== null) {
+        const internalContent = match[1].trim();
+        // Só adicionar se não contiver [/INTERNA] (já processado acima)
+        if (internalContent && !internalContent.includes("[/INTERNA]")) {
+          internalMessages.push(internalContent);
+          // Remover o marcador [INTERNA] e conteúdo da resposta
+          cleanedResponse = cleanedResponse.replace(match[0], "").trim();
+        }
+      }
+
+      // Limpar espaços em branco extras e quebras de linha duplas
+      cleanedResponse = cleanedResponse.replace(/\n\s*\n\s*\n/g, "\n\n").trim();
 
       // Enviar mensagens internas
       for (const internalContent of internalMessages) {
@@ -1032,6 +1057,12 @@ const handleOpenAi = async (
     }
 
     // Enviar resposta (sem mensagens internas)
+    // Se a resposta limpa estiver vazia mas havia mensagens internas, enviar mensagem padrão
+    if (!cleanedResponse.trim() && internalMessages.length > 0) {
+      logger.warn(`Resposta limpa vazia após remover mensagens internas. Enviando mensagem padrão.`);
+      cleanedResponse = "Entendi sua solicitação. Estou verificando e em breve retorno com mais informações.";
+    }
+
     if (cleanedResponse.trim()) {
       const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
         text: cleanedResponse

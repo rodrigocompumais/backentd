@@ -53,6 +53,9 @@ class Prompt extends Model<Prompt> {
   @Column
   model: string;
 
+  @Column({ defaultValue: "openai" })
+  provider: string;
+
   @AllowNull
   @ForeignKey(() => Queue)
   @Column

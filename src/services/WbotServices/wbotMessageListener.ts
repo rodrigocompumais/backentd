@@ -42,6 +42,7 @@ import FindOrCreateATicketTrakingService from "../TicketServices/FindOrCreateATi
 import VerifyCurrentSchedule from "../CompanyService/VerifyCurrentSchedule";
 import User from "../../models/User";
 import Setting from "../../models/Setting";
+import Prompt from "../../models/Prompt";
 import { cacheLayer } from "../../libs/cache";
 import { provider } from "./providers";
 import { debounce } from "../../helpers/Debounce";
@@ -60,6 +61,8 @@ import ShowQueueIntegrationService from "../QueueIntegrationServices/ShowQueueIn
 import { FlowBuilderModel } from "../../models/FlowBuilder";
 import { FlowCampaignModel } from "../../models/FlowCampaign";
 import { IOpenAi } from "../../@types/openai";
+import { handleGemini } from "../IntegrationsServices/GeminiService";
+import ShowPromptService from "../PromptServices/ShowPromptService";
 
 import { IConnections, INodes } from "../WebhookService/DispatchWebHookService";
 import { ActionsWebhookService } from "../WebhookService/ActionsWebhookService";
@@ -646,7 +649,84 @@ export const keepOnlySpecifiedChars = (str: string) => {
   return str.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚâêîôûÂÊÎÔÛãõÃÕçÇ!?.,;:\s]/g, "");
 };
 
+const handleGeminiInListener = async (
+  msg: proto.IWebMessageInfo,
+  wbot: Session,
+  ticket: Ticket,
+  contact: Contact,
+  mediaSent: Message | undefined,
+  ticketTraking: TicketTraking = null,
+  geminiSettings = null
+): Promise<void> => {
+  // REGRA PARA DESABILITAR O BOT PARA ALGUM CONTATO
+  if (contact.disableBot) {
+    return;
+  }
 
+  const bodyMessage = getBodyMessage(msg);
+
+  if (!bodyMessage) return;
+
+  let prompt = null;
+
+  // Se geminiSettings foi passado (de flowbuilder), usar ele
+  if (geminiSettings) {
+    prompt = geminiSettings;
+  } else {
+    // Buscar prompt do WhatsApp
+    let { prompt: whatsappPrompt } = await ShowWhatsAppService(wbot.id, ticket.companyId);
+    if (whatsappPrompt && whatsappPrompt.provider === "gemini") {
+      prompt = whatsappPrompt;
+    }
+
+    // Se não encontrou no WhatsApp, buscar da fila
+    if (!prompt && !isNil(ticket?.queue?.prompt) && ticket.queue.prompt.provider === "gemini") {
+      prompt = ticket.queue.prompt;
+    }
+
+    // Se não encontrou na fila, buscar do ticket
+    if (!prompt && ticket.promptId) {
+      try {
+        const ticketPrompt = await ShowPromptService({ 
+          promptId: ticket.promptId, 
+          companyId: ticket.companyId 
+        });
+        if (ticketPrompt && ticketPrompt.provider === "gemini") {
+          prompt = ticketPrompt;
+        }
+      } catch (err) {
+        // Prompt não encontrado, continuar
+      }
+    }
+  }
+
+  if (!prompt) return;
+
+  if (msg.messageStubType) return;
+
+  // Converter prompt para formato IGemini
+  const geminiSettingsData = {
+    name: prompt.name,
+    prompt: prompt.prompt,
+    voice: prompt.voice || "texto",
+    voiceKey: prompt.voiceKey || "",
+    voiceRegion: prompt.voiceRegion || "",
+    maxTokens: prompt.maxTokens,
+    temperature: prompt.temperature,
+    queueId: prompt.queueId,
+    maxMessages: prompt.maxMessages
+  };
+
+  await handleGemini(
+    geminiSettingsData,
+    msg,
+    wbot,
+    ticket,
+    contact,
+    mediaSent,
+    ticketTraking
+  );
+};
 
 const handleOpenAi = async (
   msg: proto.IWebMessageInfo,
@@ -876,7 +956,13 @@ export const verifyMediaMessage = async (
     await ticket.update({ status: "pending" });
     await ticket.reload({
       include: [
-        { model: Queue, as: "queue" },
+        { 
+          model: Queue, 
+          as: "queue",
+          include: [
+            { model: Prompt, as: "prompt" }
+          ]
+        },
         { model: User, as: "user" },
         { model: Contact, as: "contact" }
       ]
@@ -941,7 +1027,13 @@ export const verifyMessage = async (
     await ticket.update({ status: "pending" });
     await ticket.reload({
       include: [
-        { model: Queue, as: "queue" },
+        { 
+          model: Queue, 
+          as: "queue",
+          include: [
+            { model: Prompt, as: "prompt" }
+          ]
+        },
         { model: User, as: "user" },
         { model: Contact, as: "contact" }
       ]
@@ -1083,14 +1175,33 @@ const verifyQueue = async (
       });
       // return;
     }
-    //inicia integração openai
+    //inicia integração openai/gemini
     if (!msg.key.fromMe && !ticket.isGroup && !isNil(queues[0]?.promptId)) {
-      await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+      // Buscar prompt para verificar provider
+      try {
+        const prompt = await ShowPromptService({ 
+          promptId: queues[0].promptId, 
+          companyId: ticket.companyId 
+        });
+        
+        if (prompt.provider === "gemini") {
+          await handleGeminiInListener(msg, wbot, ticket, contact, mediaSent);
+        } else {
+          await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+        }
 
-      await ticket.update({
-        useIntegration: true,
-        promptId: queues[0]?.promptId
-      });
+        await ticket.update({
+          useIntegration: true,
+          promptId: queues[0]?.promptId
+        });
+      } catch (err) {
+        // Se não encontrar prompt, tentar OpenAI por compatibilidade
+        await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+        await ticket.update({
+          useIntegration: true,
+          promptId: queues[0]?.promptId
+        });
+      }
       // return;
     }
 
@@ -1213,18 +1324,37 @@ const verifyQueue = async (
         // return;
       }
 
-      //inicia integração openai
+      //inicia integração openai/gemini
       if (
         !msg.key.fromMe &&
         !ticket.isGroup &&
         !isNil(choosenQueue?.promptId)
       ) {
-        await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+        // Buscar prompt para verificar provider
+        try {
+          const prompt = await ShowPromptService({ 
+            promptId: choosenQueue.promptId, 
+            companyId: ticket.companyId 
+          });
+          
+          if (prompt.provider === "gemini") {
+            await handleGeminiInListener(msg, wbot, ticket, contact, mediaSent);
+          } else {
+            await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+          }
 
-        await ticket.update({
-          useIntegration: true,
-          promptId: choosenQueue?.promptId
-        });
+          await ticket.update({
+            useIntegration: true,
+            promptId: choosenQueue?.promptId
+          });
+        } catch (err) {
+          // Se não encontrar prompt, tentar OpenAI por compatibilidade
+          await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+          await ticket.update({
+            useIntegration: true,
+            promptId: choosenQueue?.promptId
+          });
+        }
         // return;
       }
 
@@ -1727,7 +1857,13 @@ const flowbuilderIntegration = async (
     await ticket.update({ status: "pending" });
     await ticket.reload({
       include: [
-        { model: Queue, as: "queue" },
+        { 
+          model: Queue, 
+          as: "queue",
+          include: [
+            { model: Prompt, as: "prompt" }
+          ]
+        },
         { model: User, as: "user" },
         { model: Contact, as: "contact" }
       ]
@@ -2539,36 +2675,62 @@ const handleMessage = async (
         temperature,
         apiKey,
         queueId,
-        maxMessages
-      } = nodeSelected.data.typebotIntegration as IOpenAi;
+        maxMessages,
+        provider
+      } = nodeSelected.data.typebotIntegration as IOpenAi & { provider?: string };
 
-      let openAiSettings = {
-        name,
-        prompt,
-        voice,
-        voiceKey,
-        voiceRegion,
-        maxTokens: parseInt(maxTokens),
-        temperature: parseInt(temperature),
-        apiKey,
-        queueId: parseInt(queueId),
-        maxMessages: parseInt(maxMessages)
-      };
+      // Verificar provider (default: openai para compatibilidade)
+      if (provider === "gemini") {
+        let geminiSettings = {
+          name,
+          prompt,
+          voice: voice || "texto",
+          voiceKey: voiceKey || "",
+          voiceRegion: voiceRegion || "",
+          maxTokens: parseInt(maxTokens),
+          temperature: parseInt(temperature),
+          queueId: parseInt(queueId),
+          maxMessages: parseInt(maxMessages)
+        };
 
-      await handleOpenAi(
-        msg,
-        wbot,
-        ticket,
-        contact,
-        mediaSent,
-        ticketTraking,
-        openAiSettings,
-      );
+        await handleGeminiInListener(
+          msg,
+          wbot,
+          ticket,
+          contact,
+          mediaSent,
+          ticketTraking,
+          geminiSettings,
+        );
+      } else {
+        let openAiSettings = {
+          name,
+          prompt,
+          voice,
+          voiceKey,
+          voiceRegion,
+          maxTokens: parseInt(maxTokens),
+          temperature: parseInt(temperature),
+          apiKey,
+          queueId: parseInt(queueId),
+          maxMessages: parseInt(maxMessages)
+        };
+
+        await handleOpenAi(
+          msg,
+          wbot,
+          ticket,
+          contact,
+          mediaSent,
+          ticketTraking,
+          openAiSettings,
+        );
+      }
 
       return;
     }
 
-    //openai na conexao
+    //openai/gemini na conexao
     if (
       !ticket.queue &&
       !isGroup &&
@@ -2576,7 +2738,22 @@ const handleMessage = async (
       !ticket.userId &&
       !isNil(whatsapp.promptId)
     ) {
-      await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+      // Buscar prompt para verificar provider
+      try {
+        const prompt = await ShowPromptService({ 
+          promptId: whatsapp.promptId, 
+          companyId: ticket.companyId 
+        });
+        
+        if (prompt.provider === "gemini") {
+          await handleGeminiInListener(msg, wbot, ticket, contact, mediaSent);
+        } else {
+          await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+        }
+      } catch (err) {
+        // Se não encontrar prompt, tentar OpenAI por compatibilidade
+        await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+      }
     }
 
     //integraçao na conexao
@@ -2607,7 +2784,7 @@ const handleMessage = async (
       return;
     }
 
-    //openai na fila
+    //openai/gemini na fila
     if (
       !isGroup &&
       !msg.key.fromMe &&
@@ -2616,7 +2793,22 @@ const handleMessage = async (
       ticket.useIntegration &&
       ticket.queueId
     ) {
-      await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+      // Buscar prompt para verificar provider
+      try {
+        const prompt = await ShowPromptService({ 
+          promptId: ticket.promptId, 
+          companyId: ticket.companyId 
+        });
+        
+        if (prompt.provider === "gemini") {
+          await handleGeminiInListener(msg, wbot, ticket, contact, mediaSent);
+        } else {
+          await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+        }
+      } catch (err) {
+        // Se não encontrar prompt, tentar OpenAI por compatibilidade
+        await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+      }
     }
 
     if (

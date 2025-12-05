@@ -89,31 +89,30 @@ export const handleGemini = async (
     `company${ticket.companyId}`
   );
 
+  // Limitar histórico para não consumir todos os tokens
+  // Pegar apenas as últimas mensagens relevantes (máximo 20 para não consumir muitos tokens)
+  const maxHistoryMessages = Math.min(geminiSettings.maxMessages, 20);
+  
   const messages = await Message.findAll({
     where: { ticketId: ticket.id },
     order: [["createdAt", "DESC"]],
-    limit: geminiSettings.maxMessages
+    limit: maxHistoryMessages
   });
 
-  const promptSystem = `Nas respostas utilize o nome ${sanitizeName(
+  // Prompt do sistema otimizado e mais curto
+  const promptSystem = `Você é um assistente de atendimento. Use o nome ${sanitizeName(
     contact.name || "Amigo(a)"
-  )} para identificar o cliente.\nSua resposta deve usar no máximo ${
-    geminiSettings.maxTokens
-  } tokens e cuide para não truncar o final.\nSempre que possível, mencione o nome dele para ser mais personalizado o atendimento e mais educado. Quando a resposta requer uma transferência para o setor de atendimento, comece sua resposta com 'Ação: Transferir para o setor de atendimento'.\n
-                ${geminiSettings.prompt}\n`;
+  )} para personalizar.\n${geminiSettings.prompt}\n\nIMPORTANTE: Seja direto e objetivo. Para transferir, comece com 'Ação: Transferir para o setor de atendimento'.`;
 
   if (msg.message?.conversation || msg.message?.extendedTextMessage?.text) {
     // Construir histórico de conversa no formato Gemini
     const contents: any[] = [];
 
-    // Adicionar prompt do sistema como primeira mensagem
+    // Adicionar prompt do sistema de forma mais eficiente
+    // Não adicionar resposta do modelo para economizar tokens
     contents.push({
       role: "user",
       parts: [{ text: promptSystem }]
-    });
-    contents.push({
-      role: "model",
-      parts: [{ text: "Entendido. Vou seguir essas instruções." }]
     });
 
     // Adicionar histórico de mensagens (inverter ordem para ter do mais antigo ao mais recente)
@@ -159,7 +158,9 @@ export const handleGemini = async (
             temperature: geminiSettings.temperature,
             topK: 40,
             topP: 0.95,
-            maxOutputTokens: geminiSettings.maxTokens
+            // Garantir que há tokens suficientes para a resposta
+            // Se maxTokens for muito baixo (menor que 500), usar no mínimo 1024 para garantir resposta
+            maxOutputTokens: Math.max(geminiSettings.maxTokens, 1024)
           },
           safetySettings: [
             {

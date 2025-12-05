@@ -16,6 +16,7 @@ import UpdateTicketService from "../services/TicketServices/UpdateTicketService"
 import DeleteWhatsAppMessage from "../services/WbotServices/DeleteWhatsAppMessage";
 import SendWhatsAppMedia from "../services/WbotServices/SendWhatsAppMedia";
 import SendWhatsAppMessage from "../services/WbotServices/SendWhatsAppMessage";
+import CreateMessageService from "../services/MessageServices/CreateMessageService";
 import CheckContactNumber from "../services/WbotServices/CheckNumber";
 import CheckIsValidContact from "../services/WbotServices/CheckIsValidContact";
 import GetProfilePicUrl from "../services/WbotServices/GetProfilePicUrl";
@@ -62,7 +63,7 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
 
 export const store = async (req: Request, res: Response): Promise<Response> => {
   const { ticketId } = req.params;
-  const { body, quotedMsg }: MessageData = req.body;
+  const { body, quotedMsg, isInternal }: MessageData & { isInternal?: boolean } = req.body;
   const medias = req.files as Express.Multer.File[];
   const { companyId } = req.user;
 
@@ -70,6 +71,26 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
 
   SetTicketMessagesAsRead(ticket);
 
+  // Se for mensagem interna, apenas salvar no banco sem enviar via WhatsApp
+  if (isInternal) {
+    // Criar mensagem interna diretamente no banco
+    const messageData = {
+      id: `${ticketId}-${Date.now()}`,
+      body: body || "",
+      ticketId: parseInt(ticketId),
+      contactId: ticket.contactId,
+      companyId: companyId,
+      fromMe: true,
+      read: true,
+      isInternal: true,
+      mediaType: "conversation"
+    };
+
+    await CreateMessageService({ messageData, companyId });
+    return res.send();
+  }
+
+  // Mensagem normal - enviar via WhatsApp
   if (medias) {
     await Promise.all(
       medias.map(async (media: Express.Multer.File, index) => {

@@ -14,6 +14,7 @@ export interface MessageData {
   mediaUrl?: string;
   ack?: number;
   queueId?: number;
+  isInternal?: boolean;
 }
 interface Request {
   messageData: MessageData;

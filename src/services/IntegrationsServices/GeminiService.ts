@@ -345,11 +345,11 @@ export const handleGemini = async (
 
       // Enviar resposta (sem mensagens internas)
       if (cleanedResponse.trim()) {
-      if (geminiSettings.voice === "texto") {
-        const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
-          text: `\u200e ${response}`
-        });
-        await verifyMessage(sentMessage!, ticket, contact);
+        if (geminiSettings.voice === "texto") {
+          const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
+            text: `\u200e ${cleanedResponse}`
+          });
+          await verifyMessage(sentMessage!, ticket, contact);
         } else {
           const fileNameWithOutExtension = `${ticket.id}_${Date.now()}`;
           convertTextToSpeechAndSaveToFile(
@@ -383,6 +383,7 @@ export const handleGemini = async (
             logger.error(`Erro para responder com audio: ${error}`);
           }
         });
+        }
       }
     } catch (err: any) {
       const status = err.response?.status;

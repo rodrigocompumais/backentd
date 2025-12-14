@@ -2717,25 +2717,26 @@ const handleMessage = async (
       msgContact = await getContactMessage(msg, wbot);
     }
 
-    // Validação: Bloquear números não-brasileiros ou números estranhos (apenas para mensagens recebidas)
-    if (!msg.key.fromMe && !isGroup) {
-      const contactNumber = msgContact.id.replace(/\D/g, "");
-      
-      if (!isBrazilianNumber(contactNumber)) {
-        const countryCode = getCountryCode(contactNumber);
-        
-        // Log detalhado do bloqueio
-        logger.warn(formatBlockedNumberLog(contactNumber, countryCode));
-        logger.info(`Mensagem bloqueada: número inválido ou não-brasileiro (+${countryCode || "sem código"}) - ${contactNumber} (empresa: ${companyId})`);
-        
-        // Log adicional para números muito longos (possíveis números estranhos)
-        if (contactNumber.length > 13) {
-          logger.warn(`Número bloqueado por ser muito longo (${contactNumber.length} dígitos): ${contactNumber} - Possível número estranho sem código de país`);
-        }
-        
-        return; // Bloqueia o processamento da mensagem
-      }
-    }
+    // VALIDAÇÃO DE NÚMEROS BRASILEIROS DESABILITADA - Estava bloqueando mensagens legítimas
+    // Se necessário reativar, verificar a lógica de validação para não bloquear números válidos
+    // if (!msg.key.fromMe && !isGroup) {
+    //   const contactNumber = msgContact.id.replace(/\D/g, "");
+    //   
+    //   if (!isBrazilianNumber(contactNumber)) {
+    //     const countryCode = getCountryCode(contactNumber);
+    //     
+    //     // Log detalhado do bloqueio
+    //     logger.warn(formatBlockedNumberLog(contactNumber, countryCode));
+    //     logger.info(`Mensagem bloqueada: número inválido ou não-brasileiro (+${countryCode || "sem código"}) - ${contactNumber} (empresa: ${companyId})`);
+    //     
+    //     // Log adicional para números muito longos (possíveis números estranhos)
+    //     if (contactNumber.length > 13) {
+    //       logger.warn(`Número bloqueado por ser muito longo (${contactNumber.length} dígitos): ${contactNumber} - Possível número estranho sem código de país`);
+    //     }
+    //     
+    //     return; // Bloqueia o processamento da mensagem
+    //   }
+    // }
 
     if (msgIsGroupBlock?.value === "enabled" && isGroup) return;
 

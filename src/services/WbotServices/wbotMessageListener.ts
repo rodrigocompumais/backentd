@@ -1414,7 +1414,9 @@ const isValidMsg = (msg: proto.IWebMessageInfo): boolean => {
   try {
     const msgType = getTypeMessage(msg);
     if (!msgType) {
-      return;
+      // Log para debug quando msgType é null/undefined
+      logger.warn(`isValidMsg: msgType é null/undefined para mensagem ${msg.key.id}`);
+      return false; // Retorna false explicitamente ao invés de undefined
     }
 
     const ifType =
@@ -2677,7 +2679,10 @@ const handleMessage = async (
 ): Promise<void> => {
   let mediaSent: Message | undefined;
 
-  if (!isValidMsg(msg)) return;
+  if (!isValidMsg(msg)) {
+    logger.debug(`Mensagem rejeitada por isValidMsg: ${msg.key.id} (remoteJid: ${msg.key.remoteJid}, empresa: ${companyId})`);
+    return;
+  }
 
   try {
     let msgContact: IMe;
@@ -2703,15 +2708,24 @@ const handleMessage = async (
       msg.message?.documentWithCaptionMessage ||
       msg.message.stickerMessage;
     if (msg.key.fromMe) {
-      if (/\u200e/.test(bodyMessage)) return;
+      // Validação de \u200e (caractere de direção) - pode estar bloqueando mensagens legítimas
+      // Comentado temporariamente para permitir todas as mensagens fromMe
+      // if (/\u200e/.test(bodyMessage)) {
+      //   logger.warn(`Mensagem fromMe bloqueada por conter \\u200e: ${msg.key.id}`);
+      //   return;
+      // }
 
-      if (
-        !hasMedia &&
-        msgType !== "conversation" &&
-        msgType !== "extendedTextMessage" &&
-        msgType !== "vcard"
-      )
-        return;
+      // Validação de tipos de mensagem fromMe - muito restritiva, pode estar bloqueando mensagens legítimas
+      // Comentado temporariamente para permitir todos os tipos de mensagem fromMe
+      // if (
+      //   !hasMedia &&
+      //   msgType !== "conversation" &&
+      //   msgType !== "extendedTextMessage" &&
+      //   msgType !== "vcard"
+      // ) {
+      //   logger.warn(`Mensagem fromMe bloqueada por tipo não permitido: ${msgType} (id: ${msg.key.id})`);
+      //   return;
+      // }
       msgContact = await getContactMessage(msg, wbot);
     } else {
       msgContact = await getContactMessage(msg, wbot);
@@ -2773,12 +2787,15 @@ const handleMessage = async (
       order: [["createdAt", "DESC"]]
     });
 
+    // Validação de mensagem de conclusão duplicada - adicionado log e verificação mais segura
     if (
       unreadMessages === 0 &&
       whatsapp.complationMessage &&
+      lastMessage &&
       formatBody(whatsapp.complationMessage, contact).trim().toLowerCase() ===
-        lastMessage?.body.trim().toLowerCase()
+        lastMessage.body.trim().toLowerCase()
     ) {
+      logger.info(`Mensagem de conclusão duplicada ignorada para contato ${contact.id} (empresa: ${companyId})`);
       return;
     }
 
@@ -3467,16 +3484,28 @@ const wbotMessageListener = async (
         .filter(filterMessages)
         .map(msg => msg);
 
-      if (!messages) return;
+      if (!messages || messages.length === 0) {
+        logger.debug(`Nenhuma mensagem para processar após filtro (empresa: ${companyId})`);
+        return;
+      }
+
+      logger.debug(`Processando ${messages.length} mensagem(ns) (empresa: ${companyId})`);
 
       for (const message of messages) {
-        const messageExists = await Message.count({
-          where: { id: message.key.id!, companyId }
-        });
+        try {
+          const messageExists = await Message.count({
+            where: { id: message.key.id!, companyId }
+          });
 
-        if (!messageExists) {
-          await handleMessage(message, wbot, companyId);
-          await verifyCampaignMessageAndCloseTicket(message, companyId);
+          if (!messageExists) {
+            await handleMessage(message, wbot, companyId);
+            await verifyCampaignMessageAndCloseTicket(message, companyId);
+          } else {
+            logger.debug(`Mensagem duplicada ignorada: ${message.key.id} (empresa: ${companyId})`);
+          }
+        } catch (error) {
+          logger.error(`Erro ao processar mensagem ${message.key.id}: ${error}`);
+          Sentry.captureException(error);
         }
       }
     });

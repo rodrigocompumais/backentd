@@ -471,17 +471,38 @@ const getSenderMessage = (
 };
 
 const getContactMessage = async (msg: proto.IWebMessageInfo, wbot: Session) => {
-  const isGroup = msg.key.remoteJid.includes("g.us");
-  const rawNumber = msg.key.remoteJid.replace(/\D/g, "");
-  return isGroup
-    ? {
-        id: getSenderMessage(msg, wbot),
-        name: msg.pushName
-      }
-    : {
-        id: msg.key.remoteJid,
-        name: msg.key.fromMe ? rawNumber : msg.pushName
-      };
+  const isGroup = msg.key.remoteJid?.includes("g.us") || false;
+  
+  if (isGroup) {
+    return {
+      id: getSenderMessage(msg, wbot),
+      name: msg.pushName
+    };
+  } else {
+    // Para mensagens não-grupo, tentar usar participant se disponível (mais confiável)
+    // Se não houver participant, usar remoteJid normalizado
+    let contactJid: string;
+    
+    if (msg.key.participant) {
+      // Participant é mais confiável para identificar o remetente real
+      contactJid = jidNormalizedUser(msg.key.participant);
+    } else if (msg.participant) {
+      contactJid = jidNormalizedUser(msg.participant);
+    } else if (msg.key.remoteJid) {
+      // Normalizar o remoteJid usando jidNormalizedUser para garantir formato correto
+      contactJid = jidNormalizedUser(msg.key.remoteJid);
+    } else {
+      // Fallback - não deveria acontecer
+      contactJid = "";
+    }
+    
+    const rawNumber = contactJid.replace(/@.*$/, "").replace(/\D/g, "");
+    
+    return {
+      id: contactJid,
+      name: msg.key.fromMe ? rawNumber : msg.pushName
+    };
+  }
 };
 
 const downloadMedia = async (msg: proto.IWebMessageInfo) => {
@@ -535,23 +556,70 @@ const verifyContact = async (
   companyId: number
 ): Promise<Contact> => {
   let profilePicUrl: string;
+  
+  // Normalizar o ID do contato para garantir formato correto
+  const normalizedContactId = msgContact.id.includes("g.us") 
+    ? msgContact.id 
+    : jidNormalizedUser(msgContact.id);
+  
   try {
-    profilePicUrl = await wbot.profilePictureUrl(msgContact.id);
+    profilePicUrl = await wbot.profilePictureUrl(normalizedContactId);
   } catch (e) {
     Sentry.captureException(e);
     profilePicUrl = `${process.env.FRONTEND_URL}/nopicture.png`;
   }
 
+  // Extrair número do JID normalizado (remove @s.whatsapp.net ou @g.us)
+  const isGroup = normalizedContactId.includes("g.us");
+  const contactNumber = isGroup 
+    ? normalizedContactId 
+    : normalizedContactId.replace(/@.*$/, "").replace(/\D/g, "");
+
+  // Log detalhado para debug quando número parecer incorreto
+  if (!isGroup) {
+    // Log quando número é muito longo (possível número incorreto)
+    if (contactNumber.length > 15) {
+      logger.warn(`⚠️ NÚMERO SUSPEITO (muito longo): ${contactNumber} | JID original: ${msgContact.id} | JID normalizado: ${normalizedContactId} | Empresa: ${companyId}`);
+      Sentry.setExtra("Número Suspeito", { 
+        número: contactNumber, 
+        jidOriginal: msgContact.id, 
+        jidNormalizado: normalizedContactId,
+        empresa: companyId 
+      });
+      Sentry.captureMessage("Número de contato suspeito detectado (muito longo)");
+    }
+    
+    // Validar se o número começa com código de país conhecido
+    if (contactNumber.length >= 10) {
+      const countryCode = contactNumber.substring(0, 2);
+      const knownCountryCodes = ["55", "52", "1", "44", "49", "33", "34", "39", "41", "43", "45", "46", "47", "48", "51", "53", "54", "56", "57", "58", "60", "61", "62", "63", "64", "65", "66", "81", "82", "84", "86", "90", "91", "92", "93", "94", "95", "98"];
+      
+      if (!knownCountryCodes.includes(countryCode) && contactNumber.length > 12) {
+        logger.warn(`⚠️ NÚMERO COM CÓDIGO DE PAÍS NÃO RECONHECIDO: ${contactNumber} | Código: ${countryCode} | JID: ${normalizedContactId} | Empresa: ${companyId}`);
+        Sentry.setExtra("Número com Código Inválido", { 
+          número: contactNumber, 
+          códigoPaís: countryCode,
+          jid: normalizedContactId,
+          empresa: companyId 
+        });
+        Sentry.captureMessage("Número de contato com código de país não reconhecido");
+      }
+    }
+    
+    // Log informativo para todos os números (ajuda no debug)
+    logger.debug(`📞 Contato processado: ${contactNumber} | JID: ${normalizedContactId} | Empresa: ${companyId}`);
+  }
+
   const contactData = {
-    name: msgContact?.name || msgContact.id.replace(/\D/g, ""),
-    number: msgContact.id.replace(/\D/g, ""),
+    name: msgContact?.name || contactNumber,
+    number: contactNumber,
     profilePicUrl,
-    isGroup: msgContact.id.includes("g.us"),
+    isGroup,
     companyId,
     whatsappId: wbot.id
   };
 
-  const contact = CreateOrUpdateContactService(contactData);
+  const contact = await CreateOrUpdateContactService(contactData);
 
   return contact;
 };

@@ -11,7 +11,7 @@ import makeWASocket, {
 
 import Whatsapp from "../models/Whatsapp";
 import { logger } from "../utils/logger";
-import MAIN_LOGGER from "baileys/lib/Utils/logger";
+import pino from "pino";
 import authState from "../helpers/authState";
 import { Boom } from "@hapi/boom";
 import AppError from "../errors/AppError";
@@ -21,8 +21,14 @@ import { StartWhatsAppSession } from "../services/WbotServices/StartWhatsAppSess
 import DeleteBaileysService from "../services/BaileysServices/DeleteBaileysService";
 import NodeCache from 'node-cache';
 
-const loggerBaileys = MAIN_LOGGER.child({});
-loggerBaileys.level = "error";
+// Usar pino diretamente ao invés de path interno do Baileys (compatível com Baileys 7.x)
+const loggerBaileys = pino({ 
+  level: "error",
+  transport: process.env.NODE_ENV === "development" ? {
+    target: "pino-pretty",
+    options: { colorize: true }
+  } : undefined
+});
 
 type Session = WASocket & {
   id?: number;

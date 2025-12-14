@@ -111,10 +111,41 @@ const wbotMonitor = async (
     });
 
     wbot.ev.on("contacts.upsert", async (contacts: BContact[]) => {
+      // Normalizar contatos para estrutura compatível com Baileys 7.x
+      // Em v7, contact.id pode ser LID ou PN
+      // contact.phoneNumber ou contact.lid estará presente dependendo do tipo
+      const normalizedContacts = contacts.map(contact => {
+        // Extrair número de telefone se disponível
+        let phoneNumber: string | undefined;
+        let lid: string | undefined;
+        
+        if (contact.phoneNumber) {
+          phoneNumber = contact.phoneNumber;
+        } else if (contact.lid) {
+          lid = contact.lid;
+        } else {
+          // Fallback: tentar extrair do id se for PN
+          const idStr = contact.id?.toString() || "";
+          if (!idStr.includes("@lid")) {
+            phoneNumber = idStr.replace(/@.*$/, "").replace(/\D/g, "");
+          } else {
+            lid = idStr;
+          }
+        }
+        
+        return {
+          id: contact.id,
+          phoneNumber,
+          lid,
+          name: contact.name,
+          notify: contact.notify,
+          // Preservar outros campos se necessário
+        };
+      });
 
       await createOrUpdateBaileysService({
         whatsappId: whatsapp.id,
-        contacts,
+        contacts: normalizedContacts,
       });
     });
 

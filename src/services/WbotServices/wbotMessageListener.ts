@@ -464,38 +464,65 @@ const getSenderMessage = (
   const me = getMeSocket(wbot);
   if (msg.key.fromMe) return me.id;
 
-  const senderId =
-    msg.participant || msg.key.participant || msg.key.remoteJid || undefined;
+  // Em Baileys 7.x, priorizar LID quando disponível, fallback para PN
+  // Para grupos: usar participantAlt (LID) se disponível, senão participant (PN)
+  // Usar type assertion pois essas propriedades podem não estar nos tipos da versão RC
+  const key = msg.key as any;
+  let senderId: string | undefined;
+  
+  if (key.participantAlt) {
+    // LID disponível para grupo
+    senderId = key.participantAlt;
+  } else if (msg.key.participant) {
+    // PN para grupo
+    senderId = msg.key.participant;
+  } else if (key.remoteJidAlt) {
+    // LID disponível para mensagem direta
+    senderId = key.remoteJidAlt;
+  } else if (msg.key.remoteJid) {
+    // PN para mensagem direta
+    senderId = msg.key.remoteJid;
+  } else if (msg.participant) {
+    // Fallback para participant no nível da mensagem
+    senderId = msg.participant;
+  }
 
-  return senderId && jidNormalizedUser(senderId);
+  return senderId ? jidNormalizedUser(senderId) : undefined;
 };
 
 const getContactMessage = async (msg: proto.IWebMessageInfo, wbot: Session) => {
   const isGroup = msg.key.remoteJid?.includes("g.us") || false;
   
   if (isGroup) {
+    // Para grupos, usar getSenderMessage que já prioriza LID
     return {
       id: getSenderMessage(msg, wbot),
       name: msg.pushName
     };
   } else {
-    // Para mensagens não-grupo, tentar usar participant se disponível (mais confiável)
-    // Se não houver participant, usar remoteJid normalizado
+    // Para mensagens diretas, priorizar LID quando disponível
+    // Usar type assertion pois essas propriedades podem não estar nos tipos da versão RC
+    const key = msg.key as any;
     let contactJid: string;
     
-    if (msg.key.participant) {
-      // Participant é mais confiável para identificar o remetente real
+    // Priorizar remoteJidAlt (LID) se disponível
+    if (key.remoteJidAlt) {
+      contactJid = jidNormalizedUser(key.remoteJidAlt);
+    } else if (msg.key.remoteJid) {
+      contactJid = jidNormalizedUser(msg.key.remoteJid);
+    } else if (key.participantAlt) {
+      // Fallback para participantAlt (LID)
+      contactJid = jidNormalizedUser(key.participantAlt);
+    } else if (msg.key.participant) {
       contactJid = jidNormalizedUser(msg.key.participant);
     } else if (msg.participant) {
       contactJid = jidNormalizedUser(msg.participant);
-    } else if (msg.key.remoteJid) {
-      // Normalizar o remoteJid usando jidNormalizedUser para garantir formato correto
-      contactJid = jidNormalizedUser(msg.key.remoteJid);
     } else {
       // Fallback - não deveria acontecer
       contactJid = "";
     }
     
+    // Extrair número do JID (funciona tanto para LID quanto PN)
     const rawNumber = contactJid.replace(/@.*$/, "").replace(/\D/g, "");
     
     return {
@@ -1332,9 +1359,14 @@ export const verifyMediaMessage = async (
   }
 
   try {
+    // Converter Buffer para Uint8Array se necessário para compatibilidade com tipos
+    const dataBuffer = Buffer.isBuffer(media.data) 
+      ? new Uint8Array(media.data)
+      : Buffer.from(media.data as string, 'base64');
+    
     await writeFileAsync(
       join(__dirname, "..", "..", "..", "public", media.filename),
-      Buffer.from(media.data, 'base64')
+      dataBuffer as any
     );
   } catch (err) {
     Sentry.captureException(err);
@@ -2826,7 +2858,10 @@ const handleMessage = async (
       const grupoMeta = await wbot.groupMetadata(msg.key.remoteJid);
       const msgGroupContact = {
         id: grupoMeta.id,
-        name: grupoMeta.subject
+        name: grupoMeta.subject,
+        // Em Baileys 7.x, owner pode ser LID, ownerPn é o número de telefone
+        owner: grupoMeta.ownerPn || grupoMeta.owner,
+        descOwner: grupoMeta.descOwnerPn || grupoMeta.descOwner
       };
       groupContact = await verifyContact(msgGroupContact, wbot, companyId);
     }
@@ -3585,6 +3620,63 @@ const wbotMessageListener = async (
 
         handleMsgAck(message, message.update.status);
       });
+    });
+
+    // Handler para atualizações de mapeamento LID/PN (Baileys 7.x)
+    // O evento pode receber um objeto único { lid, pn } ou um objeto com múltiplos mapeamentos
+    wbot.ev.on("lid-mapping.update", async (mapping: any) => {
+      try {
+        // O evento pode ter diferentes formatos dependendo da versão do Baileys
+        // Tentar tratar ambos os formatos possíveis
+        let mappings: Array<{ lid: string; pn: string; jid?: string }> = [];
+        
+        if (mapping.lid && mapping.pn) {
+          // Formato: { lid: string, pn: string }
+          mappings = [{ lid: mapping.lid, pn: mapping.pn }];
+        } else if (typeof mapping === 'object' && !mapping.lid) {
+          // Formato: { [jid: string]: { lid?: string, phoneNumber?: string } }
+          mappings = Object.entries(mapping).map(([jid, value]: [string, any]) => ({
+            lid: value.lid || jid,
+            pn: value.phoneNumber || value.pn || jid,
+            jid
+          }));
+        } else {
+          mappings = [mapping];
+        }
+        
+        logger.info(`LID mapping atualizado: ${mappings.length} mapeamento(s) (empresa: ${companyId})`);
+        
+        // Atualizar contatos existentes com novos mapeamentos LID/PN
+        for (const map of mappings) {
+          try {
+            const phoneNumber = map.pn?.replace(/@.*$/, "").replace(/\D/g, "") || "";
+            
+            if (phoneNumber) {
+              // Buscar contato pelo número
+              const contact = await Contact.findOne({
+                where: { 
+                  number: phoneNumber,
+                  companyId 
+                }
+              });
+              
+              if (contact) {
+                // Atualizar contato com informações de LID se necessário
+                // Nota: Pode ser necessário adicionar campo 'lid' ao modelo Contact no futuro
+                logger.debug(`Mapeamento LID/PN atualizado para contato ${contact.id}: LID=${map.lid}, PN=${map.pn}`);
+              } else {
+                logger.debug(`Contato não encontrado para número ${phoneNumber} ao processar LID mapping`);
+              }
+            }
+          } catch (error) {
+            logger.error(`Erro ao processar mapeamento LID/PN: ${error}`);
+            Sentry.captureException(error);
+          }
+        }
+      } catch (error) {
+        logger.error(`Erro ao processar lid-mapping.update: ${error}`);
+        Sentry.captureException(error);
+      }
     });
 
     // wbot.ev.on("messages.set", async (messageSet: IMessage) => {

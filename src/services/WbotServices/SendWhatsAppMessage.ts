@@ -1,9 +1,10 @@
 import { WAMessage } from "baileys";
 import * as Sentry from "@sentry/node";
 import AppError from "../../errors/AppError";
-import GetTicketWbot from "../../helpers/GetTicketWbot";
 import Message from "../../models/Message";
 import Ticket from "../../models/Ticket";
+import WhatsAppService from "../WhatsAppService";
+import Whatsapp from "../../models/Whatsapp";
 
 import formatBody from "../../helpers/Mustache";
 
@@ -17,12 +18,15 @@ const SendWhatsAppMessage = async ({
   body,
   ticket,
   quotedMsg
-}: Request): Promise<WAMessage> => {
+}: Request): Promise<WAMessage | any> => {
   let options = {};
-  const wbot = await GetTicketWbot(ticket);
-  const number = `${ticket.contact.number}@${
-    ticket.isGroup ? "g.us" : "s.whatsapp.net"
-  }`;
+  const number = ticket.contact.number;
+
+  // Obter whatsapp do ticket
+  const whatsapp = await Whatsapp.findByPk(ticket.whatsappId);
+  if (!whatsapp) {
+    throw new AppError("ERR_WAPP_NOT_FOUND");
+  }
 
   if (quotedMsg) {
       const chatMessages = await Message.findOne({
@@ -43,19 +47,18 @@ const SendWhatsAppMessage = async ({
           }
         };
       }
-    
   }
 
   try {
-    const sentMessage = await wbot.sendMessage(number,{
-        text: formatBody(body, ticket.contact)
-      },
-      {
-        ...options
-      }
+    const formattedBody = formatBody(body, ticket.contact);
+    const sentMessage = await WhatsAppService.sendMessage(
+      whatsapp,
+      number,
+      formattedBody,
+      options
     );
 
-    await ticket.update({ lastMessage: formatBody(body, ticket.contact) });
+    await ticket.update({ lastMessage: formattedBody });
     return sentMessage;
   } catch (err) {
     Sentry.captureException(err);

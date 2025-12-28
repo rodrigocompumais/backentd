@@ -155,6 +155,14 @@ class Whatsapp extends Model<Whatsapp> {
 
   @BelongsTo(() => FlowBuilderModel)
   flowBuilder: FlowBuilderModel
+
+  @AllowNull
+  @Column
+  gupshupApiKey: string;
+
+  @AllowNull
+  @Column
+  gupshupAppName: string;
 }
 
 export default Whatsapp;

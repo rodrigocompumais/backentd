@@ -1,8 +1,6 @@
 import Whatsapp from "../models/Whatsapp";
-import GetWhatsappWbot from "./GetWhatsappWbot";
-import fs from "fs";
-
-import { getMessageOptions } from "../services/WbotServices/SendWhatsAppMedia";
+import WhatsAppService from "../services/WhatsAppService";
+import { lookup } from "mime-types";
 
 export type MessageData = {
   number: number | string;
@@ -16,29 +14,30 @@ export const SendMessage = async (
   messageData: MessageData
 ): Promise<any> => {
   try {
-    const wbot = await GetWhatsappWbot(whatsapp);
-    const chatId = `${messageData.number}@s.whatsapp.net`;
-
-    let message;
+    const number = messageData.number.toString();
 
     if (messageData.mediaPath) {
-      const options = await getMessageOptions(
-        messageData.fileName,
+      // Determinar mimetype
+      const mimeType = lookup(messageData.mediaPath) || "";
+      const typeMessage = mimeType.split("/")[0];
+
+      return await WhatsAppService.sendMedia(
+        whatsapp,
+        number,
         messageData.mediaPath,
+        {
+          fileName: messageData.fileName,
+          caption: messageData.body,
+          mimetype: mimeType
+        }
+      );
+    } else {
+      return await WhatsAppService.sendMessage(
+        whatsapp,
+        number,
         messageData.body
       );
-      if (options) {
-        const body = fs.readFileSync(messageData.mediaPath);
-        message = await wbot.sendMessage(chatId, {
-          ...options
-        });
-      }
-    } else {
-      const body = `\u200e ${messageData.body}`;
-      message = await wbot.sendMessage(chatId, { text: body });
     }
-
-    return message;
   } catch (err: any) {
     throw new Error(err);
   }

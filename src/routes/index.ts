@@ -37,6 +37,7 @@ import flowCampaignRoutes from "./flowCampaignRoutes";
 import taskRoutes from "./taskRoutes";
 import aiRoutes from "./aiRoutes";
 import mercadoPagoRoutes from "./mercadoPagoRoutes";
+import gupshupWebhookRoutes from "./gupshupWebhookRoutes";
 const routes = Router();
 
 routes.use(userRoutes);
@@ -78,5 +79,6 @@ routes.use(flowCampaignRoutes)
 routes.use(taskRoutes);
 routes.use(aiRoutes);
 routes.use(mercadoPagoRoutes);
+routes.use(gupshupWebhookRoutes);
 
 export default routes;

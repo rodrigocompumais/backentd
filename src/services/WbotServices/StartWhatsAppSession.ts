@@ -10,6 +10,16 @@ export const StartWhatsAppSession = async (
   whatsapp: Whatsapp,
   companyId: number
 ): Promise<void> => {
+  // Se provider for Gupshup, não iniciar sessão Baileys
+  if (whatsapp.provider === "gupshup") {
+    logger.info(`Sessão ${whatsapp.name} é Gupshup. Não iniciando sessão Baileys.`);
+    // Apenas garantir que o status está correto
+    if (whatsapp.status !== "CONNECTED") {
+      await whatsapp.update({ status: "CONNECTED" });
+    }
+    return;
+  }
+
   // Verificar se já existe uma sessão ativa antes de iniciar nova
   try {
     const { getWbot } = await import("../../libs/wbot");

@@ -20,6 +20,9 @@ interface WhatsappData {
   status?: string;
   isDefault?: boolean;
   token?: string;
+  provider?: string;
+  gupshupApiKey?: string;
+  gupshupAppName?: string;
   //sendIdQueue?: number;
   //timeSendQueue?: number;
   transferQueueId?: number;
@@ -54,6 +57,9 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
     outOfHoursMessage,
     queueIds,
     token,
+    provider,
+    gupshupApiKey,
+    gupshupAppName,
     //timeSendQueue,
     //sendIdQueue,
 	  transferQueueId,
@@ -77,6 +83,9 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
     queueIds,
     companyId,
     token,
+    provider,
+    gupshupApiKey,
+    gupshupAppName,
     //timeSendQueue,
     //sendIdQueue,
 	  transferQueueId,
@@ -89,7 +98,10 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
     integrationId
   });
 
-  StartWhatsAppSession(whatsapp, companyId);
+  // Não iniciar sessão Baileys se provider for Gupshup
+  if (whatsapp.provider !== "gupshup") {
+    StartWhatsAppSession(whatsapp, companyId);
+  }
 
   const io = getIO();
   io.to(`company-${companyId}-mainchannel`).emit(`company-${companyId}-whatsapp`, {

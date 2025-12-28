@@ -18,6 +18,8 @@ interface Request {
   isDefault?: boolean;
   token?: string;
   provider?: string;
+  gupshupApiKey?: string;
+  gupshupAppName?: string;
   //sendIdQueue?: number;
   //timeSendQueue?: number;
   transferQueueId?: number;
@@ -47,6 +49,8 @@ const CreateWhatsAppService = async ({
   companyId,
   token = "",
   provider = "beta",
+  gupshupApiKey,
+  gupshupAppName,
   //timeSendQueue,
   //sendIdQueue,
   transferQueueId,
@@ -119,6 +123,17 @@ const CreateWhatsAppService = async ({
     }
   }
 
+  // Validar campos Gupshup se provider for "gupshup"
+  if (provider === "gupshup") {
+    if (!gupshupApiKey || !gupshupAppName) {
+      throw new AppError(
+        "Campos gupshupApiKey e gupshupAppName são obrigatórios quando provider é 'gupshup'"
+      );
+    }
+    // Status inicial para Gupshup é CONNECTED (não precisa QR code)
+    status = "CONNECTED";
+  }
+
   if (queueIds.length > 1 && !greetingMessage) {
     throw new AppError("ERR_WAPP_GREETING_REQUIRED");
   }
@@ -160,6 +175,8 @@ const CreateWhatsAppService = async ({
       companyId,
       token,
       provider,
+      gupshupApiKey: provider === "gupshup" ? gupshupApiKey : null,
+      gupshupAppName: provider === "gupshup" ? gupshupAppName : null,
       //timeSendQueue,
       //sendIdQueue,
 	    transferQueueId,

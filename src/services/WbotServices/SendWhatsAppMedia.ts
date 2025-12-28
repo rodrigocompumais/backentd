@@ -5,7 +5,6 @@ import { exec } from "child_process";
 import path from "path";
 import ffmpegPath from "@ffmpeg-installer/ffmpeg";
 import AppError from "../../errors/AppError";
-import GetTicketWbot from "../../helpers/GetTicketWbot";
 import Ticket from "../../models/Ticket";
 import { lookup } from "mime-types";
 import formatBody from "../../helpers/Mustache";
@@ -118,63 +117,40 @@ const SendWhatsAppMedia = async ({
   media,
   ticket,
   body
-}: Request): Promise<WAMessage> => {
+}: Request): Promise<WAMessage | any> => {
   try {
-    const wbot = await GetTicketWbot(ticket);
+    // Obter whatsapp do ticket
+    const Whatsapp = (await import("../../models/Whatsapp")).default;
+    const whatsapp = await Whatsapp.findByPk(ticket.whatsappId);
+    if (!whatsapp) {
+      throw new AppError("ERR_WAPP_NOT_FOUND");
+    }
 
     const pathMedia = media.path;
     const typeMessage = media.mimetype.split("/")[0];
-    let options: AnyMessageContent;
     const bodyMessage = formatBody(body, ticket.contact);
+    const number = ticket.contact.number;
 
-    if (typeMessage === "video") {
-      options = {
-        video: fs.readFileSync(pathMedia),
-        caption: bodyMessage,
-        fileName: media.originalname
-        // gifPlayback: true
-      };
-    } else if (typeMessage === "audio") {
+    // Para Baileys, ainda precisa processar áudio
+    let finalMediaPath = pathMedia;
+    if (typeMessage === "audio") {
       const typeAudio = media.originalname.includes("audio-record-site");
       if (typeAudio) {
-        const convert = await processAudio(media.path);
-        options = {
-          audio: fs.readFileSync(convert),
-          mimetype: typeAudio ? "audio/mp4" : media.mimetype,
-          ptt: true
-        };
+        finalMediaPath = await processAudio(media.path);
       } else {
-        const convert = await processAudioFile(media.path);
-        options = {
-          audio: fs.readFileSync(convert),
-          mimetype: typeAudio ? "audio/mp4" : media.mimetype
-        };
+        finalMediaPath = await processAudioFile(media.path);
       }
-    } else if (typeMessage === "document" || typeMessage === "text") {
-      options = {
-        document: fs.readFileSync(pathMedia),
-        caption: bodyMessage,
-        fileName: media.originalname,
-        mimetype: media.mimetype
-      };
-    } else if (typeMessage === "application") {
-      options = {
-        document: fs.readFileSync(pathMedia),
-        caption: bodyMessage,
-        fileName: media.originalname,
-        mimetype: media.mimetype
-      };
-    } else {
-      options = {
-        image: fs.readFileSync(pathMedia),
-        caption: bodyMessage
-      };
     }
 
-    const sentMessage = await wbot.sendMessage(
-      `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`,
+    const WhatsAppService = (await import("../WhatsAppService")).default;
+    const sentMessage = await WhatsAppService.sendMedia(
+      whatsapp,
+      number,
+      finalMediaPath,
       {
-        ...options
+        fileName: media.originalname,
+        caption: bodyMessage,
+        mimetype: media.mimetype
       }
     );
 

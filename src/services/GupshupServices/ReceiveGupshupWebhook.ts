@@ -8,6 +8,10 @@ import CreateOrUpdateContactService from "../ContactServices/CreateOrUpdateConta
 import FindOrCreateTicketService from "../TicketServices/FindOrCreateTicketService";
 import CreateMessageService from "../MessageServices/CreateMessageService";
 import formatBody from "../../helpers/Mustache";
+import axios from "axios";
+import fs from "fs";
+import path from "path";
+import { lookup, extension as mimeExtension } from "mime-types";
 
 /**
  * Processa mensagem recebida do webhook Gupshup
@@ -105,12 +109,13 @@ export const processGupshupWebhook = async (payload: any): Promise<void> => {
     let bodyMessage = "";
     let mediaUrl = "";
     let mediaType = messageType;
+    let savedMediaFilename = "";
 
     if (messageType === "text") {
       bodyMessage = messageContent.text || messageContent.message || "";
     } else if (messageType === "image") {
       bodyMessage = messageContent.caption || "";
-      mediaUrl = messageContent.url || messageContent.mediaUrl || "";
+      mediaUrl = messageContent.originalUrl || messageContent.url || messageContent.mediaUrl || "";
       mediaType = "image";
     } else if (messageType === "video") {
       bodyMessage = messageContent.caption || "";
@@ -128,6 +133,28 @@ export const processGupshupWebhook = async (payload: any): Promise<void> => {
       bodyMessage = JSON.stringify(messageContent);
     }
 
+    // Se houver mídia, baixar e salvar localmente
+    if (mediaUrl) {
+      try {
+        const publicFolder = path.resolve(__dirname, "..", "..", "..", "public");
+        const response = await axios.get(mediaUrl, { responseType: "arraybuffer" });
+        
+        // Determinar extensão do arquivo
+        const mimeType = response.headers["content-type"] || lookup(mediaUrl) || "application/octet-stream";
+        const ext = mimeExtension(mimeType) || "bin";
+        const timestamp = new Date().getTime();
+        
+        savedMediaFilename = `${timestamp}_${messageId}.${ext}`;
+        const filePath = path.join(publicFolder, savedMediaFilename);
+        
+        fs.writeFileSync(filePath, response.data);
+        logger.info(`Gupshup webhook: Mídia baixada e salva: ${savedMediaFilename}`);
+      } catch (error) {
+        logger.error(`Erro ao baixar mídia do webhook Gupshup: ${error}`);
+        Sentry.captureException(error);
+      }
+    }
+
     // Criar mensagem no banco
     const messageData = {
       id: messageId,
@@ -136,6 +163,7 @@ export const processGupshupWebhook = async (payload: any): Promise<void> => {
       body: bodyMessage,
       fromMe: false,
       mediaType: mediaType,
+      mediaUrl: savedMediaFilename || null,
       read: false,
       ack: 0,
       remoteJid: `${cleanNumber}@s.whatsapp.net`,

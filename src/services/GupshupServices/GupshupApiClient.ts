@@ -1,7 +1,7 @@
 import axios from "axios";
 import * as Sentry from "@sentry/node";
 import AppError from "../../errors/AppError";
-import fs from "fs";
+import path from "path";
 
 interface GupshupSendTextMessageParams {
   apiKey: string;
@@ -15,28 +15,35 @@ interface GupshupSendMediaMessageParams {
   appName: string;
   destination: string;
   mediaPath: string;
-  mediaType: "image" | "video" | "audio" | "document";
+  mediaType: "image" | "video" | "audio" | "file";
   caption?: string;
   fileName?: string;
 }
 
 class GupshupApiClient {
-  private baseURL = "https://api.gupshup.io/sm/api/v1";
+  // Endpoint correto conforme documentação: https://docs.gupshup.io/reference/
+  private baseURL = "https://api.gupshup.io/wa/api/v1";
 
   /**
    * Envia mensagem de texto via Gupshup
+   * Documentação: https://docs.gupshup.io/reference/msg
    */
   async sendTextMessage(params: GupshupSendTextMessageParams): Promise<any> {
     try {
       const { apiKey, appName, destination, message } = params;
 
-      // Remove caracteres não numéricos do número
-      const cleanNumber = destination.replace(/\D/g, "");
+      // Remove caracteres não numéricos do número e garante formato internacional
+      let cleanNumber = destination.replace(/\D/g, "");
+      
+      // Se não começar com código de país, assumir Brasil (55)
+      if (!cleanNumber.startsWith("55") && cleanNumber.length <= 11) {
+        cleanNumber = "55" + cleanNumber;
+      }
 
+      // Formato conforme documentação: https://docs.gupshup.io/reference/msg
       const response = await axios.post(
         `${this.baseURL}/msg`,
         {
-          channel: "whatsapp",
           source: appName,
           destination: cleanNumber,
           message: {
@@ -64,31 +71,78 @@ class GupshupApiClient {
 
   /**
    * Envia mídia via Gupshup
+   * Documentação: https://docs.gupshup.io/reference/msg
+   * Mídias devem usar URLs públicas, não base64
    */
   async sendMediaMessage(params: GupshupSendMediaMessageParams): Promise<any> {
     try {
       const { apiKey, appName, destination, mediaPath, mediaType, caption, fileName } = params;
 
-      // Remove caracteres não numéricos do número
-      const cleanNumber = destination.replace(/\D/g, "");
+      // Remove caracteres não numéricos do número e garante formato internacional
+      let cleanNumber = destination.replace(/\D/g, "");
+      
+      // Se não começar com código de país, assumir Brasil (55)
+      if (!cleanNumber.startsWith("55") && cleanNumber.length <= 11) {
+        cleanNumber = "55" + cleanNumber;
+      }
 
-      // Ler arquivo e converter para base64
-      const fileBuffer = fs.readFileSync(mediaPath);
-      const base64Media = fileBuffer.toString("base64");
+      // Gerar URL pública do arquivo
+      // Os arquivos são servidos em /public conforme app.ts
+      const backendUrl = process.env.BACKEND_URL || "http://localhost:8080";
+      
+      // Obter caminho relativo a partir da pasta public
+      const publicFolder = path.resolve(__dirname, "..", "..", "..", "public");
+      let relativePath = path.relative(publicFolder, mediaPath);
+      
+      // Se o arquivo não estiver na pasta public, usar apenas o nome do arquivo
+      if (relativePath.startsWith("..")) {
+        relativePath = path.basename(mediaPath);
+      }
+      
+      // Normalizar separadores de caminho para URL
+      relativePath = relativePath.replace(/\\/g, "/");
+      
+      const publicUrl = `${backendUrl}/public/${relativePath}`;
+
+      // Formato conforme documentação: https://docs.gupshup.io/reference/msg
+      let messagePayload: any;
+
+      if (mediaType === "image") {
+        // Image: precisa de originalUrl, previewUrl (opcional), caption (opcional)
+        messagePayload = {
+          type: "image",
+          originalUrl: publicUrl,
+          previewUrl: publicUrl, // Usar mesma URL como preview
+          ...(caption && { caption })
+        };
+      } else if (mediaType === "video") {
+        // Video: precisa de url, caption (opcional)
+        messagePayload = {
+          type: "video",
+          url: publicUrl,
+          ...(caption && { caption })
+        };
+      } else if (mediaType === "audio") {
+        // Audio: precisa de url
+        messagePayload = {
+          type: "audio",
+          url: publicUrl
+        };
+      } else {
+        // File/Document: precisa de url e filename
+        messagePayload = {
+          type: "file",
+          url: publicUrl,
+          filename: fileName || "file"
+        };
+      }
 
       const response = await axios.post(
         `${this.baseURL}/msg`,
         {
-          channel: "whatsapp",
           source: appName,
           destination: cleanNumber,
-          message: {
-            type: mediaType,
-            caption: caption || "",
-            media: base64Media,
-            fileName: fileName || "file",
-            mimetype: this.getContentType(mediaType)
-          }
+          message: messagePayload
         },
         {
           headers: {
@@ -108,19 +162,6 @@ class GupshupApiClient {
     }
   }
 
-  /**
-   * Obtém o tipo de conteúdo baseado no tipo de mídia
-   */
-  private getContentType(mediaType: string): string {
-    const contentTypes: { [key: string]: string } = {
-      image: "image/jpeg",
-      video: "video/mp4",
-      audio: "audio/mpeg",
-      document: "application/pdf"
-    };
-
-    return contentTypes[mediaType] || "application/octet-stream";
-  }
 }
 
 export default new GupshupApiClient();

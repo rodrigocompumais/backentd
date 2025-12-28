@@ -48,17 +48,19 @@ class GupshupProvider implements IWhatsAppProvider {
       }
 
       // Determinar tipo de mídia baseado no mimetype ou opções
+      // Conforme documentação: https://docs.gupshup.io/reference/msg
       const mimeType = options?.mimetype || lookup(mediaPath) || "";
       const typeMessage = mimeType.split("/")[0];
 
-      let mediaType: "image" | "video" | "audio" | "document";
+      let mediaType: "image" | "video" | "audio" | "file";
 
       if (typeMessage === "video") {
         mediaType = "video";
       } else if (typeMessage === "audio") {
         mediaType = "audio";
       } else if (typeMessage === "document" || typeMessage === "application" || typeMessage === "text") {
-        mediaType = "document";
+        // Documentos devem usar type "file" conforme documentação
+        mediaType = "file";
       } else {
         mediaType = "image";
       }

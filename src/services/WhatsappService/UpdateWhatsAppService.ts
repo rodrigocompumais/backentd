@@ -17,6 +17,9 @@ interface WhatsappData {
   ratingMessage?: string;
   queueIds?: number[];
   token?: string;
+  provider?: string;
+  gupshupApiKey?: string;
+  gupshupAppName?: string;
   //sendIdQueue?: number;
   //timeSendQueue?: number;
   transferQueueId?: number; 
@@ -62,6 +65,9 @@ const UpdateWhatsAppService = async ({
     ratingMessage,
     queueIds = [],
     token,
+    provider,
+    gupshupApiKey,
+    gupshupAppName,
     //timeSendQueue,
     //sendIdQueue = null,
     transferQueueId,	
@@ -101,6 +107,9 @@ const UpdateWhatsAppService = async ({
 
   const whatsapp = await ShowWhatsAppService(whatsappId, companyId);
 
+  // Se estiver atualizando credenciais Gupshup, validar
+  const isUpdatingGupshup = provider === "gupshup" || (whatsapp.provider === "gupshup" && (gupshupApiKey || gupshupAppName));
+  
   await whatsapp.update({
     name,
     status,
@@ -112,6 +121,9 @@ const UpdateWhatsAppService = async ({
     isDefault,
     companyId,
     token,
+    provider: provider || whatsapp.provider,
+    gupshupApiKey: isUpdatingGupshup && gupshupApiKey !== undefined ? gupshupApiKey : whatsapp.gupshupApiKey,
+    gupshupAppName: isUpdatingGupshup && gupshupAppName !== undefined ? gupshupAppName : whatsapp.gupshupAppName,
     //timeSendQueue,
     //sendIdQueue,
     transferQueueId,	
@@ -125,6 +137,17 @@ const UpdateWhatsAppService = async ({
   });
 
   await AssociateWhatsappQueue(whatsapp, queueIds);
+
+  // Se atualizou credenciais Gupshup, validar conexão
+  if (isUpdatingGupshup) {
+    try {
+      const { ValidateGupshupConnection } = await import("../GupshupServices/ValidateGupshupConnection");
+      await ValidateGupshupConnection(whatsapp);
+    } catch (error) {
+      // Log do erro mas não falha a atualização
+      console.error("Erro ao validar conexão Gupshup após atualização:", error);
+    }
+  }
 
   return { whatsapp, oldDefaultWhatsapp };
 };

@@ -193,6 +193,17 @@ const CreateWhatsAppService = async ({
 
   await AssociateWhatsappQueue(whatsapp, queueIds);
 
+  // Se for Gupshup, validar conexão após criar
+  if (provider === "gupshup") {
+    try {
+      const { ValidateGupshupConnection } = await import("../GupshupServices/ValidateGupshupConnection");
+      await ValidateGupshupConnection(whatsapp);
+    } catch (error) {
+      // Log do erro mas não falha a criação
+      console.error("Erro ao validar conexão Gupshup:", error);
+    }
+  }
+
   return { whatsapp, oldDefaultWhatsapp };
 };
 

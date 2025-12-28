@@ -38,6 +38,7 @@ import taskRoutes from "./taskRoutes";
 import aiRoutes from "./aiRoutes";
 import mercadoPagoRoutes from "./mercadoPagoRoutes";
 import gupshupWebhookRoutes from "./gupshupWebhookRoutes";
+import gupshupValidationRoutes from "./gupshupValidationRoutes";
 const routes = Router();
 
 routes.use(userRoutes);
@@ -80,5 +81,6 @@ routes.use(taskRoutes);
 routes.use(aiRoutes);
 routes.use(mercadoPagoRoutes);
 routes.use(gupshupWebhookRoutes);
+routes.use(gupshupValidationRoutes);
 
 export default routes;

@@ -1,6 +1,7 @@
 import path, { join } from "path";
 import { promisify } from "util";
 import { writeFile } from "fs";
+import { Op } from "sequelize";
 import * as Sentry from "@sentry/node";
 import { isNil, head } from "lodash";
 import { extension as mimeExtension } from "mime-types";
@@ -2854,6 +2855,17 @@ const handleMessage = async (
   const rawFromMe = msg.key.fromMe;
   const timestamp = msg.messageTimestamp;
 
+  let resolutionStrategy = "PHONE";
+  if (rawFromMe) {
+    resolutionStrategy = "IGNORE_FROM_ME";
+  } else if (rawRemoteJid && rawRemoteJid.includes("@lid")) {
+    if (rawSenderPn) resolutionStrategy = "PHONE (via senderPn)";
+    else if (rawParticipant && !rawParticipant.includes("@lid")) resolutionStrategy = "PHONE (via participant)";
+    else resolutionStrategy = "LID (Fallback - BLOCK)";
+  } else {
+    resolutionStrategy = "PHONE (via remoteJid)";
+  }
+
   logger.info(`[BAILEYS-DEBUG] Evento recebido:
     RemoteJid: ${rawRemoteJid}
     SenderPn: ${rawSenderPn}
@@ -2862,11 +2874,42 @@ const handleMessage = async (
     FromMe: ${rawFromMe}
     Timestamp: ${timestamp}
     CompanyId: ${companyId}
+    ResolvedIdentity: ${resolutionStrategy}
   `);
 
   if (!isValidMsg(msg)) {
     logger.debug(`Mensagem rejeitada por isValidMsg: ${msg.key.id} (remoteJid: ${msg.key.remoteJid}, empresa: ${companyId})`);
     return;
+  }
+
+  // REGRA ABSOLUTA: fromMe NÃO deve criar contatos ou conversas
+  // Serve apenas para status. Se não tivermos o ticket já aberto, ignoramos.
+  if (rawFromMe) {
+    logger.info(`[IGNORE] Evento fromMe ignorado para criação de fluxos: ${msg.key.id}`);
+
+    // Opcional: Se quiser processar apenas UPDATE de mensagem em tickets existentes,
+    // precisaria buscar o ticket sem criar. Por enquanto, a regra é "NÃO criar".
+    // Se a mensagem for importante para histórico, ela deve ser tratada se o ticket JÁ EXISTIR.
+    // Mas FindOrCreateTicketService CRIA. Então devemos checar existência antes.
+    const msgContactForCheck = await getContactMessage(msg, wbot);
+    const existingContact = await Contact.findOne({
+      where: { number: msgContactForCheck.id.replace(/\D/g, ""), companyId }
+    });
+
+    if (!existingContact) {
+      logger.warn(`[BLOCK-FROM-ME] Tentativa de criar contato via fromMe bloqueada. ID: ${msgContactForCheck.id}`);
+      return;
+    }
+
+    // Se o contato existe, verificamos se tem ticket aberto.
+    const existingTicket = await Ticket.findOne({
+      where: { contactId: existingContact.id, companyId, status: { [Op.or]: ["open", "pending"] } }
+    });
+
+    if (!existingTicket) {
+      logger.warn(`[BLOCK-FROM-ME] Mensagem enviada pelo celular (fromMe) sem ticket aberto. Ignorando para não abrir ticket avulso.`);
+      return;
+    }
   }
 
   try {

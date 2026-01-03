@@ -3207,7 +3207,6 @@ const handleMessage = async (
       !ticket.isGroup &&
       !ticket.queue &&
       !ticket.user &&
-      ticket.chatbot &&
       !isNil(whatsapp.integrationId) &&
       !ticket.useIntegration
     ) {
@@ -3217,13 +3216,25 @@ const handleMessage = async (
         companyId
       );
 
+      const isFirstMsg = await Ticket.findOne({
+        where: {
+          contactId: groupContact ? groupContact.id : contact.id,
+          companyId,
+          whatsappId: whatsapp.id
+        },
+        order: [["id", "DESC"]]
+      });
+
       await handleMessageIntegration(
         msg,
         wbot,
         integrations,
         ticket,
         companyId,
-        isMenu
+        isMenu,
+        whatsapp,
+        contact,
+        isFirstMsg
       );
 
       return;
@@ -3318,33 +3329,7 @@ const handleMessage = async (
       order: [["id", "DESC"]]
     });
 
-    // integração flowbuilder
-    if (
-      !msg.key.fromMe &&
-      !ticket.isGroup &&
-      !ticket.queue &&
-      !ticket.user &&
-      !isNil(whatsapp.integrationId) &&
-      !ticket.useIntegration
-    ) {
 
-      const integrations = await ShowQueueIntegrationService(
-        whatsapp.integrationId,
-        companyId
-      );
-
-      await handleMessageIntegration(
-        msg,
-        wbot,
-        integrations,
-        ticket,
-        companyId,
-        isMenu,
-        whatsapp,
-        contact,
-        isFirstMsg
-      );
-    }
 
     const dontReadTheFirstQuestion = ticket.queue === null;
 

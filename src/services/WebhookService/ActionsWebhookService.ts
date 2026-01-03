@@ -182,86 +182,83 @@ export const ActionsWebhookService = async (
     let noAlterNext = false;
 
     for (var i = 0; i < lengthLoop; i++) {
-      {
-        let nodeSelected: any;
-        let ticketInit: Ticket;
+      let nodeSelected: any;
+      let ticketInit: Ticket;
 
-        if (pressKey) {
-          console.log("UPDATE2...");
-          if (pressKey === "parar") {
-            console.log("UPDATE3...");
-            if (idTicket) {
-              console.log("UPDATE4...");
-              ticketInit = await Ticket.findOne({
-                where: { id: idTicket, whatsappId }
-              });
-              await ticket.update({
-                status: "closed"
-              });
-            }
-            break;
+      if (pressKey) {
+        console.log("UPDATE2...");
+        if (pressKey === "parar") {
+          console.log("UPDATE3...");
+          if (idTicket) {
+            console.log("UPDATE4...");
+            ticketInit = await Ticket.findOne({
+              where: { id: idTicket, whatsappId }
+            });
+            await ticket.update({
+              status: "closed"
+            });
           }
+          break;
+        }
 
-          if (execFn === "") {
-            console.log("UPDATE5...");
-            nodeSelected = {
-              type: "menu"
-            };
-          } else {
-            console.log("UPDATE6...");
-            nodeSelected = nodes.filter(node => node.id === execFn)[0];
-          }
+        if (execFn === "") {
+          console.log("UPDATE5...");
+          nodeSelected = {
+            type: "menu"
+          };
         } else {
-          console.log("UPDATE7...");
-          const otherNode = nodes.filter(node => node.id === next)[0];
-          if (otherNode) {
-            nodeSelected = otherNode;
-          }
+          console.log("UPDATE6...");
+          nodeSelected = nodes.filter(node => node.id === execFn)[0];
+        }
+      } else {
+        console.log("UPDATE7...");
+        const otherNode = nodes.filter(node => node.id === next)[0];
+        if (otherNode) {
+          nodeSelected = otherNode;
+        }
+      }
+
+      if (nodeSelected.type === "message") {
+
+        let msg;
+
+        const webhook = ticket.dataWebhook
+
+        if (webhook && webhook.hasOwnProperty("variables")) {
+          msg = {
+            body: replaceMessages(webhook, nodeSelected.data.label)
+          };
+        } else {
+          msg = {
+            body: nodeSelected.data.label
+          };
         }
 
-        if (nodeSelected.type === "message") {
+        await logHistory(ticket, "model", msg.body);
 
-          let msg;
-
-          const webhook = ticket.dataWebhook
-
-          if (webhook && webhook.hasOwnProperty("variables")) {
-            msg = {
-              body: replaceMessages(webhook, nodeSelected.data.label)
-            };
-          } else {
-            msg = {
-              body: nodeSelected.data.label
-            };
-          }
-
-          await logHistory(ticket, "model", msg.body);
-
-          await SendMessage(whatsapp, {
-            number: numberClient,
-            body: msg.body
-          });
+        await SendMessage(whatsapp, {
+          number: numberClient,
+          body: msg.body
+        });
 
 
-          //TESTE BOTÃO
-          //await SendMessageFlow(whatsapp, {
-          //  number: numberClient,
-          //  body: msg.body
-          //} )
-          await intervalWhats("1");
-        }
-        console.log("273");
-        if (nodeSelected.type === "typebot") {
-          console.log("275");
-          const wbot = getWbot(whatsapp.id);
-          await typebotListener({
-            wbot: wbot,
-            msg,
-            ticket,
-            typebot: nodeSelected.data.typebotIntegration
-          });
-        }
-
+        //TESTE BOTÃO
+        //await SendMessageFlow(whatsapp, {
+        //  number: numberClient,
+        //  body: msg.body
+        //} )
+        await intervalWhats("1");
+      }
+      console.log("273");
+      if (nodeSelected.type === "typebot") {
+        console.log("275");
+        const wbot = getWbot(whatsapp.id);
+        await typebotListener({
+          wbot: wbot,
+          msg,
+          ticket,
+          typebot: nodeSelected.data.typebotIntegration
+        });
       }
 
       if (nodeSelected.type === "gemini") {
@@ -400,7 +397,7 @@ export const ActionsWebhookService = async (
 
       if (nodeSelected.type === "question") {
         const webhook = ticket?.dataWebhook;
-        const variables = ticket?.dataWebhook?.variables;
+        const variables = (ticket?.dataWebhook as any)?.variables;
 
         if (!variables || variables === undefined || variables === null) {
           const { message } = nodeSelected.data.typebotIntegration;
@@ -439,7 +436,7 @@ export const ActionsWebhookService = async (
       if (nodeSelected.type === "ticket") {
         /*const queueId = nodeSelected.data?.data?.id || nodeSelected.data?.id;
         const queue = await ShowQueueService(queueId, companyId);
-  
+   
         await ticket.update({
           status: "pending",
           queueId: queue.id,
@@ -450,14 +447,14 @@ export const ActionsWebhookService = async (
           hashFlowId: hashWebhookId,
           flowStopped: idFlowDb.toString()
         });
-  
+   
         await FindOrCreateATicketTrakingService({
           ticketId: ticket.id,
           companyId,
           whatsappId: ticket.whatsappId,
           userId: ticket.userId
         });
-  
+   
         await UpdateTicketService({
           ticketData: {
             status: "pending",
@@ -466,21 +463,21 @@ export const ActionsWebhookService = async (
           ticketId: ticket.id,
           companyId
         });
-  
+   
         await CreateLogTicketService({
           ticketId: ticket.id,
           type: "queue",
           queueId: queue.id
         });
-  
+   
         let settings = await CompaniesSettings.findOne({
           where: {
             companyId: companyId
           }
         });
-  
+   
         const enableQueuePosition = settings.sendQueuePosition === "enabled";
-  
+   
         if (enableQueuePosition) {
           const count = await Ticket.findAndCountAll({
             where: {
@@ -492,27 +489,27 @@ export const ActionsWebhookService = async (
               isGroup: false
             }
           });
-  
+   
           // Lógica para enviar posição da fila de atendimento
           const qtd = count.count === 0 ? 1 : count.count;
-  
+   
           const msgFila = `${settings.sendQueuePositionMessage} *${qtd}*`;
-  
+   
           const ticketDetails = await ShowTicketService(ticket.id, companyId);
-  
+   
           const bodyFila = formatBody(`${msgFila}`, ticket.contact);
-  
+   
           await delay(3000);
           await typeSimulation(ticket, "composing");
-  
+   
           await SendWhatsAppMessage({
             body: bodyFila,
             ticket: ticketDetails,
             quotedMsg: null
           });
-  
+   
           SetTicketMessagesAsRead(ticketDetails);
-  
+   
           await ticketDetails.update({
             lastMessage: bodyFila
           });
@@ -539,7 +536,7 @@ export const ActionsWebhookService = async (
             const webhook = ticket.dataWebhook;
 
             if (webhook && webhook.hasOwnProperty("variables")) {
-              msg = replaceMessages(webhook.variables, bodyFor);
+              msg = replaceMessages((webhook as any).variables, bodyFor);
             } else {
               msg = bodyFor;
             }

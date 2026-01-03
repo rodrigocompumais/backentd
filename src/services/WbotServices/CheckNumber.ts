@@ -9,7 +9,8 @@ interface IOnWhatsapp {
 }
 
 const checker = async (number: string, wbot: any) => {
-  const [validNumber] = await wbot.onWhatsApp(`${number}@s.whatsapp.net`);
+  const jid = number.includes("@") ? number : `${number}@s.whatsapp.net`;
+  const [validNumber] = await wbot.onWhatsApp(jid);
   return validNumber;
 };
 

@@ -492,7 +492,8 @@ const getContactMessage = async (msg: proto.IWebMessageInfo, wbot: Session) => {
   // Correção para mensagens enviadas por mim no privado
   // Se for outgoing e privado, o 'Contact' do ticket é o destinatário (remoteJid), não eu (sender)
   if (!isGroup && msg.key.fromMe) {
-    contactJid = msg.key.remoteJid;
+    const key = msg.key as any;
+    contactJid = key.remoteJidAlt || msg.key.remoteJid;
   } else {
     // Para grupos (incoming/outgoing) ou privado (incoming), usar a lógica padrão de sender
     contactJid = getSenderMessage(msg, wbot);
@@ -574,9 +575,24 @@ const verifyContact = async (
 
   // Extrair número do JID normalizado (remove @s.whatsapp.net ou @g.us)
   const isGroup = normalizedContactId.includes("g.us");
-  const contactNumber = isGroup
+  let contactNumber = isGroup
     ? normalizedContactId
     : normalizedContactId.replace(/@.*$/, "").replace(/\D/g, "");
+
+  if (!isGroup && normalizedContactId.includes("@lid")) {
+    const lidMappingStore = (wbot as any)?.signalRepository?.lidMapping;
+    const getPNForLID = lidMappingStore?.getPNForLID;
+    if (typeof getPNForLID === "function") {
+      try {
+        const pn = await Promise.resolve(getPNForLID(normalizedContactId));
+        if (pn) {
+          contactNumber = pn.replace(/@.*$/, "").replace(/\D/g, "");
+        }
+      } catch (e) {
+        Sentry.captureException(e);
+      }
+    }
+  }
 
   // Log detalhado para debug quando número parecer incorreto
   if (!isGroup) {
@@ -1565,12 +1581,14 @@ const verifyQueue = async (
     ) {
       const body = formatBody(`${greetingMessage}`, contact);
 
-      await wbot.sendMessage(
-        `${contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`,
-        {
-          text: body
-        }
-      );
+      if (body.trim().replace(/\u200e/g, '').length > 0) {
+        await wbot.sendMessage(
+          `${contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`,
+          {
+            text: body
+          }
+        );
+      }
     }
 
     const firstQueue = head(queues);
@@ -1715,13 +1733,18 @@ const verifyQueue = async (
             `\u200e ${queue.outOfHoursMessage}\n\n*[ # ]* - Voltar ao Menu Principal`,
             ticket.contact
           );
-          const sentMessage = await wbot.sendMessage(
-            `${contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`,
-            {
-              text: body
-            }
-          );
-          await verifyMessage(sentMessage, ticket, contact);
+
+          if (queue.outOfHoursMessage && queue.outOfHoursMessage.trim().length > 0) {
+            const sentMessage = await wbot.sendMessage(
+              `${contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`,
+              {
+                text: body
+              }
+            );
+            await verifyMessage(sentMessage, ticket, contact);
+          }
+
+
           await UpdateTicketService({
             ticketData: { queueId: null, chatbot },
             ticketId: ticket.id,
@@ -2951,13 +2974,16 @@ const handleMessage = async (
 
           const debouncedSentMessage = debounce(
             async () => {
-              await wbot.sendMessage(
-                `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
-                }`,
-                {
-                  text: body
-                }
-              );
+              // Verifica se a mensagem de fora de horário existe e não está vazia (ignorando caracteres invisíveis)
+              if (whatsapp.outOfHoursMessage && whatsapp.outOfHoursMessage.trim().length > 0) {
+                await wbot.sendMessage(
+                  `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
+                  }`,
+                  {
+                    text: body
+                  }
+                );
+              }
             },
             3000,
             ticket.id
@@ -3001,13 +3027,15 @@ const handleMessage = async (
               const body = `${queue.outOfHoursMessage}`;
               const debouncedSentMessage = debounce(
                 async () => {
-                  await wbot.sendMessage(
-                    `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
-                    }`,
-                    {
-                      text: body
-                    }
-                  );
+                  if (queue.outOfHoursMessage && queue.outOfHoursMessage.trim().length > 0) {
+                    await wbot.sendMessage(
+                      `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
+                      }`,
+                      {
+                        text: body
+                      }
+                    );
+                  }
                 },
                 3000,
                 ticket.id

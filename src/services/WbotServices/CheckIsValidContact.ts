@@ -10,8 +10,10 @@ const CheckIsValidContact = async (
 
   const wbot = getWbot(defaultWhatsapp.id);
 
+  const jid = number.includes("@") ? number : `${number}@s.whatsapp.net`;
+
   try {
-    const isValidNumber = await wbot.onWhatsApp(`${number}`);
+    const isValidNumber = await wbot.onWhatsApp(jid);
     if (!isValidNumber) {
       throw new AppError("invalidNumber");
     }

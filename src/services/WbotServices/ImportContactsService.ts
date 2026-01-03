@@ -48,9 +48,15 @@ const ImportContactsService = async (companyId: number): Promise<void> => {
     : phoneContacts;
 
   if (isArray(phoneContactsList)) {
-    phoneContactsList.forEach(async ({ id, name, notify }) => {
-      if (id === "status@broadcast" || id.includes("g.us")) return;
-      const number = id.replace(/\D/g, "");
+    phoneContactsList.forEach(async ({ id, name, notify, phoneNumber, lid }) => {
+      const idStr = `${id || ""}`;
+      if (idStr === "status@broadcast" || idStr.includes("g.us")) return;
+
+      const resolvedNumber = `${phoneNumber || ""}`.replace(/\D/g, "");
+      const fallbackNumber = idStr.includes("@lid") ? "" : idStr.replace(/\D/g, "");
+      const number = resolvedNumber || fallbackNumber;
+
+      if (!number) return;
 
       const existingContact = await Contact.findOne({
         where: { number, companyId }

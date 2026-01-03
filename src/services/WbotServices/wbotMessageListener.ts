@@ -480,8 +480,24 @@ const getSenderMessage = (
       senderId = key.participant;
     }
   } else {
-    // Se for privado, o sender SEMPRE é o remoteJid
-    senderId = msg.key.remoteJid;
+    // Se for privado
+    // Verificar se remoteJid é LID
+    if (msg.key.remoteJid && msg.key.remoteJid.includes("@lid")) {
+      // Se for LID, tentar obter o PN de senderPn ou participant
+      if (key.senderPn) {
+        senderId = key.senderPn;
+      } else if (msg.participant && !msg.participant.includes("@lid")) {
+        senderId = msg.participant;
+      } else if (key.participant && !key.participant.includes("@lid")) {
+        senderId = key.participant;
+      } else {
+        // Se não tiver PN, usa o LID mesmo (não tem o que fazer)
+        senderId = msg.key.remoteJid;
+      }
+    } else {
+      // Se não for LID (é s.whatsapp.net), usa ele
+      senderId = msg.key.remoteJid;
+    }
   }
 
   // Fallback seguro

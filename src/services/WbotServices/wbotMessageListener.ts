@@ -2846,6 +2846,24 @@ const handleMessage = async (
 ): Promise<void> => {
   let mediaSent: Message | undefined;
 
+  // LOG DETALHADO PARA DIAGNÓSTICO DE LID (Solicitado via prompt)
+  const rawRemoteJid = msg.key.remoteJid;
+  const rawParticipant = msg.key.participant || (msg.key as any).participant;
+  const rawSenderPn = (msg.key as any).senderPn;
+  const rawPushName = msg.pushName;
+  const rawFromMe = msg.key.fromMe;
+  const timestamp = msg.messageTimestamp;
+
+  logger.info(`[BAILEYS-DEBUG] Evento recebido:
+    RemoteJid: ${rawRemoteJid}
+    SenderPn: ${rawSenderPn}
+    Participant: ${rawParticipant}
+    PushName: ${rawPushName}
+    FromMe: ${rawFromMe}
+    Timestamp: ${timestamp}
+    CompanyId: ${companyId}
+  `);
+
   if (!isValidMsg(msg)) {
     logger.debug(`Mensagem rejeitada por isValidMsg: ${msg.key.id} (remoteJid: ${msg.key.remoteJid}, empresa: ${companyId})`);
     return;

@@ -27,6 +27,7 @@ import { getIO } from "../../libs/socket";
 import CreateMessageService, { MessageData } from "../MessageServices/CreateMessageService";
 import { logger } from "../../utils/logger";
 import CreateOrUpdateContactService from "../ContactServices/CreateOrUpdateContactService";
+import AppError from "../../errors/AppError";
 import FindOrCreateTicketService from "../TicketServices/FindOrCreateTicketService";
 import ShowWhatsAppService from "../WhatsappService/ShowWhatsAppService";
 import UpdateTicketService from "../TicketServices/UpdateTicketService";
@@ -464,14 +465,13 @@ const getSenderMessage = (
   const me = getMeSocket(wbot);
   if (msg.key.fromMe) return me.id;
 
-  if (msg.key.fromMe) return me.id;
-
   const key = msg.key as any;
   let senderId: string | undefined;
 
   const isGroup = msg.key.remoteJid?.includes("@g.us");
 
   if (isGroup) {
+    // 1. senderPn é o padrão ouro (telefone real)
     if (key.senderPn) {
       senderId = key.senderPn;
     } else if (msg.participant) {
@@ -480,27 +480,34 @@ const getSenderMessage = (
       senderId = key.participant;
     }
   } else {
-    // Se for privado
-    // Verificar se remoteJid é LID
-    if (msg.key.remoteJid && msg.key.remoteJid.includes("@lid")) {
-      // Se for LID, tentar obter o PN de senderPn ou participant
-      if (key.senderPn) {
-        senderId = key.senderPn;
-      } else if (msg.participant && !msg.participant.includes("@lid")) {
+    // Para conversas privadas (1-1)
+
+    // 1. Tentar senderPn se disponível (telefone real)
+    if (key.senderPn) {
+      senderId = key.senderPn;
+    }
+    // 2. Verificar se remoteJid NÃO é LID (é @s.whatsapp.net)
+    else if (msg.key.remoteJid && !msg.key.remoteJid.includes("@lid")) {
+      senderId = msg.key.remoteJid;
+    }
+    // 3. Se remoteJid FOR LID, tentar resgatar o telefone de outras formas
+    else if (msg.key.remoteJid && msg.key.remoteJid.includes("@lid")) {
+      // Tentar participant (as vezes o Baileys popula participant com o PN em chats com LID)
+      if (msg.participant && !msg.participant.includes("@lid")) {
         senderId = msg.participant;
       } else if (key.participant && !key.participant.includes("@lid")) {
         senderId = key.participant;
       } else {
-        // Se não tiver PN, usa o LID mesmo (não tem o que fazer)
+        // CASO CRÍTICO: Só temos o LID.
+        // O usuário proibiu persistir LID.
+        // Tentar usar o remoteJid mas logar um aviso severo
+        logger.error(`[CRITICAL] Não foi possível resolver Telefone Real a partir do LID: ${msg.key.remoteJid}. Usando fallback para LID (Isso pode criar duplicidade!)`);
         senderId = msg.key.remoteJid;
       }
-    } else {
-      // Se não for LID (é s.whatsapp.net), usa ele
-      senderId = msg.key.remoteJid;
     }
   }
 
-  // Fallback seguro
+  // Fallback final
   if (!senderId) {
     senderId = msg.key.remoteJid;
   }
@@ -622,6 +629,28 @@ const verifyContact = async (
 
       if (!knownCountryCodes.includes(countryCode) && contactNumber.length > 12) {
         logger.warn(`⚠️ NÚMERO COM CÓDIGO DE PAÍS NÃO RECONHECIDO: ${contactNumber} | Código: ${countryCode} | JID: ${normalizedContactId} | Empresa: ${companyId}`);
+
+        // CORREÇÃO CRÍTICA PARA LIDS
+        // Se o JID ou o número indicam ser um LID (longo e desconhecido), NÃO criar contato com esse número.
+        if (normalizedContactId.includes("@lid") || contactNumber.length > 13) {
+          logger.error(`[BLOCK] Tentativa de criação de contato com LID/Número inválido bloqueada: ${contactNumber}`);
+
+          // Tentar encontrar um contato existente pelo JID antigo ou pelo nome (desesperado)
+          // Se não encontrar, infelizmente não podemos criar um contato lixo.
+          // Retorna undefined ou lança erro para não poluir o banco?
+          // Melhor: Tentar buscar por number = contactNumber
+          const existingContact = await Contact.findOne({ where: { number: contactNumber, companyId } });
+          if (existingContact) {
+            return existingContact;
+          } else {
+            // Se não existe, vamos criar um contato placeholder ou impedir?
+            // O usuário disse: "NÃO setar remoteJid como identificador".
+            // Vamos barrar a criação e retornar um erro controlado ou null (se o sistema suportar)
+            // Como o retorno é Promise<Contact>, vamos lançar erro para não prosseguir com LIXO.
+            throw new AppError("ERR_CONTACT_LID_BLOCK");
+          }
+        }
+
         Sentry.setExtra("Número com Código Inválido", {
           número: contactNumber,
           códigoPaís: countryCode,

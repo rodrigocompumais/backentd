@@ -26,7 +26,7 @@ export const createFlow = async (
     companyId
   });
 
-  if(flow === 'exist'){
+  if (flow === 'exist') {
     return res.status(402).json('exist')
   }
 
@@ -38,11 +38,11 @@ export const updateFlow = async (
   res: Response
 ): Promise<Response> => {
   const { companyId } = req.user;
-  const { flowId, name } = req.body;
+  const { flowId, name, flow: flowData } = req.body;
 
-  const flow = await UpdateFlowBuilderService({ companyId, name, flowId });
+  const flow = await UpdateFlowBuilderService({ companyId, name, flowId, flow: flowData });
 
-  if(flow === 'exist'){
+  if (flow === 'exist') {
     return res.status(402).json('exist')
   }
 

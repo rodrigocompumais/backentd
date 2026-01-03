@@ -1,7 +1,6 @@
 import path, { join } from "path";
 import { promisify } from "util";
 import { writeFile } from "fs";
-import { Op } from "sequelize";
 import * as Sentry from "@sentry/node";
 import { isNil, head } from "lodash";
 import { extension as mimeExtension } from "mime-types";
@@ -28,7 +27,6 @@ import { getIO } from "../../libs/socket";
 import CreateMessageService, { MessageData } from "../MessageServices/CreateMessageService";
 import { logger } from "../../utils/logger";
 import CreateOrUpdateContactService from "../ContactServices/CreateOrUpdateContactService";
-import AppError from "../../errors/AppError";
 import FindOrCreateTicketService from "../TicketServices/FindOrCreateTicketService";
 import ShowWhatsAppService from "../WhatsappService/ShowWhatsAppService";
 import UpdateTicketService from "../TicketServices/UpdateTicketService";
@@ -469,47 +467,22 @@ const getSenderMessage = (
   const key = msg.key as any;
   let senderId: string | undefined;
 
-  const isGroup = msg.key.remoteJid?.includes("@g.us");
+  // Hierarquia solicitada:
+  // 1. senderPn (se disponível)
+  // 2. participant (geralmente contém o PN em grupos)
+  // 3. remoteJid (fallback)
 
-  if (isGroup) {
-    // 1. senderPn é o padrão ouro (telefone real)
-    if (key.senderPn) {
-      senderId = key.senderPn;
-    } else if (msg.participant) {
-      senderId = msg.participant;
-    } else if (key.participant) {
-      senderId = key.participant;
-    }
-  } else {
-    // Para conversas privadas (1-1)
-
-    // 1. Tentar senderPn se disponível (telefone real)
-    if (key.senderPn) {
-      senderId = key.senderPn;
-    }
-    // 2. Verificar se remoteJid NÃO é LID (é @s.whatsapp.net)
-    else if (msg.key.remoteJid && !msg.key.remoteJid.includes("@lid")) {
-      senderId = msg.key.remoteJid;
-    }
-    // 3. Se remoteJid FOR LID, tentar resgatar o telefone de outras formas
-    else if (msg.key.remoteJid && msg.key.remoteJid.includes("@lid")) {
-      // Tentar participant (as vezes o Baileys popula participant com o PN em chats com LID)
-      if (msg.participant && !msg.participant.includes("@lid")) {
-        senderId = msg.participant;
-      } else if (key.participant && !key.participant.includes("@lid")) {
-        senderId = key.participant;
-      } else {
-        // CASO CRÍTICO: Só temos o LID.
-        // O usuário proibiu persistir LID.
-        // Tentar usar o remoteJid mas logar um aviso severo
-        logger.error(`[CRITICAL] Não foi possível resolver Telefone Real a partir do LID: ${msg.key.remoteJid}. Usando fallback para LID (Isso pode criar duplicidade!)`);
-        senderId = msg.key.remoteJid;
-      }
-    }
-  }
-
-  // Fallback final
-  if (!senderId) {
+  if (key.senderPn) {
+    // Prioridade 1: senderPn explícito
+    senderId = key.senderPn;
+  } else if (msg.participant) {
+    // Prioridade 2: participant na mensagem (root)
+    senderId = msg.participant;
+  } else if (key.participant) {
+    // Prioridade 2: participant na key
+    senderId = key.participant;
+  } else if (msg.key.remoteJid) {
+    // Prioridade 3: remoteJid
     senderId = msg.key.remoteJid;
   }
 
@@ -630,28 +603,6 @@ const verifyContact = async (
 
       if (!knownCountryCodes.includes(countryCode) && contactNumber.length > 12) {
         logger.warn(`⚠️ NÚMERO COM CÓDIGO DE PAÍS NÃO RECONHECIDO: ${contactNumber} | Código: ${countryCode} | JID: ${normalizedContactId} | Empresa: ${companyId}`);
-
-        // CORREÇÃO CRÍTICA PARA LIDS
-        // Se o JID ou o número indicam ser um LID (longo e desconhecido), NÃO criar contato com esse número.
-        if (normalizedContactId.includes("@lid") || contactNumber.length > 13) {
-          logger.error(`[BLOCK] Tentativa de criação de contato com LID/Número inválido bloqueada: ${contactNumber}`);
-
-          // Tentar encontrar um contato existente pelo JID antigo ou pelo nome (desesperado)
-          // Se não encontrar, infelizmente não podemos criar um contato lixo.
-          // Retorna undefined ou lança erro para não poluir o banco?
-          // Melhor: Tentar buscar por number = contactNumber
-          const existingContact = await Contact.findOne({ where: { number: contactNumber, companyId } });
-          if (existingContact) {
-            return existingContact;
-          } else {
-            // Se não existe, vamos criar um contato placeholder ou impedir?
-            // O usuário disse: "NÃO setar remoteJid como identificador".
-            // Vamos barrar a criação e retornar um erro controlado ou null (se o sistema suportar)
-            // Como o retorno é Promise<Contact>, vamos lançar erro para não prosseguir com LIXO.
-            throw new AppError("ERR_CONTACT_LID_BLOCK");
-          }
-        }
-
         Sentry.setExtra("Número com Código Inválido", {
           número: contactNumber,
           códigoPaís: countryCode,
@@ -2368,52 +2319,7 @@ const flowbuilderIntegration = async (
     return;
   }
 
-  // FORCE INTEGRATION IF DEFINED (Fix for Connection Integrations)
-  if (queueIntegration && queueIntegration.name) {
-    const flow = await FlowBuilderModel.findOne({
-      where: {
-        name: queueIntegration.name,
-        companyId
-      }
-    });
-
-    if (flow) {
-      const nodes: INodes[] = flow.flow["nodes"];
-      const connections: IConnections[] = flow.flow["connections"];
-
-      const mountDataContact = {
-        number: contact.number,
-        name: contact.name,
-        email: contact.email
-      };
-
-      await ticket.update({
-        useIntegration: true,
-        integrationId: queueIntegration.id
-      });
-
-      await ActionsWebhookService(
-        wbot.id!, // whatsappId
-        flow.id,
-        ticket.companyId,
-        nodes,
-        connections,
-        flow.flow["nodes"][0].id,
-        null,
-        "",
-        "",
-        null,
-        ticket.id,
-        mountDataContact,
-        msg
-      );
-      return;
-    }
-  }
-
   const whatsapp = await ShowWhatsAppService(wbot.id!, companyId);
-
-  logger.info(`[DEBUG] Connection Integration Check: WhatsAppId: ${whatsapp.id}, IntegrationId: ${whatsapp.integrationId}, Ticket UseIntegration: ${ticket.useIntegration}`);
 
   const listPhrase = await FlowCampaignModel.findAll({
     where: {
@@ -2847,121 +2753,10 @@ const handleMessage = async (
 ): Promise<void> => {
   let mediaSent: Message | undefined;
 
-  // =========================================================================
-  // 🧠 MODELO MENTAL OBRIGATÓRIO (State Machine: IGNORE_FROM_ME | LID | PHONE)
-  // =========================================================================
-
-  const rawRemoteJid = msg.key.remoteJid;
-  const rawSenderPn = (msg.key as any).senderPn;
-  const rawParticipant = msg.key.participant || (msg.key as any).participant;
-  const rawFromMe = msg.key.fromMe;
-  const rawPushName = msg.pushName;
-  const messageId = msg.key.id;
-
-  let resolutionStrategy = "ERROR";
-  let resolvedIdentity = null;
-
-  // 1. STATE: IGNORE_FROM_ME
-  if (rawFromMe) {
-    resolutionStrategy = "IGNORE_FROM_ME";
-    logger.info(JSON.stringify({
-      remoteJid: rawRemoteJid,
-      senderPn: rawSenderPn,
-      participant: rawParticipant,
-      fromMe: rawFromMe,
-      pushName: rawPushName,
-      companyId: companyId,
-      messageId: messageId,
-      resolvedIdentity: null,
-      resolutionStrategy: resolutionStrategy
-    }));
-    return; // Encerrar processamento imediatamente
-  }
-
-  // 2. TENTATIVA DE RESOLUÇÃO DE IDENTIDADE (PHONE)
-  // Prioridade: senderPn -> participant -> remoteJid (apenas se @s.whatsapp.net)
-
-  // Tentar senderPn (Telefone Real)
-  if (rawSenderPn) {
-    resolvedIdentity = rawSenderPn;
-    resolutionStrategy = "PHONE (senderPn)";
-  }
-  // Tentar participant (se válido e não LID)
-  else if (rawParticipant && !rawParticipant.includes("@lid")) {
-    resolvedIdentity = rawParticipant;
-    resolutionStrategy = "PHONE (participant)";
-  }
-  // Tentar remoteJid (somente se @s.whatsapp.net)
-  else if (rawRemoteJid && rawRemoteJid.endsWith("@s.whatsapp.net")) {
-    resolvedIdentity = rawRemoteJid.replace("@s.whatsapp.net", "");
-    resolutionStrategy = "PHONE (remoteJid)";
-  }
-
-  // 3. STATE: LID (Lead Temporário / Bloqueio)
-  // Se não resolveu identidade válida e é um LID
-  else if (rawRemoteJid && rawRemoteJid.endsWith("@lid")) {
-    resolutionStrategy = "LID";
-    // Como proibido criar contato, e sistema exige contato para criar ticket,
-    // vamos encerrar por aqui para evitar "dirty writes".
-    // Futuramente: criarOuAtualizarConversaPendente(event)
-    logger.warn(JSON.stringify({
-      remoteJid: rawRemoteJid,
-      senderPn: rawSenderPn,
-      participant: rawParticipant,
-      fromMe: rawFromMe,
-      pushName: rawPushName,
-      companyId: companyId,
-      messageId: messageId,
-      resolvedIdentity: null,
-      resolutionStrategy: "LID - BLOCKED (Wait for Phone)"
-    }));
-    return;
-  }
-  // 4. STATE: ERROR (Não foi possível identificar)
-  else {
-    resolutionStrategy = "ERROR";
-    logger.error(JSON.stringify({
-      remoteJid: rawRemoteJid,
-      senderPn: rawSenderPn,
-      participant: rawParticipant,
-      fromMe: rawFromMe,
-      pushName: rawPushName,
-      companyId: companyId,
-      messageId: messageId,
-      resolvedIdentity: null,
-      resolutionStrategy: "ERROR - UNKNOWN IDENTITY"
-    }));
-    return;
-  }
-
-  // LOG OBRIGATÓRIO (SUCCESS PHONE)
-  logger.info(JSON.stringify({
-    remoteJid: rawRemoteJid,
-    senderPn: rawSenderPn,
-    participant: rawParticipant,
-    fromMe: rawFromMe,
-    pushName: rawPushName,
-    companyId: companyId,
-    messageId: messageId,
-    resolvedIdentity: resolvedIdentity,
-    resolutionStrategy: resolutionStrategy
-  }));
-
   if (!isValidMsg(msg)) {
+    logger.debug(`Mensagem rejeitada por isValidMsg: ${msg.key.id} (remoteJid: ${msg.key.remoteJid}, empresa: ${companyId})`);
     return;
   }
-
-  // Continuamos apenas se tivermos uma identidade resolvida (resolvedIdentity)
-  // Mas o restante do código usa 'msg' e helpers. 
-  // Precisamos garantir que os helpers usem a identidade que ACABAMOS de resolver.
-  // 'getContactMessage' e 'verifyContact' precisam ser alinhados ou bypassados?
-  // Infelizmente 'verifyContact' extrai novamente. Vamos confiar que 'getSenderMessage'
-  // foi corrigido (no passo anterior) mas para garantir,
-  // vamos injetar a identidade resolvida se possível?
-  // O código legado é acoplado. Vamos deixar fluir, pois se 'resolvedIdentity' foi achado,
-  // o 'getSenderMessage' (que implementamos antes) deve achar o mesmo.
-  // Se 'getSenderMessage' falhar lá na frente, 'verifyContact' tem o bloqueio de LID.
-
 
   try {
     let msgContact: IMe;
@@ -3088,12 +2883,6 @@ const handleMessage = async (
       companyId,
       groupContact
     );
-
-    logger.info(`conversa iniciada para ${contact.number} contato para ${companyId} empresa`);
-
-    if (ticket.status === "pending") {
-      logger.info(`${contact.number} contato esta pendente`);
-    }
 
     await provider(ticket, msg, companyId, contact, wbot as WASocket);
 
@@ -3412,31 +3201,21 @@ const handleMessage = async (
       }
     }
 
-
     //integraçao na conexao
     if (
       !msg.key.fromMe &&
       !ticket.isGroup &&
       !ticket.queue &&
       !ticket.user &&
+      ticket.chatbot &&
       !isNil(whatsapp.integrationId) &&
       !ticket.useIntegration
     ) {
-      logger.info(`[DEBUG] Entering Connection Integration Block for Ticket ${ticket.id}`);
 
       const integrations = await ShowQueueIntegrationService(
         whatsapp.integrationId,
         companyId
       );
-
-      const isFirstMsg = await Ticket.findOne({
-        where: {
-          contactId: groupContact ? groupContact.id : contact.id,
-          companyId,
-          whatsappId: whatsapp.id
-        },
-        order: [["id", "DESC"]]
-      });
 
       await handleMessageIntegration(
         msg,
@@ -3444,10 +3223,7 @@ const handleMessage = async (
         integrations,
         ticket,
         companyId,
-        isMenu,
-        whatsapp,
-        contact,
-        isFirstMsg
+        isMenu
       );
 
       return;
@@ -3542,7 +3318,33 @@ const handleMessage = async (
       order: [["id", "DESC"]]
     });
 
+    // integração flowbuilder
+    if (
+      !msg.key.fromMe &&
+      !ticket.isGroup &&
+      !ticket.queue &&
+      !ticket.user &&
+      !isNil(whatsapp.integrationId) &&
+      !ticket.useIntegration
+    ) {
 
+      const integrations = await ShowQueueIntegrationService(
+        whatsapp.integrationId,
+        companyId
+      );
+
+      await handleMessageIntegration(
+        msg,
+        wbot,
+        integrations,
+        ticket,
+        companyId,
+        isMenu,
+        whatsapp,
+        contact,
+        isFirstMsg
+      );
+    }
 
     const dontReadTheFirstQuestion = ticket.queue === null;
 

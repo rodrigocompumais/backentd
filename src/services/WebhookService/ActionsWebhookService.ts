@@ -70,9 +70,6 @@ export const ActionsWebhookService = async (
       idTicket,
       numberPhrase
     );
-
-    logger.info(`[FLOWBUILDER] Iniciando execução do fluxo ID: ${idFlowDb} para Ticket: ${idTicket} Company: ${companyId}`);
-
     let createFieldJsonName = "";
 
     const connectStatic = connects;
@@ -221,13 +218,6 @@ export const ActionsWebhookService = async (
         }
       }
 
-      if (nodeSelected) {
-        logger.info(`[FLOWBUILDER] Processando nó ID: ${nodeSelected.id} Tipo: ${nodeSelected.type} para Ticket: ${ticket?.id}`);
-      } else {
-        logger.warn(`[FLOWBUILDER] Nó não encontrado ou undefined. Next: ${next} ExecFn: ${execFn}`);
-        break;
-      }
-
       if (nodeSelected.type === "message") {
 
         let msg;
@@ -271,648 +261,188 @@ export const ActionsWebhookService = async (
         });
       }
 
-      if (nodeSelected.type === "gemini") {
-        let {
-          name,
-          prompt,
-          voice,
-          voiceKey,
-          voiceRegion,
-          maxTokens,
-          temperature,
-          apiKey,
-          queueId,
-          maxMessages
-        } = nodeSelected.data.typebotIntegration;
-
-        let geminiSettings = {
-          name,
-          prompt,
-          voice,
-          voiceKey,
-          voiceRegion,
-          maxTokens: parseInt(maxTokens),
-          temperature: parseInt(temperature),
-          apiKey,
-          queueId: parseInt(queueId),
-          maxMessages: parseInt(maxMessages)
-        };
-
-        const contact = await Contact.findOne({
-          where: { number: numberClient, companyId }
-        });
-
-        const wbot = getWbot(whatsapp.id);
-
-        const ticketTraking = await FindOrCreateATicketTrakingService({
-          ticketId: ticket.id,
-          companyId,
-          userId: null,
-          whatsappId: whatsapp?.id
-        });
-
-        await handleGemini(
-          geminiSettings,
-          msg,
-          wbot,
-          ticket,
-          contact,
-          null,
-          ticketTraking
-        );
-        // Gemini usually handles its own history, but for Summary node consistency we might want to log the prompt or response?
-        // Since handleGemini is blackbox here, we assume it might update history or we revisit this.
-        // For now, relying on Gemini's internal context.
-
-        await ticket.update({
-          userId: null,
-          companyId: companyId,
-          lastFlowId: nodeSelected.id,
-          hashFlowId: hashWebhookId,
-          flowStopped: idFlowDb.toString()
-        });
-        break;
-      }
-
-      if (nodeSelected.type === "summary") {
-        try {
-          // 1. Gera o resumo
-          const summary = await generateContextSummary({
-            ticketId: ticket.id,
-            companyId: ticket.companyId,
-            provider: "gemini",
-          });
-
-          // 2. Cria mensagem interna com o resumo
-          const messageData: MessageData = {
-            id: "summary-" + Date.now(),
-            ticketId: ticket.id,
-            contactId: ticket.contactId,
-            body: `📝 *Resumo do Fluxo*:\\n${summary}`,
-            fromMe: true,
-            mediaType: "conversation",
-            read: true,
-            isInternal: true // Importante: flag para mensagem interna
-          };
-
-          await CreateMessageService({ messageData, companyId: ticket.companyId });
-
-          await delay(1000); // Pequeno delay para garantir ordem
-        } catch (error) {
-          logger.error(`Error generating summary node: ${error}`);
-        }
-      }
-
-      if (nodeSelected.type === "openai") {
-        let {
-          name,
-          prompt,
-          voice,
-          voiceKey,
-          voiceRegion,
-          maxTokens,
-          temperature,
-          apiKey,
-          queueId,
-          maxMessages
-        } = nodeSelected.data.typebotIntegration as IOpenAi;
-
-        let openAiSettings = {
-          name,
-          prompt,
-          voice,
-          voiceKey,
-          voiceRegion,
-          maxTokens: parseInt(maxTokens),
-          temperature: parseInt(temperature),
-          apiKey,
-          queueId: parseInt(queueId),
-          maxMessages: parseInt(maxMessages)
-        };
-
-        const contact = await Contact.findOne({
-          where: { number: numberClient, companyId }
-        });
-
-        const wbot = getWbot(whatsapp.id);
-
-        const ticketTraking = await FindOrCreateATicketTrakingService({
-          ticketId: ticket.id,
-          companyId,
-          userId: null,
-          whatsappId: whatsapp?.id
-        });
-
-        await handleOpenAi(
-          openAiSettings,
-          msg,
-          wbot,
-          ticket,
-          contact,
-          null,
-          ticketTraking
-        );
-
-        await ticket.update({
-          userId: null,
-          companyId: companyId,
-          lastFlowId: nodeSelected.id,
-          hashFlowId: hashWebhookId,
-          flowStopped: idFlowDb.toString()
-        });
-        break;
-      }
-
-      if (nodeSelected.type === "question") {
-        const webhook = ticket?.dataWebhook;
-        const variables = (ticket?.dataWebhook as any)?.variables;
-
-        if (!variables || variables === undefined || variables === null) {
-          const { message } = nodeSelected.data.typebotIntegration;
-          await logHistory(ticket, "model", message);
-
-          const ticketDetails = await ShowTicketService(ticket.id, companyId);
-
-          const bodyFila = formatBody(`${message}`, ticket.contact);
-
-          await delay(3000);
-          await typeSimulation(ticket, "composing");
-
-          await SendWhatsAppMessage({
-            body: bodyFila,
-            ticket: ticketDetails,
-            quotedMsg: null
-          });
-
-          SetTicketMessagesAsRead(ticketDetails);
-
-          await ticketDetails.update({
-            lastMessage: bodyFila
-          });
-
-          await ticket.update({
-            userId: null,
-            companyId: companyId,
-            lastFlowId: nodeSelected.id,
-            hashFlowId: hashWebhookId,
-            flowStopped: idFlowDb.toString()
-          });
-        }
-        break;
-      }
-
-      if (nodeSelected.type === "ticket") {
-        /*const queueId = nodeSelected.data?.data?.id || nodeSelected.data?.id;
-        const queue = await ShowQueueService(queueId, companyId);
-   
-        await ticket.update({
-          status: "pending",
-          queueId: queue.id,
-          userId: ticket.userId,
-          companyId: companyId,
-          flowWebhook: true,
-          lastFlowId: nodeSelected.id,
-          hashFlowId: hashWebhookId,
-          flowStopped: idFlowDb.toString()
-        });
-   
-        await FindOrCreateATicketTrakingService({
-          ticketId: ticket.id,
-          companyId,
-          whatsappId: ticket.whatsappId,
-          userId: ticket.userId
-        });
-   
-        await UpdateTicketService({
-          ticketData: {
-            status: "pending",
-            queueId: queue.id
-          },
-          ticketId: ticket.id,
-          companyId
-        });
-   
-        await CreateLogTicketService({
-          ticketId: ticket.id,
-          type: "queue",
-          queueId: queue.id
-        });
-   
-        let settings = await CompaniesSettings.findOne({
-          where: {
-            companyId: companyId
-          }
-        });
-   
-        const enableQueuePosition = settings.sendQueuePosition === "enabled";
-   
-        if (enableQueuePosition) {
-          const count = await Ticket.findAndCountAll({
-            where: {
-              userId: null,
-              status: "pending",
-              companyId,
-              queueId: queue.id,
-              whatsappId: whatsapp.id,
-              isGroup: false
-            }
-          });
-   
-          // Lógica para enviar posição da fila de atendimento
-          const qtd = count.count === 0 ? 1 : count.count;
-   
-          const msgFila = `${settings.sendQueuePositionMessage} *${qtd}*`;
-   
-          const ticketDetails = await ShowTicketService(ticket.id, companyId);
-   
-          const bodyFila = formatBody(`${msgFila}`, ticket.contact);
-   
-          await delay(3000);
-          await typeSimulation(ticket, "composing");
-   
-          await SendWhatsAppMessage({
-            body: bodyFila,
-            ticket: ticketDetails,
-            quotedMsg: null
-          });
-   
-          SetTicketMessagesAsRead(ticketDetails);
-   
-          await ticketDetails.update({
-            lastMessage: bodyFila
-          });
-        }*/
-      }
-
-      if (nodeSelected.type === "singleBlock") {
-        for (var iLoc = 0; iLoc < nodeSelected.data.seq.length; iLoc++) {
-          const elementNowSelected = nodeSelected.data.seq[iLoc];
-
-          ticket = await Ticket.findOne({
-            where: { id: idTicket, companyId }
-          });
-
-          if (elementNowSelected.includes("message")) {
-            const bodyFor = nodeSelected.data.elements.filter(
-              item => item.number === elementNowSelected
-            )[0].value;
-
-            const ticketDetails = await ShowTicketService(idTicket, companyId);
-
-            let msg;
-
-            const webhook = ticket.dataWebhook;
-
-            if (webhook && webhook.hasOwnProperty("variables")) {
-              msg = replaceMessages((webhook as any).variables, bodyFor);
-            } else {
-              msg = bodyFor;
-            }
-
-            await delay(3000);
-            await typeSimulation(ticket, "composing");
-
-            await SendWhatsAppMessage({
-              body: msg,
-              ticket: ticketDetails,
-              quotedMsg: null
-            });
-
-            SetTicketMessagesAsRead(ticketDetails);
-
-            await ticketDetails.update({
-              lastMessage: formatBody(bodyFor, ticket.contact)
-            });
-
-            await intervalWhats("1");
-          }
-          if (elementNowSelected.includes("interval")) {
-            await intervalWhats(
-              nodeSelected.data.elements.filter(
-                item => item.number === elementNowSelected
-              )[0].value
-            );
-          }
-
-          if (elementNowSelected.includes("img")) {
-            await typeSimulation(ticket, "composing");
-
-            logger.info(__dirname.split("src")[0].split("\\").join("/"));
-
-            await SendMessage(whatsapp, {
-              number: numberClient,
-              body: "",
-              mediaPath:
-                process.env.BACKEND_URL.includes("http://localhost")
-                  ? `${__dirname.split("src")[0].split("\\").join("/")}public/${nodeSelected.data.elements.filter(
-                    item => item.number === elementNowSelected
-                  )[0].value
-                  }`
-                  : `${__dirname
-                    .split("dist")[0]
-                    .split("\\")
-                    .join("/")}public/${nodeSelected.data.elements.filter(
-                      item => item.number === elementNowSelected
-                    )[0].value
-                  }`
-            });
-            await intervalWhats("1");
-          }
-
-          if (elementNowSelected.includes("audio")) {
-            const mediaDirectory =
-              process.env.BACKEND_URL === "http://localhost:8090"
-                ? `${__dirname.split("src")[0].split("\\").join("/")}public/${nodeSelected.data.elements.filter(
-                  item => item.number === elementNowSelected
-                )[0].value
-                }`
-                : `${__dirname.split("dist")[0].split("\\").join("/")}public/${nodeSelected.data.elements.filter(
-                  item => item.number === elementNowSelected
-                )[0].value
-                }`;
-            const ticketInt = await Ticket.findOne({
-              where: { id: ticket.id }
-            });
-
-            await typeSimulation(ticket, "recording");
-
-            await SendWhatsAppMediaFlow({
-              media: mediaDirectory,
-              ticket: ticketInt,
-              isRecord: nodeSelected.data.elements.filter(
-                item => item.number === elementNowSelected
-              )[0].record
-            });
-            //fs.unlinkSync(mediaDirectory.split('.')[0] + 'A.mp3');
-            await intervalWhats("1");
-          }
-          if (elementNowSelected.includes("video")) {
-            const mediaDirectory =
-              process.env.BACKEND_URL === "http://localhost:8090"
-                ? `${__dirname.split("src")[0].split("\\").join("/")}public/${nodeSelected.data.elements.filter(
-                  item => item.number === elementNowSelected
-                )[0].value
-                }`
-                : `${__dirname.split("dist")[0].split("\\").join("/")}public/${nodeSelected.data.elements.filter(
-                  item => item.number === elementNowSelected
-                )[0].value
-                }`;
-            const ticketInt = await Ticket.findOne({
-              where: { id: ticket.id }
-            });
-
-            await typeSimulation(ticket, "recording");
-
-            await SendWhatsAppMediaFlow({
-              media: mediaDirectory,
-              ticket: ticketInt
-            });
-            //fs.unlinkSync(mediaDirectory.split('.')[0] + 'A.mp3');
-            await intervalWhats("1");
-          }
-        }
-      }
-
-      let isRandomizer: boolean;
-      if (nodeSelected.type === "randomizer") {
-        const selectedRandom = randomizarCaminho(
-          nodeSelected.data.percent / 100
-        );
-
-        const resultConnect = connects.filter(
-          connect => connect.source === nodeSelected.id
-        );
-        if (selectedRandom === "A") {
-          next = resultConnect.filter(item => item.sourceHandle === "a")[0]
-            .target;
-          noAlterNext = true;
-        } else {
-          next = resultConnect.filter(item => item.sourceHandle === "b")[0]
-            .target;
-          noAlterNext = true;
-        }
-        isRandomizer = true;
-      }
-
-      let isMenu: boolean;
-
-      if (nodeSelected.type === "menu") {
-        console.log(650, "menu");
-        if (pressKey) {
-          const filterOne = connectStatic.filter(
-            confil => confil.source === next
-          );
-          const filterTwo = filterOne.filter(
-            filt2 => filt2.sourceHandle === "a" + pressKey
-          );
-          if (filterTwo.length > 0) {
-            execFn = filterTwo[0].target;
-          } else {
-            execFn = undefined;
-          }
-          // execFn =
-          //   connectStatic
-          //     .filter(confil => confil.source === next)
-          //     .filter(filt2 => filt2.sourceHandle === "a" + pressKey)[0]?.target ??
-          //   undefined;
-          if (execFn === undefined) {
-            break;
-          }
-          pressKey = "999";
-
-          const isNodeExist = nodes.filter(item => item.id === execFn);
-          console.log(674, "menu");
-          if (isNodeExist.length > 0) {
-            isMenu = isNodeExist[0].type === "menu" ? true : false;
-          } else {
-            isMenu = false;
-          }
-        } else {
-          console.log(681, "menu");
-          let optionsMenu = "";
-          nodeSelected.data.arrayOption.map(item => {
-            optionsMenu += `[${item.number}] ${item.value}\n`;
-          });
-
-          const menuCreate = `${nodeSelected.data.message}\n\n${optionsMenu}`;
-
-          const webhook = ticket.dataWebhook;
-
-          let msg;
-          if (webhook && webhook.hasOwnProperty("variables")) {
-            msg = {
-              body: replaceMessages(webhook, menuCreate),
-              number: numberClient,
-              companyId: companyId
-            };
-          } else {
-            msg = {
-              body: menuCreate,
-              number: numberClient,
-              companyId: companyId
-            };
-          }
-
-          await logHistory(ticket, "model", msg.body);
-
-          const ticketDetails = await ShowTicketService(ticket.id, companyId);
-
-          //const messageData: MessageData = {
-          //  wid: randomString(50),
-          //  ticketId: ticket.id,
-          //  body: msg.body,
-          //  fromMe: true,
-          //  read: true
-          //};
-
-          //await CreateMessageService({ messageData: messageData, companyId });
-
-          //await SendWhatsAppMessage({ body: bodyFor, ticket: ticketDetails, quotedMsg: null })
-
-          // await SendMessage(whatsapp, {
-          //   number: numberClient,
-          //   body: msg.body
-          // });
-
-          await typeSimulation(ticket, "composing");
-
-          await SendWhatsAppMessage({
-            body: msg.body,
-            ticket: ticketDetails,
-            quotedMsg: null
-          });
-
-          SetTicketMessagesAsRead(ticketDetails);
-
-          await ticketDetails.update({
-            lastMessage: formatBody(msg.body, ticket.contact)
-          });
-          await intervalWhats("1");
-
-          if (ticket) {
-            ticket = await Ticket.findOne({
-              where: {
-                id: ticket.id,
-                whatsappId: whatsappId,
-                companyId: companyId
-              }
-            });
-          } else {
-            ticket = await Ticket.findOne({
-              where: {
-                id: idTicket,
-                whatsappId: whatsappId,
-                companyId: companyId
-              }
-            });
-          }
-
-          if (ticket) {
-            await ticket.update({
-              queueId: ticket.queueId ? ticket.queueId : null,
-              userId: null,
-              companyId: companyId,
-              flowWebhook: true,
-              lastFlowId: nodeSelected.id,
-              dataWebhook: dataWebhook,
-              hashFlowId: hashWebhookId,
-              flowStopped: idFlowDb.toString()
-            });
-          }
-
-          break;
-        }
-      }
-
-      let isContinue = false;
-
-      if (pressKey === "999" && execCount > 0) {
-        console.log(587, "ActionsWebhookService | 587");
-
-        pressKey = undefined;
-        let result = connects.filter(connect => connect.source === execFn)[0];
-        if (typeof result === "undefined") {
-          next = "";
-        } else {
-          if (!noAlterNext) {
-            next = result.target;
-          }
-        }
-      } else {
-        let result;
-
-        if (isMenu) {
-          result = { target: execFn };
-          isContinue = true;
-          pressKey = undefined;
-        } else if (isRandomizer) {
-          isRandomizer = false;
-          result = next;
-        } else {
-          result = connects.filter(connect => connect.source === next)[0];
-        }
-
-        if (typeof result === "undefined") {
-          next = "";
-        } else {
-          if (!noAlterNext) {
-            next = result.target;
-          }
-        }
-        console.log(619, "ActionsWebhookService");
-      }
-
-      if (!pressKey && !isContinue) {
-        const nextNode = connects.filter(
-          connect => connect.source === nodeSelected.id
-        ).length;
-
-        console.log(626, "ActionsWebhookService");
-
-        if (nextNode === 0) {
-          console.log(654, "ActionsWebhookService");
-
-          await Ticket.findOne({
-            where: { id: idTicket, whatsappId, companyId: companyId }
-          });
-          await ticket.update({
-            lastFlowId: nodeSelected.id,
-            hashFlowId: null,
-            flowWebhook: false,
-            flowStopped: idFlowDb.toString()
-          });
-          break;
-        }
-      }
-
-      isContinue = false;
-
-      if (next === "") {
-        break;
-      }
-
-      console.log(678, "ActionsWebhookService");
-
-      console.log("UPDATE10...");
-      ticket = await Ticket.findOne({
-        where: { id: idTicket, whatsappId, companyId: companyId }
+    }
+
+    if (nodeSelected.type === "gemini") {
+      let {
+        name,
+        prompt,
+        voice,
+        voiceKey,
+        voiceRegion,
+        maxTokens,
+        temperature,
+        apiKey,
+        queueId,
+        maxMessages
+      } = nodeSelected.data.typebotIntegration;
+
+      let geminiSettings = {
+        name,
+        prompt,
+        voice,
+        voiceKey,
+        voiceRegion,
+        maxTokens: parseInt(maxTokens),
+        temperature: parseInt(temperature),
+        apiKey,
+        queueId: parseInt(queueId),
+        maxMessages: parseInt(maxMessages)
+      };
+
+      const contact = await Contact.findOne({
+        where: { number: numberClient, companyId }
       });
 
-      if (ticket.status === "closed") {
-        io.of(String(companyId))
-          // .to(oldStatus)
-          // .to(ticketId.toString())
-          .emit(`company-${ticket.companyId}-ticket`, {
-            action: "delete",
-            ticketId: ticket.id
-          });
-      }
+      const wbot = getWbot(whatsapp.id);
 
-      console.log("UPDATE12...");
-      await ticket.update({
-        whatsappId: whatsappId,
-        queueId: ticket?.queueId,
+      const ticketTraking = await FindOrCreateATicketTrakingService({
+        ticketId: ticket.id,
+        companyId,
         userId: null,
+        whatsappId: whatsapp?.id
+      });
+
+      await handleGemini(
+        geminiSettings,
+        msg,
+        wbot,
+        ticket,
+        contact,
+        null,
+        ticketTraking
+      );
+      // Gemini usually handles its own history, but for Summary node consistency we might want to log the prompt or response?
+      // Since handleGemini is blackbox here, we assume it might update history or we revisit this.
+      // For now, relying on Gemini's internal context.
+    }
+
+    if (nodeSelected.type === "summary") {
+      try {
+        // 1. Gera o resumo
+        const summary = await generateContextSummary({
+          ticketId: ticket.id,
+          companyId: ticket.companyId,
+          provider: "gemini",
+        });
+
+        // 2. Cria mensagem interna com o resumo
+        const messageData: MessageData = {
+          id: "summary-" + Date.now(),
+          ticketId: ticket.id,
+          contactId: ticket.contactId,
+          body: `📝 *Resumo do Fluxo*:\\n${summary}`,
+          fromMe: true,
+          mediaType: "conversation",
+          read: true,
+          isInternal: true // Importante: flag para mensagem interna
+        };
+
+        await CreateMessageService({ messageData, companyId: ticket.companyId });
+
+        await delay(1000); // Pequeno delay para garantir ordem
+      } catch (error) {
+        logger.error(`Error generating summary node: ${error}`);
+      }
+    }
+
+    if (nodeSelected.type === "openai") {
+      let {
+        name,
+        prompt,
+        voice,
+        voiceKey,
+        voiceRegion,
+        maxTokens,
+        temperature,
+        apiKey,
+        queueId,
+        maxMessages
+      } = nodeSelected.data.typebotIntegration as IOpenAi;
+
+      let openAiSettings = {
+        name,
+        prompt,
+        voice,
+        voiceKey,
+        voiceRegion,
+        maxTokens: parseInt(maxTokens),
+        temperature: parseInt(temperature),
+        apiKey,
+        queueId: parseInt(queueId),
+        maxMessages: parseInt(maxMessages)
+      };
+
+      const contact = await Contact.findOne({
+        where: { number: numberClient, companyId }
+      });
+
+      const wbot = getWbot(whatsapp.id);
+
+      const ticketTraking = await FindOrCreateATicketTrakingService({
+        ticketId: ticket.id,
+        companyId,
+        userId: null,
+        whatsappId: whatsapp?.id
+      });
+
+      await handleOpenAi(
+        openAiSettings,
+        msg,
+        wbot,
+        ticket,
+        contact,
+        null,
+        ticketTraking
+      );
+    }
+
+    if (nodeSelected.type === "question") {
+      const webhook = ticket?.dataWebhook;
+      const variables = ticket?.dataWebhook?.variables;
+
+      if (!variables || variables === undefined || variables === null) {
+        const { message } = nodeSelected.data.typebotIntegration;
+        await logHistory(ticket, "model", message);
+
+        const ticketDetails = await ShowTicketService(ticket.id, companyId);
+
+        const bodyFila = formatBody(`${message}`, ticket.contact);
+
+        await delay(3000);
+        await typeSimulation(ticket, "composing");
+
+        await SendWhatsAppMessage({
+          body: bodyFila,
+          ticket: ticketDetails,
+          quotedMsg: null
+        });
+
+        SetTicketMessagesAsRead(ticketDetails);
+
+        await ticketDetails.update({
+          lastMessage: bodyFila
+        });
+
+        await ticket.update({
+          userId: null,
+          companyId: companyId,
+          lastFlowId: nodeSelected.id,
+          hashFlowId: hashWebhookId,
+          flowStopped: idFlowDb.toString()
+        });
+      }
+      break;
+    }
+
+    if (nodeSelected.type === "ticket") {
+      /*const queueId = nodeSelected.data?.data?.id || nodeSelected.data?.id;
+      const queue = await ShowQueueService(queueId, companyId);
+
+      await ticket.update({
+        status: "pending",
+        queueId: queue.id,
+        userId: ticket.userId,
         companyId: companyId,
         flowWebhook: true,
         lastFlowId: nodeSelected.id,
@@ -920,15 +450,458 @@ export const ActionsWebhookService = async (
         flowStopped: idFlowDb.toString()
       });
 
-      noAlterNext = false;
-      execCount++;
+      await FindOrCreateATicketTrakingService({
+        ticketId: ticket.id,
+        companyId,
+        whatsappId: ticket.whatsappId,
+        userId: ticket.userId
+      });
+
+      await UpdateTicketService({
+        ticketData: {
+          status: "pending",
+          queueId: queue.id
+        },
+        ticketId: ticket.id,
+        companyId
+      });
+
+      await CreateLogTicketService({
+        ticketId: ticket.id,
+        type: "queue",
+        queueId: queue.id
+      });
+
+      let settings = await CompaniesSettings.findOne({
+        where: {
+          companyId: companyId
+        }
+      });
+
+      const enableQueuePosition = settings.sendQueuePosition === "enabled";
+
+      if (enableQueuePosition) {
+        const count = await Ticket.findAndCountAll({
+          where: {
+            userId: null,
+            status: "pending",
+            companyId,
+            queueId: queue.id,
+            whatsappId: whatsapp.id,
+            isGroup: false
+          }
+        });
+
+        // Lógica para enviar posição da fila de atendimento
+        const qtd = count.count === 0 ? 1 : count.count;
+
+        const msgFila = `${settings.sendQueuePositionMessage} *${qtd}*`;
+
+        const ticketDetails = await ShowTicketService(ticket.id, companyId);
+
+        const bodyFila = formatBody(`${msgFila}`, ticket.contact);
+
+        await delay(3000);
+        await typeSimulation(ticket, "composing");
+
+        await SendWhatsAppMessage({
+          body: bodyFila,
+          ticket: ticketDetails,
+          quotedMsg: null
+        });
+
+        SetTicketMessagesAsRead(ticketDetails);
+
+        await ticketDetails.update({
+          lastMessage: bodyFila
+        });
+      }*/
     }
 
-    return "ok";
-  } catch (error) {
-    logger.error(`[FLOWBUILDER] Erro crítico na execução do fluxo: ${error.message} Stack: ${error.stack}`);
-    return "error";
+    if (nodeSelected.type === "singleBlock") {
+      for (var iLoc = 0; iLoc < nodeSelected.data.seq.length; iLoc++) {
+        const elementNowSelected = nodeSelected.data.seq[iLoc];
+
+        ticket = await Ticket.findOne({
+          where: { id: idTicket, companyId }
+        });
+
+        if (elementNowSelected.includes("message")) {
+          const bodyFor = nodeSelected.data.elements.filter(
+            item => item.number === elementNowSelected
+          )[0].value;
+
+          const ticketDetails = await ShowTicketService(idTicket, companyId);
+
+          let msg;
+
+          const webhook = ticket.dataWebhook;
+
+          if (webhook && webhook.hasOwnProperty("variables")) {
+            msg = replaceMessages(webhook.variables, bodyFor);
+          } else {
+            msg = bodyFor;
+          }
+
+          await delay(3000);
+          await typeSimulation(ticket, "composing");
+
+          await SendWhatsAppMessage({
+            body: msg,
+            ticket: ticketDetails,
+            quotedMsg: null
+          });
+
+          SetTicketMessagesAsRead(ticketDetails);
+
+          await ticketDetails.update({
+            lastMessage: formatBody(bodyFor, ticket.contact)
+          });
+
+          await intervalWhats("1");
+        }
+        if (elementNowSelected.includes("interval")) {
+          await intervalWhats(
+            nodeSelected.data.elements.filter(
+              item => item.number === elementNowSelected
+            )[0].value
+          );
+        }
+
+        if (elementNowSelected.includes("img")) {
+          await typeSimulation(ticket, "composing");
+
+          logger.info(__dirname.split("src")[0].split("\\").join("/"));
+
+          await SendMessage(whatsapp, {
+            number: numberClient,
+            body: "",
+            mediaPath:
+              process.env.BACKEND_URL.includes("http://localhost")
+                ? `${__dirname.split("src")[0].split("\\").join("/")}public/${nodeSelected.data.elements.filter(
+                  item => item.number === elementNowSelected
+                )[0].value
+                }`
+                : `${__dirname
+                  .split("dist")[0]
+                  .split("\\")
+                  .join("/")}public/${nodeSelected.data.elements.filter(
+                    item => item.number === elementNowSelected
+                  )[0].value
+                }`
+          });
+          await intervalWhats("1");
+        }
+
+        if (elementNowSelected.includes("audio")) {
+          const mediaDirectory =
+            process.env.BACKEND_URL === "http://localhost:8090"
+              ? `${__dirname.split("src")[0].split("\\").join("/")}public/${nodeSelected.data.elements.filter(
+                item => item.number === elementNowSelected
+              )[0].value
+              }`
+              : `${__dirname.split("dist")[0].split("\\").join("/")}public/${nodeSelected.data.elements.filter(
+                item => item.number === elementNowSelected
+              )[0].value
+              }`;
+          const ticketInt = await Ticket.findOne({
+            where: { id: ticket.id }
+          });
+
+          await typeSimulation(ticket, "recording");
+
+          await SendWhatsAppMediaFlow({
+            media: mediaDirectory,
+            ticket: ticketInt,
+            isRecord: nodeSelected.data.elements.filter(
+              item => item.number === elementNowSelected
+            )[0].record
+          });
+          //fs.unlinkSync(mediaDirectory.split('.')[0] + 'A.mp3');
+          await intervalWhats("1");
+        }
+        if (elementNowSelected.includes("video")) {
+          const mediaDirectory =
+            process.env.BACKEND_URL === "http://localhost:8090"
+              ? `${__dirname.split("src")[0].split("\\").join("/")}public/${nodeSelected.data.elements.filter(
+                item => item.number === elementNowSelected
+              )[0].value
+              }`
+              : `${__dirname.split("dist")[0].split("\\").join("/")}public/${nodeSelected.data.elements.filter(
+                item => item.number === elementNowSelected
+              )[0].value
+              }`;
+          const ticketInt = await Ticket.findOne({
+            where: { id: ticket.id }
+          });
+
+          await typeSimulation(ticket, "recording");
+
+          await SendWhatsAppMediaFlow({
+            media: mediaDirectory,
+            ticket: ticketInt
+          });
+          //fs.unlinkSync(mediaDirectory.split('.')[0] + 'A.mp3');
+          await intervalWhats("1");
+        }
+      }
+    }
+
+    let isRandomizer: boolean;
+    if (nodeSelected.type === "randomizer") {
+      const selectedRandom = randomizarCaminho(
+        nodeSelected.data.percent / 100
+      );
+
+      const resultConnect = connects.filter(
+        connect => connect.source === nodeSelected.id
+      );
+      if (selectedRandom === "A") {
+        next = resultConnect.filter(item => item.sourceHandle === "a")[0]
+          .target;
+        noAlterNext = true;
+      } else {
+        next = resultConnect.filter(item => item.sourceHandle === "b")[0]
+          .target;
+        noAlterNext = true;
+      }
+      isRandomizer = true;
+    }
+
+    let isMenu: boolean;
+
+    if (nodeSelected.type === "menu") {
+      console.log(650, "menu");
+      if (pressKey) {
+        const filterOne = connectStatic.filter(
+          confil => confil.source === next
+        );
+        const filterTwo = filterOne.filter(
+          filt2 => filt2.sourceHandle === "a" + pressKey
+        );
+        if (filterTwo.length > 0) {
+          execFn = filterTwo[0].target;
+        } else {
+          execFn = undefined;
+        }
+        // execFn =
+        //   connectStatic
+        //     .filter(confil => confil.source === next)
+        //     .filter(filt2 => filt2.sourceHandle === "a" + pressKey)[0]?.target ??
+        //   undefined;
+        if (execFn === undefined) {
+          break;
+        }
+        pressKey = "999";
+
+        const isNodeExist = nodes.filter(item => item.id === execFn);
+        console.log(674, "menu");
+        if (isNodeExist.length > 0) {
+          isMenu = isNodeExist[0].type === "menu" ? true : false;
+        } else {
+          isMenu = false;
+        }
+      } else {
+        console.log(681, "menu");
+        let optionsMenu = "";
+        nodeSelected.data.arrayOption.map(item => {
+          optionsMenu += `[${item.number}] ${item.value}\n`;
+        });
+
+        const menuCreate = `${nodeSelected.data.message}\n\n${optionsMenu}`;
+
+        const webhook = ticket.dataWebhook;
+
+        let msg;
+        if (webhook && webhook.hasOwnProperty("variables")) {
+          msg = {
+            body: replaceMessages(webhook, menuCreate),
+            number: numberClient,
+            companyId: companyId
+          };
+        } else {
+          msg = {
+            body: menuCreate,
+            number: numberClient,
+            companyId: companyId
+          };
+        }
+
+        await logHistory(ticket, "model", msg.body);
+
+        const ticketDetails = await ShowTicketService(ticket.id, companyId);
+
+        //const messageData: MessageData = {
+        //  wid: randomString(50),
+        //  ticketId: ticket.id,
+        //  body: msg.body,
+        //  fromMe: true,
+        //  read: true
+        //};
+
+        //await CreateMessageService({ messageData: messageData, companyId });
+
+        //await SendWhatsAppMessage({ body: bodyFor, ticket: ticketDetails, quotedMsg: null })
+
+        // await SendMessage(whatsapp, {
+        //   number: numberClient,
+        //   body: msg.body
+        // });
+
+        await typeSimulation(ticket, "composing");
+
+        await SendWhatsAppMessage({
+          body: msg.body,
+          ticket: ticketDetails,
+          quotedMsg: null
+        });
+
+        SetTicketMessagesAsRead(ticketDetails);
+
+        await ticketDetails.update({
+          lastMessage: formatBody(msg.body, ticket.contact)
+        });
+        await intervalWhats("1");
+
+        if (ticket) {
+          ticket = await Ticket.findOne({
+            where: {
+              id: ticket.id,
+              whatsappId: whatsappId,
+              companyId: companyId
+            }
+          });
+        } else {
+          ticket = await Ticket.findOne({
+            where: {
+              id: idTicket,
+              whatsappId: whatsappId,
+              companyId: companyId
+            }
+          });
+        }
+
+        if (ticket) {
+          await ticket.update({
+            queueId: ticket.queueId ? ticket.queueId : null,
+            userId: null,
+            companyId: companyId,
+            flowWebhook: true,
+            lastFlowId: nodeSelected.id,
+            dataWebhook: dataWebhook,
+            hashFlowId: hashWebhookId,
+            flowStopped: idFlowDb.toString()
+          });
+        }
+
+        break;
+      }
+    }
+
+    let isContinue = false;
+
+    if (pressKey === "999" && execCount > 0) {
+      console.log(587, "ActionsWebhookService | 587");
+
+      pressKey = undefined;
+      let result = connects.filter(connect => connect.source === execFn)[0];
+      if (typeof result === "undefined") {
+        next = "";
+      } else {
+        if (!noAlterNext) {
+          next = result.target;
+        }
+      }
+    } else {
+      let result;
+
+      if (isMenu) {
+        result = { target: execFn };
+        isContinue = true;
+        pressKey = undefined;
+      } else if (isRandomizer) {
+        isRandomizer = false;
+        result = next;
+      } else {
+        result = connects.filter(connect => connect.source === next)[0];
+      }
+
+      if (typeof result === "undefined") {
+        next = "";
+      } else {
+        if (!noAlterNext) {
+          next = result.target;
+        }
+      }
+      console.log(619, "ActionsWebhookService");
+    }
+
+    if (!pressKey && !isContinue) {
+      const nextNode = connects.filter(
+        connect => connect.source === nodeSelected.id
+      ).length;
+
+      console.log(626, "ActionsWebhookService");
+
+      if (nextNode === 0) {
+        console.log(654, "ActionsWebhookService");
+
+        await Ticket.findOne({
+          where: { id: idTicket, whatsappId, companyId: companyId }
+        });
+        await ticket.update({
+          lastFlowId: nodeSelected.id,
+          hashFlowId: null,
+          flowWebhook: false,
+          flowStopped: idFlowDb.toString()
+        });
+        break;
+      }
+    }
+
+    isContinue = false;
+
+    if (next === "") {
+      break;
+    }
+
+    console.log(678, "ActionsWebhookService");
+
+    console.log("UPDATE10...");
+    ticket = await Ticket.findOne({
+      where: { id: idTicket, whatsappId, companyId: companyId }
+    });
+
+    if (ticket.status === "closed") {
+      io.of(String(companyId))
+        // .to(oldStatus)
+        // .to(ticketId.toString())
+        .emit(`company-${ticket.companyId}-ticket`, {
+          action: "delete",
+          ticketId: ticket.id
+        });
+    }
+
+    console.log("UPDATE12...");
+    await ticket.update({
+      whatsappId: whatsappId,
+      queueId: ticket?.queueId,
+      userId: null,
+      companyId: companyId,
+      flowWebhook: true,
+      lastFlowId: nodeSelected.id,
+      hashFlowId: hashWebhookId,
+      flowStopped: idFlowDb.toString()
+    });
+
+    noAlterNext = false;
+    execCount++;
   }
+
+    return "ds";
+} catch (error) {
+  logger.error(error);
+}
 };
 
 const constructJsonLine = (line: string, json: any) => {
@@ -945,9 +918,9 @@ const constructJsonLine = (line: string, json: any) => {
   return valor;
 };
 
-export function removerNaoLetrasNumeros(texto: string) {
-  // Remove tudo que não for número
-  return texto.replace(/\D/g, "");
+function removerNaoLetrasNumeros(texto: string) {
+  // Substitui todos os caracteres que não são letras ou números por vazio
+  return texto.replace(/[^a-zA-Z0-9]/g, "");
 }
 
 const sendMessageWhats = async (

@@ -39,7 +39,9 @@ const typebotListener = async ({
         typebotRestartMessage
     } = typebot;
 
-    const number = msg.key.remoteJid.replace(/\D/g, '');
+    // Use the contact number directly from the ticket instead of parsing remoteJid
+    // This ensures compatibility with LIDs and avoids duplication
+    const number = ticket.contact.number;
 
     let body = getBodyMessage(msg);
 
@@ -97,7 +99,7 @@ const typebotListener = async ({
             await ticket.reload();
         }
 
-        if (isNil(ticket.typebotSessionId)) {            
+        if (isNil(ticket.typebotSessionId)) {
             dataStart = await createSession(msg, typebot, number);
             sessionId = dataStart.sessionId
             status = true;
@@ -241,7 +243,7 @@ const typebotListener = async ({
                             try {
                                 let jsonGatilho = JSON.parse(gatilho);
 
-                                if (jsonGatilho.stopBot  && isNil(jsonGatilho.userId)  && isNil(jsonGatilho.queueId)) {
+                                if (jsonGatilho.stopBot && isNil(jsonGatilho.userId) && isNil(jsonGatilho.queueId)) {
                                     await ticket.update({
                                         useIntegration: false,
                                         isBot: false
@@ -393,7 +395,7 @@ const typebotListener = async ({
                 ticketData: {
                     status: "closed",
                     useIntegration: false,
-                    integrationId: null                   
+                    integrationId: null
                 },
                 ticketId: ticket.id,
                 companyId: ticket.companyId

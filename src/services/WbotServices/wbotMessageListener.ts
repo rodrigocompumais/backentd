@@ -464,27 +464,26 @@ const getSenderMessage = (
   const me = getMeSocket(wbot);
   if (msg.key.fromMe) return me.id;
 
-  // Em Baileys 7.x, priorizar LID quando disponível, fallback para PN
-  // Para grupos: usar participantAlt (LID) se disponível, senão participant (PN)
-  // Usar type assertion pois essas propriedades podem não estar nos tipos da versão RC
   const key = msg.key as any;
   let senderId: string | undefined;
-  
-  if (key.participantAlt) {
-    // LID disponível para grupo
-    senderId = key.participantAlt;
-  } else if (msg.key.participant) {
-    // PN para grupo
-    senderId = msg.key.participant;
-  } else if (key.remoteJidAlt) {
-    // LID disponível para mensagem direta
-    senderId = key.remoteJidAlt;
-  } else if (msg.key.remoteJid) {
-    // PN para mensagem direta
-    senderId = msg.key.remoteJid;
+
+  // Hierarquia solicitada:
+  // 1. senderPn (se disponível)
+  // 2. participant (geralmente contém o PN em grupos)
+  // 3. remoteJid (fallback)
+
+  if (key.senderPn) {
+    // Prioridade 1: senderPn explícito
+    senderId = key.senderPn;
   } else if (msg.participant) {
-    // Fallback para participant no nível da mensagem
-    senderId = msg.participant;
+      // Prioridade 2: participant na mensagem (root)
+      senderId = msg.participant;
+  } else if (key.participant) {
+    // Prioridade 2: participant na key
+    senderId = key.participant;
+  } else if (msg.key.remoteJid) {
+    // Prioridade 3: remoteJid
+    senderId = msg.key.remoteJid;
   }
 
   return senderId ? jidNormalizedUser(senderId) : undefined;
@@ -493,43 +492,18 @@ const getSenderMessage = (
 const getContactMessage = async (msg: proto.IWebMessageInfo, wbot: Session) => {
   const isGroup = msg.key.remoteJid?.includes("g.us") || false;
   
-  if (isGroup) {
-    // Para grupos, usar getSenderMessage que já prioriza LID
-    return {
-      id: getSenderMessage(msg, wbot),
-      name: msg.pushName
-    };
-  } else {
-    // Para mensagens diretas, priorizar LID quando disponível
-    // Usar type assertion pois essas propriedades podem não estar nos tipos da versão RC
-    const key = msg.key as any;
-    let contactJid: string;
+  // Usar a mesma lógica de identificação para grupos e privados
+  // Isso garante consistência e prioriza o senderPn/participant
+  const contactJid = getSenderMessage(msg, wbot);
     
-    // Priorizar remoteJidAlt (LID) se disponível
-    if (key.remoteJidAlt) {
-      contactJid = jidNormalizedUser(key.remoteJidAlt);
-    } else if (msg.key.remoteJid) {
-      contactJid = jidNormalizedUser(msg.key.remoteJid);
-    } else if (key.participantAlt) {
-      // Fallback para participantAlt (LID)
-      contactJid = jidNormalizedUser(key.participantAlt);
-    } else if (msg.key.participant) {
-      contactJid = jidNormalizedUser(msg.key.participant);
-    } else if (msg.participant) {
-      contactJid = jidNormalizedUser(msg.participant);
-    } else {
-      // Fallback - não deveria acontecer
-      contactJid = "";
-    }
-    
-    // Extrair número do JID (funciona tanto para LID quanto PN)
-    const rawNumber = contactJid.replace(/@.*$/, "").replace(/\D/g, "");
-    
-    return {
-      id: contactJid,
-      name: msg.key.fromMe ? rawNumber : msg.pushName
-    };
-  }
+  // Extrair número apenas se tivermos um JID válido
+  // Garantir que removemos qualquer sufixo e caracteres não numéricos
+  const rawNumber = contactJid ? contactJid.replace(/@.*$/, "").replace(/\D/g, "") : "";
+  
+  return {
+    id: contactJid || "", // Passar o JID completo (pode ser PN@s.whatsapp.net)
+    name: msg.key.fromMe ? rawNumber : msg.pushName
+  };
 };
 
 const downloadMedia = async (msg: proto.IWebMessageInfo) => {

@@ -70,6 +70,9 @@ export const ActionsWebhookService = async (
       idTicket,
       numberPhrase
     );
+
+    logger.info(`[FLOWBUILDER] Iniciando execução do fluxo ID: ${idFlowDb} para Ticket: ${idTicket} Company: ${companyId}`);
+
     let createFieldJsonName = "";
 
     const connectStatic = connects;
@@ -216,6 +219,13 @@ export const ActionsWebhookService = async (
         if (otherNode) {
           nodeSelected = otherNode;
         }
+      }
+
+      if (nodeSelected) {
+        logger.info(`[FLOWBUILDER] Processando nó ID: ${nodeSelected.id} Tipo: ${nodeSelected.type} para Ticket: ${ticket?.id}`);
+      } else {
+        logger.warn(`[FLOWBUILDER] Nó não encontrado ou undefined. Next: ${next} ExecFn: ${execFn}`);
+        break;
       }
 
       if (nodeSelected.type === "message") {
@@ -914,9 +924,10 @@ export const ActionsWebhookService = async (
       execCount++;
     }
 
-    return "ds";
+    return "ok";
   } catch (error) {
-    logger.error(error);
+    logger.error(`[FLOWBUILDER] Erro crítico na execução do fluxo: ${error.message} Stack: ${error.stack}`);
+    return "error";
   }
 };
 

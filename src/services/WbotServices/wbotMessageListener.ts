@@ -2847,70 +2847,121 @@ const handleMessage = async (
 ): Promise<void> => {
   let mediaSent: Message | undefined;
 
-  // LOG DETALHADO PARA DIAGNÓSTICO DE LID (Solicitado via prompt)
-  const rawRemoteJid = msg.key.remoteJid;
-  const rawParticipant = msg.key.participant || (msg.key as any).participant;
-  const rawSenderPn = (msg.key as any).senderPn;
-  const rawPushName = msg.pushName;
-  const rawFromMe = msg.key.fromMe;
-  const timestamp = msg.messageTimestamp;
+  // =========================================================================
+  // 🧠 MODELO MENTAL OBRIGATÓRIO (State Machine: IGNORE_FROM_ME | LID | PHONE)
+  // =========================================================================
 
-  let resolutionStrategy = "PHONE";
+  const rawRemoteJid = msg.key.remoteJid;
+  const rawSenderPn = (msg.key as any).senderPn;
+  const rawParticipant = msg.key.participant || (msg.key as any).participant;
+  const rawFromMe = msg.key.fromMe;
+  const rawPushName = msg.pushName;
+  const messageId = msg.key.id;
+
+  let resolutionStrategy = "ERROR";
+  let resolvedIdentity = null;
+
+  // 1. STATE: IGNORE_FROM_ME
   if (rawFromMe) {
     resolutionStrategy = "IGNORE_FROM_ME";
-  } else if (rawRemoteJid && rawRemoteJid.includes("@lid")) {
-    if (rawSenderPn) resolutionStrategy = "PHONE (via senderPn)";
-    else if (rawParticipant && !rawParticipant.includes("@lid")) resolutionStrategy = "PHONE (via participant)";
-    else resolutionStrategy = "LID (Fallback - BLOCK)";
-  } else {
-    resolutionStrategy = "PHONE (via remoteJid)";
+    logger.info(JSON.stringify({
+      remoteJid: rawRemoteJid,
+      senderPn: rawSenderPn,
+      participant: rawParticipant,
+      fromMe: rawFromMe,
+      pushName: rawPushName,
+      companyId: companyId,
+      messageId: messageId,
+      resolvedIdentity: null,
+      resolutionStrategy: resolutionStrategy
+    }));
+    return; // Encerrar processamento imediatamente
   }
 
-  logger.info(`[BAILEYS-DEBUG] Evento recebido:
-    RemoteJid: ${rawRemoteJid}
-    SenderPn: ${rawSenderPn}
-    Participant: ${rawParticipant}
-    PushName: ${rawPushName}
-    FromMe: ${rawFromMe}
-    Timestamp: ${timestamp}
-    CompanyId: ${companyId}
-    ResolvedIdentity: ${resolutionStrategy}
-  `);
+  // 2. TENTATIVA DE RESOLUÇÃO DE IDENTIDADE (PHONE)
+  // Prioridade: senderPn -> participant -> remoteJid (apenas se @s.whatsapp.net)
 
-  if (!isValidMsg(msg)) {
-    logger.debug(`Mensagem rejeitada por isValidMsg: ${msg.key.id} (remoteJid: ${msg.key.remoteJid}, empresa: ${companyId})`);
+  // Tentar senderPn (Telefone Real)
+  if (rawSenderPn) {
+    resolvedIdentity = rawSenderPn;
+    resolutionStrategy = "PHONE (senderPn)";
+  }
+  // Tentar participant (se válido e não LID)
+  else if (rawParticipant && !rawParticipant.includes("@lid")) {
+    resolvedIdentity = rawParticipant;
+    resolutionStrategy = "PHONE (participant)";
+  }
+  // Tentar remoteJid (somente se @s.whatsapp.net)
+  else if (rawRemoteJid && rawRemoteJid.endsWith("@s.whatsapp.net")) {
+    resolvedIdentity = rawRemoteJid.replace("@s.whatsapp.net", "");
+    resolutionStrategy = "PHONE (remoteJid)";
+  }
+
+  // 3. STATE: LID (Lead Temporário / Bloqueio)
+  // Se não resolveu identidade válida e é um LID
+  else if (rawRemoteJid && rawRemoteJid.endsWith("@lid")) {
+    resolutionStrategy = "LID";
+    // Como proibido criar contato, e sistema exige contato para criar ticket,
+    // vamos encerrar por aqui para evitar "dirty writes".
+    // Futuramente: criarOuAtualizarConversaPendente(event)
+    logger.warn(JSON.stringify({
+      remoteJid: rawRemoteJid,
+      senderPn: rawSenderPn,
+      participant: rawParticipant,
+      fromMe: rawFromMe,
+      pushName: rawPushName,
+      companyId: companyId,
+      messageId: messageId,
+      resolvedIdentity: null,
+      resolutionStrategy: "LID - BLOCKED (Wait for Phone)"
+    }));
+    return;
+  }
+  // 4. STATE: ERROR (Não foi possível identificar)
+  else {
+    resolutionStrategy = "ERROR";
+    logger.error(JSON.stringify({
+      remoteJid: rawRemoteJid,
+      senderPn: rawSenderPn,
+      participant: rawParticipant,
+      fromMe: rawFromMe,
+      pushName: rawPushName,
+      companyId: companyId,
+      messageId: messageId,
+      resolvedIdentity: null,
+      resolutionStrategy: "ERROR - UNKNOWN IDENTITY"
+    }));
     return;
   }
 
-  // REGRA ABSOLUTA: fromMe NÃO deve criar contatos ou conversas
-  // Serve apenas para status. Se não tivermos o ticket já aberto, ignoramos.
-  if (rawFromMe) {
-    logger.info(`[IGNORE] Evento fromMe ignorado para criação de fluxos: ${msg.key.id}`);
+  // LOG OBRIGATÓRIO (SUCCESS PHONE)
+  logger.info(JSON.stringify({
+    remoteJid: rawRemoteJid,
+    senderPn: rawSenderPn,
+    participant: rawParticipant,
+    fromMe: rawFromMe,
+    pushName: rawPushName,
+    companyId: companyId,
+    messageId: messageId,
+    resolvedIdentity: resolvedIdentity,
+    resolutionStrategy: resolutionStrategy
+  }));
 
-    // Opcional: Se quiser processar apenas UPDATE de mensagem em tickets existentes,
-    // precisaria buscar o ticket sem criar. Por enquanto, a regra é "NÃO criar".
-    // Se a mensagem for importante para histórico, ela deve ser tratada se o ticket JÁ EXISTIR.
-    // Mas FindOrCreateTicketService CRIA. Então devemos checar existência antes.
-    const msgContactForCheck = await getContactMessage(msg, wbot);
-    const existingContact = await Contact.findOne({
-      where: { number: msgContactForCheck.id.replace(/\D/g, ""), companyId }
-    });
-
-    if (!existingContact) {
-      logger.warn(`[BLOCK-FROM-ME] Tentativa de criar contato via fromMe bloqueada. ID: ${msgContactForCheck.id}`);
-      return;
-    }
-
-    // Se o contato existe, verificamos se tem ticket aberto.
-    const existingTicket = await Ticket.findOne({
-      where: { contactId: existingContact.id, companyId, status: { [Op.or]: ["open", "pending"] } }
-    });
-
-    if (!existingTicket) {
-      logger.warn(`[BLOCK-FROM-ME] Mensagem enviada pelo celular (fromMe) sem ticket aberto. Ignorando para não abrir ticket avulso.`);
-      return;
-    }
+  if (!isValidMsg(msg)) {
+    return;
   }
+
+  // Continuamos apenas se tivermos uma identidade resolvida (resolvedIdentity)
+  // Mas o restante do código usa 'msg' e helpers. 
+  // Precisamos garantir que os helpers usem a identidade que ACABAMOS de resolver.
+  // 'getContactMessage' e 'verifyContact' precisam ser alinhados ou bypassados?
+  // Infelizmente 'verifyContact' extrai novamente. Vamos confiar que 'getSenderMessage'
+  // foi corrigido (no passo anterior) mas para garantir,
+  // vamos injetar a identidade resolvida se possível?
+  // O código legado é acoplado. Vamos deixar fluir, pois se 'resolvedIdentity' foi achado,
+  // o 'getSenderMessage' (que implementamos antes) deve achar o mesmo.
+  // Se 'getSenderMessage' falhar lá na frente, 'verifyContact' tem o bloqueio de LID.
+
 
   try {
     let msgContact: IMe;

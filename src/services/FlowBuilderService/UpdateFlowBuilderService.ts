@@ -4,39 +4,31 @@ import { randomString } from "../../utils/randomCode";
 
 interface Request {
   companyId: number;
-  name?: string;
+  name: string;
   flowId: number;
-  flow?: any;
 }
 
 const UpdateFlowBuilderService = async ({
   companyId,
   name,
-  flowId,
-  flow: flowData
+  flowId
 }: Request): Promise<String> => {
   try {
 
-    // Se name for undefined, não tenta buscar duplicidade
-    if (name) {
-      const nameExist = await FlowBuilderModel.findOne({
-        where: {
-          name,
-          company_id: companyId
-        }
-      })
-
-      // Se encontrar e não for o mesmo ID (caso estivesse editando o proprio nome), mas aqui é update genérico
-      if (nameExist && nameExist.id !== flowId) {
-        return 'exist'
+    const nameExist = await FlowBuilderModel.findOne({
+      where: {
+        name,
+        company_id: companyId
       }
+    })
+
+    console.log({ nameExist })
+
+    if (nameExist) {
+      return 'exist'
     }
 
-    const updateData: any = {};
-    if (name) updateData.name = name;
-    if (flowData) updateData.flow = flowData;
-
-    await FlowBuilderModel.update(updateData, {
+    const flow = await FlowBuilderModel.update({ name }, {
       where: { id: flowId, company_id: companyId }
     });
 

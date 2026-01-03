@@ -25,9 +25,6 @@ import typebotListener from "../TypebotServices/typebotListener";
 import { getWbot } from "../../libs/wbot";
 import { proto } from "baileys";
 import { handleOpenAi } from "../IntegrationsServices/OpenAiService";
-import { handleGemini } from "../IntegrationsServices/GeminiService";
-import generateContextSummary from "../AiServices/GenerateContextSummaryService";
-import CreateMessageService, { MessageData } from "../MessageServices/CreateMessageService";
 import { IOpenAi } from "../../@types/openai";
 
 interface IAddContact {
@@ -158,26 +155,7 @@ export const ActionsWebhookService = async (
 
     let execFn = "";
 
-    let ticket = idTicket ? await Ticket.findOne({ where: { id: idTicket, companyId } }) : null;
-
-    const logHistory = async (ticket: Ticket, role: "user" | "model", content: string) => {
-      try {
-        if (!ticket) return;
-        const dataWebhookStr = ticket.dataWebhook || {};
-        const history = dataWebhookStr['history'] || [];
-        history.push({ role, content, createdAt: new Date() });
-
-        await ticket.update({
-          dataWebhook: { ...dataWebhookStr, history }
-        });
-      } catch (e) {
-        console.error("Error logging history:", e);
-      }
-    };
-
-    if (ticket && pressKey && pressKey !== "parar" && pressKey !== "999") {
-      await logHistory(ticket, "user", pressKey);
-    }
+    let ticket = null;
 
     let noAlterNext = false;
 
@@ -234,8 +212,6 @@ export const ActionsWebhookService = async (
           };
         }
 
-        await logHistory(ticket, "model", msg.body);
-
         await SendMessage(whatsapp, {
           number: numberClient,
           body: msg.body
@@ -259,90 +235,6 @@ export const ActionsWebhookService = async (
           ticket,
           typebot: nodeSelected.data.typebotIntegration
         });
-      }
-
-
-      if (nodeSelected.type === "gemini") {
-        let {
-          name,
-          prompt,
-          voice,
-          voiceKey,
-          voiceRegion,
-          maxTokens,
-          temperature,
-          apiKey,
-          queueId,
-          maxMessages
-        } = nodeSelected.data.typebotIntegration;
-
-        let geminiSettings = {
-          name,
-          prompt,
-          voice,
-          voiceKey,
-          voiceRegion,
-          maxTokens: parseInt(maxTokens),
-          temperature: parseInt(temperature),
-          apiKey,
-          queueId: parseInt(queueId),
-          maxMessages: parseInt(maxMessages)
-        };
-
-        const contact = await Contact.findOne({
-          where: { number: numberClient, companyId }
-        });
-
-        const wbot = getWbot(whatsapp.id);
-
-        const ticketTraking = await FindOrCreateATicketTrakingService({
-          ticketId: ticket.id,
-          companyId,
-          userId: null,
-          whatsappId: whatsapp?.id
-        });
-
-        await handleGemini(
-          geminiSettings,
-          msg,
-          wbot,
-          ticket,
-          contact,
-          null,
-          ticketTraking
-        );
-        // Gemini usually handles its own history, but for Summary node consistency we might want to log the prompt or response?
-        // Since handleGemini is blackbox here, we assume it might update history or we revisit this.
-        // For now, relying on Gemini's internal context.
-      }
-
-      if (nodeSelected.type === "summary") {
-        try {
-          // 1. Gera o resumo
-          const summary = await generateContextSummary({
-            ticketId: ticket.id,
-            companyId: ticket.companyId,
-            provider: "gemini",
-          });
-
-          // 2. Cria mensagem interna com o resumo
-          const messageData: MessageData = {
-            id: "summary-" + Date.now(),
-            ticketId: ticket.id,
-            contactId: ticket.contactId,
-            body: `📝 *Resumo do Fluxo*:\\n${summary}`,
-            fromMe: true,
-            mediaType: "conversation",
-            read: true,
-            isInternal: true // Importante: flag para mensagem interna
-          };
-
-          await CreateMessageService({ messageData, companyId: ticket.companyId });
-
-          await delay(1000); // Pequeno delay para garantir ordem
-        } catch (error) {
-          logger.error(`Error generating summary node: ${error}`);
-        }
       }
 
       if (nodeSelected.type === "openai") {
@@ -402,8 +294,6 @@ export const ActionsWebhookService = async (
 
         if (!variables || variables === undefined || variables === null) {
           const { message } = nodeSelected.data.typebotIntegration;
-          await logHistory(ticket, "model", message);
-
           const ticketDetails = await ShowTicketService(ticket.id, companyId);
 
           const bodyFila = formatBody(`${message}`, ticket.contact);
@@ -437,7 +327,7 @@ export const ActionsWebhookService = async (
       if (nodeSelected.type === "ticket") {
         /*const queueId = nodeSelected.data?.data?.id || nodeSelected.data?.id;
         const queue = await ShowQueueService(queueId, companyId);
-  
+
         await ticket.update({
           status: "pending",
           queueId: queue.id,
@@ -448,14 +338,14 @@ export const ActionsWebhookService = async (
           hashFlowId: hashWebhookId,
           flowStopped: idFlowDb.toString()
         });
-  
+
         await FindOrCreateATicketTrakingService({
           ticketId: ticket.id,
           companyId,
           whatsappId: ticket.whatsappId,
           userId: ticket.userId
         });
-  
+
         await UpdateTicketService({
           ticketData: {
             status: "pending",
@@ -464,21 +354,21 @@ export const ActionsWebhookService = async (
           ticketId: ticket.id,
           companyId
         });
-  
+
         await CreateLogTicketService({
           ticketId: ticket.id,
           type: "queue",
           queueId: queue.id
         });
-  
+
         let settings = await CompaniesSettings.findOne({
           where: {
             companyId: companyId
           }
         });
-  
+
         const enableQueuePosition = settings.sendQueuePosition === "enabled";
-  
+
         if (enableQueuePosition) {
           const count = await Ticket.findAndCountAll({
             where: {
@@ -490,27 +380,27 @@ export const ActionsWebhookService = async (
               isGroup: false
             }
           });
-  
+
           // Lógica para enviar posição da fila de atendimento
           const qtd = count.count === 0 ? 1 : count.count;
-  
+
           const msgFila = `${settings.sendQueuePositionMessage} *${qtd}*`;
-  
+
           const ticketDetails = await ShowTicketService(ticket.id, companyId);
-  
+
           const bodyFila = formatBody(`${msgFila}`, ticket.contact);
-  
+
           await delay(3000);
           await typeSimulation(ticket, "composing");
-  
+
           await SendWhatsAppMessage({
             body: bodyFila,
             ticket: ticketDetails,
             quotedMsg: null
           });
-  
+
           SetTicketMessagesAsRead(ticketDetails);
-  
+
           await ticketDetails.update({
             lastMessage: bodyFila
           });
@@ -725,8 +615,6 @@ export const ActionsWebhookService = async (
               companyId: companyId
             };
           }
-
-          await logHistory(ticket, "model", msg.body);
 
           const ticketDetails = await ShowTicketService(ticket.id, companyId);
 

@@ -91,15 +91,30 @@ Solicitação do usuário: ${prompt}`;
             throw new Error("Resposta vazia do Gemini.");
         }
 
-        // Limpar markdown se houver (```json ... ```)
-        const cleanedJson = textResponse.replace(/^```json\s*/, "").replace(/\s*```$/, "");
+        // Limpar markdown se houver e extrair apenas o JSON
+        let cleanedJson = textResponse;
+
+        // Tentar encontrar o JSON entre blocos de código
+        const jsonMatch = textResponse.match(/```json\s*([\s\S]*?)\s*```/);
+        if (jsonMatch && jsonMatch[1]) {
+            cleanedJson = jsonMatch[1];
+        } else {
+            // Fallback: tentar encontrar o primeiro { e o último }
+            const firstBrace = textResponse.indexOf('{');
+            const lastBrace = textResponse.lastIndexOf('}');
+
+            if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+                cleanedJson = textResponse.substring(firstBrace, lastBrace + 1);
+            }
+        }
 
         try {
             const flow = JSON.parse(cleanedJson);
             return flow;
         } catch (e) {
             logger.error("Erro ao fazer parse do JSON gerado pelo Gemini", e);
-            throw new Error("O Gemini não gerou um JSON válido.");
+            logger.error("Resposta original:", textResponse);
+            throw new Error("O Gemini não gerou um JSON válido. Tente refazer o prompt.");
         }
     } catch (error: any) {
         logger.error(`GenerateFlowService Error: ${error.message}`);

@@ -467,22 +467,18 @@ const getSenderMessage = (
   const key = msg.key as any;
   let senderId: string | undefined;
 
-  // Hierarquia solicitada:
-  // 1. senderPn (se disponível)
-  // 2. participant (geralmente contém o PN em grupos)
-  // 3. remoteJid (fallback)
+  // Baileys 7.x+ logic:
+  // participantAlt / remoteJidAlt contêm o PN se o principal for LID
 
-  if (key.senderPn) {
-    // Prioridade 1: senderPn explícito
-    senderId = key.senderPn;
-  } else if (msg.participant) {
-    // Prioridade 2: participant na mensagem (root)
-    senderId = msg.participant;
+  if (key.participantAlt) {
+    senderId = key.participantAlt;
   } else if (key.participant) {
-    // Prioridade 2: participant na key
     senderId = key.participant;
+  } else if (msg.participant) {
+    senderId = msg.participant;
+  } else if (key.remoteJidAlt) {
+    senderId = key.remoteJidAlt;
   } else if (msg.key.remoteJid) {
-    // Prioridade 3: remoteJid
     senderId = msg.key.remoteJid;
   }
 

@@ -2,6 +2,7 @@ import { getIO } from "../../libs/socket";
 import Contact from "../../models/Contact";
 import ContactCustomField from "../../models/ContactCustomField";
 import { isNil } from "lodash";
+import { Op } from "sequelize";
 interface ExtraInfo extends ContactCustomField {
   name: string;
   value: string;
@@ -31,7 +32,22 @@ const CreateOrUpdateContactService = async ({
   const number = isGroup ? rawNumber : rawNumber.replace(/[^0-9]/g, "");
 
   const io = getIO();
-  
+  let finalName = name;
+
+  // Validação de unicidade de nome (Case Insensitive)
+  // Se já existe um contato com esse nome na empresa (e não é o mesmo número), append o número ao nome
+  const existingContactWithName = await Contact.findOne({
+    where: {
+      name: finalName,
+      companyId,
+      number: { [Op.ne]: number } // Garante que não é o próprio contato (caso de update)
+    }
+  });
+
+  if (existingContactWithName) {
+    finalName = `${finalName} ${number}`;
+  }
+
   // Usar findOrCreate para evitar race conditions
   // Esta operação é atômica e garante que apenas um registro seja criado
   const [contact, created] = await Contact.findOrCreate({
@@ -40,7 +56,7 @@ const CreateOrUpdateContactService = async ({
       companyId
     },
     defaults: {
-      name,
+      name: finalName,
       number,
       profilePicUrl,
       email,
@@ -54,14 +70,14 @@ const CreateOrUpdateContactService = async ({
   // Se o contato já existia, atualizar os dados
   if (!created) {
     const updateData: any = { profilePicUrl };
-    
+
     // Atualizar whatsappId apenas se não estiver definido
     if (isNil(contact.whatsappId) && whatsappId) {
       updateData.whatsappId = whatsappId;
     }
-    
+
     await contact.update(updateData);
-    
+
     io.to(`company-${companyId}-mainchannel`).emit(`company-${companyId}-contact`, {
       action: "update",
       contact

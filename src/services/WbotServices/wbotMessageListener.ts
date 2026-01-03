@@ -464,25 +464,28 @@ const getSenderMessage = (
   const me = getMeSocket(wbot);
   if (msg.key.fromMe) return me.id;
 
+  if (msg.key.fromMe) return me.id;
+
   const key = msg.key as any;
   let senderId: string | undefined;
 
-  // Hierarquia solicitada:
-  // 1. senderPn (se disponível)
-  // 2. participant (geralmente contém o PN em grupos)
-  // 3. remoteJid (fallback)
+  const isGroup = msg.key.remoteJid?.includes("@g.us");
 
-  if (key.senderPn) {
-    // Prioridade 1: senderPn explícito
-    senderId = key.senderPn;
-  } else if (msg.participant) {
-    // Prioridade 2: participant na mensagem (root)
-    senderId = msg.participant;
-  } else if (key.participant) {
-    // Prioridade 2: participant na key
-    senderId = key.participant;
-  } else if (msg.key.remoteJid) {
-    // Prioridade 3: remoteJid
+  if (isGroup) {
+    if (key.senderPn) {
+      senderId = key.senderPn;
+    } else if (msg.participant) {
+      senderId = msg.participant;
+    } else if (key.participant) {
+      senderId = key.participant;
+    }
+  } else {
+    // Se for privado, o sender SEMPRE é o remoteJid
+    senderId = msg.key.remoteJid;
+  }
+
+  // Fallback seguro
+  if (!senderId) {
     senderId = msg.key.remoteJid;
   }
 

@@ -10,6 +10,7 @@ import UploadImgFlowBuilderService from "../services/FlowBuilderService/UploadIm
 import UploadAudioFlowBuilderService from "../services/FlowBuilderService/UploadAudioFlowBuilderService";
 import DuplicateFlowBuilderService from "../services/FlowBuilderService/DuplicateFlowBuilderService";
 import UploadAllFlowBuilderService from "../services/FlowBuilderService/UploadAllFlowBuilderService";
+import GenerateFlowService from "../services/AiServices/GenerateFlowService";
 // import { handleMessage } from "../services/FacebookServices/facebookMessageListener";
 
 export const createFlow = async (
@@ -203,4 +204,19 @@ export const FlowUploadAll = async (req: Request, res: Response) => {
     companyId
   });
   return res.status(200).json(items);
+};
+
+export const generateFlow = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  const { prompt } = req.body;
+  const { companyId } = req.user;
+
+  try {
+    const flow = await GenerateFlowService({ prompt, companyId });
+    return res.status(200).json(flow);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
 };

@@ -59,7 +59,14 @@ flowBuilder.post(
   "/flowbuilder/content",
   isAuth,
   upload.array('medias'),
+  upload.array('medias'),
   FlowBuilderController.FlowUploadAll
+);
+
+flowBuilder.post(
+  "/flowbuilder/generate",
+  isAuth,
+  FlowBuilderController.generateFlow
 );
 
 export default flowBuilder;

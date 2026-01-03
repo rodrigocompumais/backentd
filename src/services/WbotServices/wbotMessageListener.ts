@@ -73,7 +73,7 @@ import { IConnections, INodes } from "../WebhookService/DispatchWebHookService";
 import { ActionsWebhookService } from "../WebhookService/ActionsWebhookService";
 import { WebhookModel } from "../../models/Webhook";
 
-import {differenceInMilliseconds} from "date-fns";
+import { differenceInMilliseconds } from "date-fns";
 import Whatsapp from "../../models/Whatsapp";
 import fs from "node:fs";
 import request from "request";
@@ -112,7 +112,7 @@ const getTypeMessage = (msg: proto.IWebMessageInfo): string => {
 };
 
 function hasCaption(title: string, fileName: string) {
-  if(!title || !fileName) return false;
+  if (!title || !fileName) return false;
 
   const fileNameExtension = fileName.substring(fileName.lastIndexOf('.') + 1);
 
@@ -476,8 +476,8 @@ const getSenderMessage = (
     // Prioridade 1: senderPn explícito
     senderId = key.senderPn;
   } else if (msg.participant) {
-      // Prioridade 2: participant na mensagem (root)
-      senderId = msg.participant;
+    // Prioridade 2: participant na mensagem (root)
+    senderId = msg.participant;
   } else if (key.participant) {
     // Prioridade 2: participant na key
     senderId = key.participant;
@@ -491,15 +491,21 @@ const getSenderMessage = (
 
 const getContactMessage = async (msg: proto.IWebMessageInfo, wbot: Session) => {
   const isGroup = msg.key.remoteJid?.includes("g.us") || false;
-  
-  // Usar a mesma lógica de identificação para grupos e privados
-  // Isso garante consistência e prioriza o senderPn/participant
-  const contactJid = getSenderMessage(msg, wbot);
-    
+  let contactJid: string | undefined;
+
+  // Correção para mensagens enviadas por mim no privado
+  // Se for outgoing e privado, o 'Contact' do ticket é o destinatário (remoteJid), não eu (sender)
+  if (!isGroup && msg.key.fromMe) {
+    contactJid = msg.key.remoteJid;
+  } else {
+    // Para grupos (incoming/outgoing) ou privado (incoming), usar a lógica padrão de sender
+    contactJid = getSenderMessage(msg, wbot);
+  }
+
   // Extrair número apenas se tivermos um JID válido
   // Garantir que removemos qualquer sufixo e caracteres não numéricos
   const rawNumber = contactJid ? contactJid.replace(/@.*$/, "").replace(/\D/g, "") : "";
-  
+
   return {
     id: contactJid || "", // Passar o JID completo (pode ser PN@s.whatsapp.net)
     name: msg.key.fromMe ? rawNumber : msg.pushName
@@ -557,12 +563,12 @@ const verifyContact = async (
   companyId: number
 ): Promise<Contact> => {
   let profilePicUrl: string;
-  
+
   // Normalizar o ID do contato para garantir formato correto
-  const normalizedContactId = msgContact.id.includes("g.us") 
-    ? msgContact.id 
+  const normalizedContactId = msgContact.id.includes("g.us")
+    ? msgContact.id
     : jidNormalizedUser(msgContact.id);
-  
+
   try {
     profilePicUrl = await wbot.profilePictureUrl(normalizedContactId);
   } catch (e) {
@@ -572,8 +578,8 @@ const verifyContact = async (
 
   // Extrair número do JID normalizado (remove @s.whatsapp.net ou @g.us)
   const isGroup = normalizedContactId.includes("g.us");
-  const contactNumber = isGroup 
-    ? normalizedContactId 
+  const contactNumber = isGroup
+    ? normalizedContactId
     : normalizedContactId.replace(/@.*$/, "").replace(/\D/g, "");
 
   // Log detalhado para debug quando número parecer incorreto
@@ -581,32 +587,32 @@ const verifyContact = async (
     // Log quando número é muito longo (possível número incorreto)
     if (contactNumber.length > 15) {
       logger.warn(`⚠️ NÚMERO SUSPEITO (muito longo): ${contactNumber} | JID original: ${msgContact.id} | JID normalizado: ${normalizedContactId} | Empresa: ${companyId}`);
-      Sentry.setExtra("Número Suspeito", { 
-        número: contactNumber, 
-        jidOriginal: msgContact.id, 
+      Sentry.setExtra("Número Suspeito", {
+        número: contactNumber,
+        jidOriginal: msgContact.id,
         jidNormalizado: normalizedContactId,
-        empresa: companyId 
+        empresa: companyId
       });
       Sentry.captureMessage("Número de contato suspeito detectado (muito longo)");
     }
-    
+
     // Validar se o número começa com código de país conhecido
     if (contactNumber.length >= 10) {
       const countryCode = contactNumber.substring(0, 2);
       const knownCountryCodes = ["55", "52", "1", "44", "49", "33", "34", "39", "41", "43", "45", "46", "47", "48", "51", "53", "54", "56", "57", "58", "60", "61", "62", "63", "64", "65", "66", "81", "82", "84", "86", "90", "91", "92", "93", "94", "95", "98"];
-      
+
       if (!knownCountryCodes.includes(countryCode) && contactNumber.length > 12) {
         logger.warn(`⚠️ NÚMERO COM CÓDIGO DE PAÍS NÃO RECONHECIDO: ${contactNumber} | Código: ${countryCode} | JID: ${normalizedContactId} | Empresa: ${companyId}`);
-        Sentry.setExtra("Número com Código Inválido", { 
-          número: contactNumber, 
+        Sentry.setExtra("Número com Código Inválido", {
+          número: contactNumber,
           códigoPaís: countryCode,
           jid: normalizedContactId,
-          empresa: companyId 
+          empresa: companyId
         });
         Sentry.captureMessage("Número de contato com código de país não reconhecido");
       }
     }
-    
+
     // Log informativo para todos os números (ajuda no debug)
     logger.debug(`📞 Contato processado: ${contactNumber} | JID: ${normalizedContactId} | Empresa: ${companyId}`);
   }
@@ -761,9 +767,9 @@ const handleGeminiInListener = async (
     // Se não encontrou na fila, buscar do ticket
     if (!prompt && ticket.promptId) {
       try {
-        const ticketPrompt = await ShowPromptService({ 
-          promptId: ticket.promptId, 
-          companyId: ticket.companyId 
+        const ticketPrompt = await ShowPromptService({
+          promptId: ticket.promptId,
+          companyId: ticket.companyId
         });
         if (ticketPrompt && ticketPrompt.provider === "gemini") {
           prompt = ticketPrompt;
@@ -903,7 +909,7 @@ const handleOpenAi = async (
 
   let { prompt } = await ShowWhatsAppService(wbot.id, ticket.companyId);
 
-  if( openAiSettings )
+  if (openAiSettings)
     prompt = openAiSettings;
 
   if (!prompt && !isNil(ticket?.queue?.prompt)) {
@@ -946,11 +952,10 @@ const handleOpenAi = async (
 
   let promptSystem = `Nas respostas utilize o nome ${sanitizeName(
     contact.name || "Amigo(a)"
-  )} para identificar o cliente.\nSua resposta deve usar no máximo ${
-    prompt.maxTokens
-  } tokens e cuide para não truncar o final.\nSempre que possível, mencione o nome dele para ser mais personalizado o atendimento e mais educado. Quando a resposta requer uma transferência para o setor de atendimento, comece sua resposta com 'Ação: Transferir para o setor de atendimento'.\n
+  )} para identificar o cliente.\nSua resposta deve usar no máximo ${prompt.maxTokens
+    } tokens e cuide para não truncar o final.\nSempre que possível, mencione o nome dele para ser mais personalizado o atendimento e mais educado. Quando a resposta requer uma transferência para o setor de atendimento, comece sua resposta com 'Ação: Transferir para o setor de atendimento'.\n
   ${prompt.prompt}\n`;
-  
+
   // Adicionar instruções sobre mensagens internas se habilitado
   if (prompt.canSendInternalMessages) {
     promptSystem += `\n\nREGRA CRÍTICA - Anotações Internas:
@@ -1000,13 +1005,13 @@ const handleOpenAi = async (
       // Usa uma única passagem para evitar duplicação
       const internalMessageRegex = /\[INTERNA\](.*?)\[\/INTERNA\]/gs;
       const processedMatches = new Set<string>(); // Para evitar duplicação
-      
+
       let match;
       // Processar todas as mensagens internas com fechamento explícito
       while ((match = internalMessageRegex.exec(response || "")) !== null) {
         const fullMatch = match[0]; // [INTERNA]...[/INTERNA]
         const internalContent = match[1].trim();
-        
+
         // Evitar processar a mesma mensagem duas vezes
         if (internalContent && !processedMatches.has(fullMatch)) {
           processedMatches.add(fullMatch);
@@ -1022,7 +1027,7 @@ const handleOpenAi = async (
       while ((match = openInternalRegex.exec(cleanedResponse)) !== null) {
         const fullMatch = match[0];
         const internalContent = match[0].replace(/\[INTERNA\]/g, "").trim();
-        
+
         // Só processar se não foi já processado e não contém [/INTERNA]
         if (internalContent && !fullMatch.includes("[/INTERNA]") && !processedMatches.has(fullMatch)) {
           processedMatches.add(fullMatch);
@@ -1060,7 +1065,7 @@ const handleOpenAi = async (
           }
         }
       }
-      
+
       // Log para debug
       if (internalMessages.length > 0) {
         logger.info(`📝 Processadas ${uniqueInternalMessages.length} mensagem(ns) interna(s). Resposta limpa: ${cleanedResponse.substring(0, 100)}...`);
@@ -1105,7 +1110,7 @@ const handleOpenAi = async (
       // Transferir para a fila
       await transferQueue(targetQueueId, ticket, contact);
       logger.info(`Ticket ${ticket.id} transferido para fila ${targetQueueId}`);
-      
+
       // Enviar mensagem automática de transferência
       await sendTransferMessage(ticket, contact, targetQueueId, null);
 
@@ -1131,10 +1136,10 @@ const handleOpenAi = async (
     }
 
     if (cleanedResponse.trim()) {
-    const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
+      const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
         text: cleanedResponse
-    });
-    await verifyMessage(sentMessage!, ticket, contact);
+      });
+      await verifyMessage(sentMessage!, ticket, contact);
     }
 
   } else if (msg.message?.audioMessage) {
@@ -1169,18 +1174,18 @@ const handleOpenAi = async (
     // Aplicar mesma lógica de mensagens internas e transferência para áudio
     let cleanedAudioResponse = response || "";
     const audioInternalMessages: string[] = [];
-    
+
     if (prompt.canSendInternalMessages && response) {
       // Regex unificado que captura [INTERNA]...[/INTERNA] de forma não-gulosa
       const internalMessageRegex = /\[INTERNA\](.*?)\[\/INTERNA\]/gs;
       const processedMatches = new Set<string>(); // Para evitar duplicação
-      
+
       let match;
       // Processar todas as mensagens internas com fechamento explícito
       while ((match = internalMessageRegex.exec(response)) !== null) {
         const fullMatch = match[0]; // [INTERNA]...[/INTERNA]
         const internalContent = match[1].trim();
-        
+
         // Evitar processar a mesma mensagem duas vezes
         if (internalContent && !processedMatches.has(fullMatch)) {
           processedMatches.add(fullMatch);
@@ -1195,7 +1200,7 @@ const handleOpenAi = async (
       while ((match = openInternalRegex.exec(cleanedAudioResponse)) !== null) {
         const fullMatch = match[0];
         const internalContent = match[0].replace(/\[INTERNA\]/g, "").trim();
-        
+
         if (internalContent && !fullMatch.includes("[/INTERNA]") && !processedMatches.has(fullMatch)) {
           processedMatches.add(fullMatch);
           audioInternalMessages.push(internalContent);
@@ -1269,7 +1274,7 @@ const handleOpenAi = async (
       // Transferir para a fila
       await transferQueue(targetQueueId, ticket, contact);
       logger.info(`Ticket ${ticket.id} transferido para fila ${targetQueueId}`);
-      
+
       // Enviar mensagem automática de transferência
       await sendTransferMessage(ticket, contact, targetQueueId, null);
 
@@ -1277,7 +1282,7 @@ const handleOpenAi = async (
         .replace("Ação: Transferir para o setor de atendimento", "")
         .trim();
     }
-    
+
     // Validação final para áudio: garantir que nenhum marcador [INTERNA] seja enviado ao cliente
     if (cleanedAudioResponse.includes("[INTERNA]") || cleanedAudioResponse.includes("[/INTERNA]")) {
       logger.error(`⚠️ ATENÇÃO: Marcadores [INTERNA] ainda presentes na resposta de áudio! Removendo...`);
@@ -1334,10 +1339,10 @@ export const verifyMediaMessage = async (
 
   try {
     // Converter Buffer para Uint8Array se necessário para compatibilidade com tipos
-    const dataBuffer = Buffer.isBuffer(media.data) 
+    const dataBuffer = Buffer.isBuffer(media.data)
       ? new Uint8Array(media.data)
       : Buffer.from(media.data as string, 'base64');
-    
+
     await writeFileAsync(
       join(__dirname, "..", "..", "..", "public", media.filename),
       dataBuffer as any
@@ -1382,8 +1387,8 @@ export const verifyMediaMessage = async (
     await ticket.update({ status: "pending" });
     await ticket.reload({
       include: [
-        { 
-          model: Queue, 
+        {
+          model: Queue,
           as: "queue",
           include: [
             { model: Prompt, as: "prompt" }
@@ -1453,8 +1458,8 @@ export const verifyMessage = async (
     await ticket.update({ status: "pending" });
     await ticket.reload({
       include: [
-        { 
-          model: Queue, 
+        {
+          model: Queue,
           as: "queue",
           include: [
             { model: Prompt, as: "prompt" }
@@ -1607,21 +1612,21 @@ const verifyQueue = async (
     if (!msg.key.fromMe && !ticket.isGroup && !isNil(queues[0]?.promptId)) {
       // Buscar prompt para verificar provider
       try {
-        const prompt = await ShowPromptService({ 
-          promptId: queues[0].promptId, 
-          companyId: ticket.companyId 
+        const prompt = await ShowPromptService({
+          promptId: queues[0].promptId,
+          companyId: ticket.companyId
         });
-        
+
         if (prompt.provider === "gemini") {
           await handleGeminiInListener(msg, wbot, ticket, contact, mediaSent);
         } else {
-      await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+          await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
         }
 
-      await ticket.update({
-        useIntegration: true,
-        promptId: queues[0]?.promptId
-      });
+        await ticket.update({
+          useIntegration: true,
+          promptId: queues[0]?.promptId
+        });
       } catch (err) {
         // Se não encontrar prompt, tentar OpenAI por compatibilidade
         await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
@@ -1760,21 +1765,21 @@ const verifyQueue = async (
       ) {
         // Buscar prompt para verificar provider
         try {
-          const prompt = await ShowPromptService({ 
-            promptId: choosenQueue.promptId, 
-            companyId: ticket.companyId 
+          const prompt = await ShowPromptService({
+            promptId: choosenQueue.promptId,
+            companyId: ticket.companyId
           });
-          
+
           if (prompt.provider === "gemini") {
             await handleGeminiInListener(msg, wbot, ticket, contact, mediaSent);
           } else {
-        await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+            await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
           }
 
-        await ticket.update({
-          useIntegration: true,
-          promptId: choosenQueue?.promptId
-        });
+          await ticket.update({
+            useIntegration: true,
+            promptId: choosenQueue?.promptId
+          });
         } catch (err) {
           // Se não encontrar prompt, tentar OpenAI por compatibilidade
           await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
@@ -2062,8 +2067,7 @@ const handleChartbot = async (
       };
 
       const sendMsg = await wbot.sendMessage(
-        `${ticket.contact.number}@${
-          ticket.isGroup ? "g.us" : "s.whatsapp.net"
+        `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
         }`,
         buttonMessage
       );
@@ -2088,8 +2092,7 @@ const handleChartbot = async (
       };
 
       const sendMsg = await wbot.sendMessage(
-        `${ticket.contact.number}@${
-          ticket.isGroup ? "g.us" : "s.whatsapp.net"
+        `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
         }`,
         textMessage
       );
@@ -2157,8 +2160,7 @@ const handleChartbot = async (
         };
 
         const sendMsg = await wbot.sendMessage(
-          `${ticket.contact.number}@${
-            ticket.isGroup ? "g.us" : "s.whatsapp.net"
+          `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
           }`,
           listMessage
         );
@@ -2188,8 +2190,7 @@ const handleChartbot = async (
         };
 
         const sendMsg = await wbot.sendMessage(
-          `${ticket.contact.number}@${
-            ticket.isGroup ? "g.us" : "s.whatsapp.net"
+          `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
           }`,
           buttonMessage
         );
@@ -2213,8 +2214,7 @@ const handleChartbot = async (
         };
 
         const sendMsg = await wbot.sendMessage(
-          `${ticket.contact.number}@${
-            ticket.isGroup ? "g.us" : "s.whatsapp.net"
+          `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
           }`,
           textMessage
         );
@@ -2285,8 +2285,8 @@ const flowbuilderIntegration = async (
     await ticket.update({ status: "pending" });
     await ticket.reload({
       include: [
-        { 
-          model: Queue, 
+        {
+          model: Queue,
           as: "queue",
           include: [
             { model: Prompt, as: "prompt" }
@@ -2654,7 +2654,7 @@ export const handleMessageIntegration = async (
     console.log("entrou no typebot");
     // await typebots(ticket, msg, wbot, queueIntegration);
     await typebotListener({ ticket, msg, wbot, typebot: queueIntegration });
-  } else if(queueIntegration.type === "flowbuilder") {
+  } else if (queueIntegration.type === "flowbuilder") {
     if (!isMenu) {
 
       await flowbuilderIntegration(
@@ -2870,7 +2870,7 @@ const handleMessage = async (
       whatsapp.complationMessage &&
       lastMessage &&
       formatBody(whatsapp.complationMessage, contact).trim().toLowerCase() ===
-        lastMessage.body.trim().toLowerCase()
+      lastMessage.body.trim().toLowerCase()
     ) {
       logger.info(`Mensagem de conclusão duplicada ignorada para contato ${contact.id} (empresa: ${companyId})`);
       return;
@@ -2956,8 +2956,7 @@ const handleMessage = async (
           const debouncedSentMessage = debounce(
             async () => {
               await wbot.sendMessage(
-                `${ticket.contact.number}@${
-                  ticket.isGroup ? "g.us" : "s.whatsapp.net"
+                `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
                 }`,
                 {
                   text: body
@@ -3007,8 +3006,7 @@ const handleMessage = async (
               const debouncedSentMessage = debounce(
                 async () => {
                   await wbot.sendMessage(
-                    `${ticket.contact.number}@${
-                      ticket.isGroup ? "g.us" : "s.whatsapp.net"
+                    `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
                     }`,
                     {
                       text: body
@@ -3150,28 +3148,28 @@ const handleMessage = async (
           geminiSettings,
         );
       } else {
-      let openAiSettings = {
-        name,
-        prompt,
-        voice,
-        voiceKey,
-        voiceRegion,
-        maxTokens: parseInt(maxTokens),
-        temperature: parseInt(temperature),
-        apiKey,
-        queueId: parseInt(queueId),
-        maxMessages: parseInt(maxMessages)
-      };
+        let openAiSettings = {
+          name,
+          prompt,
+          voice,
+          voiceKey,
+          voiceRegion,
+          maxTokens: parseInt(maxTokens),
+          temperature: parseInt(temperature),
+          apiKey,
+          queueId: parseInt(queueId),
+          maxMessages: parseInt(maxMessages)
+        };
 
-      await handleOpenAi(
-        msg,
-        wbot,
-        ticket,
-        contact,
-        mediaSent,
-        ticketTraking,
-        openAiSettings,
-      );
+        await handleOpenAi(
+          msg,
+          wbot,
+          ticket,
+          contact,
+          mediaSent,
+          ticketTraking,
+          openAiSettings,
+        );
       }
 
       return;
@@ -3187,15 +3185,15 @@ const handleMessage = async (
     ) {
       // Buscar prompt para verificar provider
       try {
-        const prompt = await ShowPromptService({ 
-          promptId: whatsapp.promptId, 
-          companyId: ticket.companyId 
+        const prompt = await ShowPromptService({
+          promptId: whatsapp.promptId,
+          companyId: ticket.companyId
         });
-        
+
         if (prompt.provider === "gemini") {
           await handleGeminiInListener(msg, wbot, ticket, contact, mediaSent);
         } else {
-      await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+          await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
         }
       } catch (err) {
         // Se não encontrar prompt, tentar OpenAI por compatibilidade
@@ -3242,15 +3240,15 @@ const handleMessage = async (
     ) {
       // Buscar prompt para verificar provider
       try {
-        const prompt = await ShowPromptService({ 
-          promptId: ticket.promptId, 
-          companyId: ticket.companyId 
+        const prompt = await ShowPromptService({
+          promptId: ticket.promptId,
+          companyId: ticket.companyId
         });
-        
+
         if (prompt.provider === "gemini") {
           await handleGeminiInListener(msg, wbot, ticket, contact, mediaSent);
         } else {
-      await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+          await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
         }
       } catch (err) {
         // Se não encontrar prompt, tentar OpenAI por compatibilidade
@@ -3390,8 +3388,7 @@ const handleMessage = async (
             const debouncedSentMessage = debounce(
               async () => {
                 await wbot.sendMessage(
-                  `${ticket.contact.number}@${
-                    ticket.isGroup ? "g.us" : "s.whatsapp.net"
+                  `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
                   }`,
                   {
                     text: body
@@ -3433,8 +3430,7 @@ const handleMessage = async (
         const debouncedSentMessage = debounce(
           async () => {
             await wbot.sendMessage(
-              `${ticket.contact.number}@${
-                ticket.isGroup ? "g.us" : "s.whatsapp.net"
+              `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
               }`,
               {
                 text: whatsapp.greetingMessage
@@ -3603,7 +3599,7 @@ const wbotMessageListener = async (
         // O evento pode ter diferentes formatos dependendo da versão do Baileys
         // Tentar tratar ambos os formatos possíveis
         let mappings: Array<{ lid: string; pn: string; jid?: string }> = [];
-        
+
         if (mapping.lid && mapping.pn) {
           // Formato: { lid: string, pn: string }
           mappings = [{ lid: mapping.lid, pn: mapping.pn }];
@@ -3617,23 +3613,23 @@ const wbotMessageListener = async (
         } else {
           mappings = [mapping];
         }
-        
+
         logger.info(`LID mapping atualizado: ${mappings.length} mapeamento(s) (empresa: ${companyId})`);
-        
+
         // Atualizar contatos existentes com novos mapeamentos LID/PN
         for (const map of mappings) {
           try {
             const phoneNumber = map.pn?.replace(/@.*$/, "").replace(/\D/g, "") || "";
-            
+
             if (phoneNumber) {
               // Buscar contato pelo número
               const contact = await Contact.findOne({
-                where: { 
+                where: {
                   number: phoneNumber,
-                  companyId 
+                  companyId
                 }
               });
-              
+
               if (contact) {
                 // Atualizar contato com informações de LID se necessário
                 // Nota: Pode ser necessário adicionar campo 'lid' ao modelo Contact no futuro

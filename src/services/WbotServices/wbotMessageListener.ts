@@ -2932,6 +2932,12 @@ const handleMessage = async (
       groupContact
     );
 
+    logger.info(`conversa iniciada para ${contact.number} contato para ${companyId} empresa`);
+
+    if (ticket.status === "pending") {
+      logger.info(`${contact.number} contato esta pendente`);
+    }
+
     await provider(ticket, msg, companyId, contact, wbot as WASocket);
 
     // voltar para o menu inicial

@@ -2319,6 +2319,49 @@ const flowbuilderIntegration = async (
     return;
   }
 
+  // FORCE INTEGRATION IF DEFINED (Fix for Connection Integrations)
+  if (queueIntegration && queueIntegration.name) {
+    const flow = await FlowBuilderModel.findOne({
+      where: {
+        name: queueIntegration.name,
+        companyId
+      }
+    });
+
+    if (flow) {
+      const nodes: INodes[] = flow.flow["nodes"];
+      const connections: IConnections[] = flow.flow["connections"];
+
+      const mountDataContact = {
+        number: contact.number,
+        name: contact.name,
+        email: contact.email
+      };
+
+      await ticket.update({
+        useIntegration: true,
+        integrationId: queueIntegration.id
+      });
+
+      await ActionsWebhookService(
+        wbot.id!, // whatsappId
+        flow.id,
+        ticket.companyId,
+        nodes,
+        connections,
+        flow.flow["nodes"][0].id,
+        null,
+        "",
+        "",
+        null,
+        ticket.id,
+        mountDataContact,
+        msg
+      );
+      return;
+    }
+  }
+
   const whatsapp = await ShowWhatsAppService(wbot.id!, companyId);
 
   logger.info(`[DEBUG] Connection Integration Check: WhatsAppId: ${whatsapp.id}, IntegrationId: ${whatsapp.integrationId}, Ticket UseIntegration: ${ticket.useIntegration}`);

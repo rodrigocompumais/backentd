@@ -2321,6 +2321,8 @@ const flowbuilderIntegration = async (
 
   const whatsapp = await ShowWhatsAppService(wbot.id!, companyId);
 
+  logger.info(`[DEBUG] Connection Integration Check: WhatsAppId: ${whatsapp.id}, IntegrationId: ${whatsapp.integrationId}, Ticket UseIntegration: ${ticket.useIntegration}`);
+
   const listPhrase = await FlowCampaignModel.findAll({
     where: {
       whatsappId: whatsapp.id
@@ -3201,6 +3203,7 @@ const handleMessage = async (
       }
     }
 
+
     //integraçao na conexao
     if (
       !msg.key.fromMe &&
@@ -3210,6 +3213,7 @@ const handleMessage = async (
       !isNil(whatsapp.integrationId) &&
       !ticket.useIntegration
     ) {
+      logger.info(`[DEBUG] Entering Connection Integration Block for Ticket ${ticket.id}`);
 
       const integrations = await ShowQueueIntegrationService(
         whatsapp.integrationId,

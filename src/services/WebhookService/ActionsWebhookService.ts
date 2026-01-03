@@ -313,6 +313,15 @@ export const ActionsWebhookService = async (
         // Gemini usually handles its own history, but for Summary node consistency we might want to log the prompt or response?
         // Since handleGemini is blackbox here, we assume it might update history or we revisit this.
         // For now, relying on Gemini's internal context.
+
+        await ticket.update({
+          userId: null,
+          companyId: companyId,
+          lastFlowId: nodeSelected.id,
+          hashFlowId: hashWebhookId,
+          flowStopped: idFlowDb.toString()
+        });
+        break;
       }
 
       if (nodeSelected.type === "summary") {
@@ -393,6 +402,15 @@ export const ActionsWebhookService = async (
           null,
           ticketTraking
         );
+
+        await ticket.update({
+          userId: null,
+          companyId: companyId,
+          lastFlowId: nodeSelected.id,
+          hashFlowId: hashWebhookId,
+          flowStopped: idFlowDb.toString()
+        });
+        break;
       }
 
       if (nodeSelected.type === "question") {

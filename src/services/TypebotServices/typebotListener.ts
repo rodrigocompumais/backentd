@@ -147,7 +147,9 @@ const typebotListener = async ({
             }
 
             if (messages?.length === 0) {
-                await wbot.sendMessage(`${number}@c.us`, { text: typebotUnknownMessage });
+                // CORREÇÃO: Usar msg.key.remoteJid que é o destino correto do chat
+                // Isso garante que funcione tanto em grupos quanto em privados
+                await wbot.sendMessage(msg.key.remoteJid, { text: typebotUnknownMessage });
             } else {
                 for (const message of messages) {
                     if (message.type === 'text') {
@@ -387,7 +389,8 @@ const typebotListener = async ({
 
             await ticket.reload();
 
-            await wbot.sendMessage(`${number}@c.us`, { text: typebotRestartMessage })
+            // CORREÇÃO: Usar msg.key.remoteJid que é o destino correto do chat
+            await wbot.sendMessage(msg.key.remoteJid, { text: typebotRestartMessage })
 
         }
         if (body === typebotKeywordFinish) {

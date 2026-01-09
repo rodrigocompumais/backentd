@@ -12,6 +12,33 @@ import fs from "fs";
 import { getMessageOptions } from "../../services/WbotServices/SendWhatsAppMedia";
 
 class BaileysProvider implements IWhatsAppProvider {
+  /**
+   * Constrói o JID correto para envio de mensagens.
+   * CORREÇÃO: Detecta se é grupo baseado no formato do número
+   * - Se já contém @g.us ou @s.whatsapp.net, usa como está
+   * - Se termina com padrão de grupo (números-números@g.us), usa @g.us
+   * - Caso contrário, usa @s.whatsapp.net (chat privado)
+   */
+  private buildChatJid(number: string): string {
+    // Se já é um JID completo, retorna como está
+    if (number.includes("@")) {
+      return number;
+    }
+    
+    // Detecta se é um grupo pelo padrão (grupos geralmente têm formato: numerosrandom-timestamp)
+    // Grupos têm formato como: 120363123456789012@g.us
+    // Para simplificar, se o número limpo tiver mais de 15 dígitos, provavelmente é um grupo
+    const cleanNumber = number.replace(/\D/g, "");
+    
+    // Grupos geralmente têm IDs maiores que números de telefone
+    // Números de telefone raramente passam de 15 dígitos
+    if (cleanNumber.length > 15) {
+      return `${number}@g.us`;
+    }
+    
+    return `${number}@s.whatsapp.net`;
+  }
+
   async sendMessage(
     whatsapp: Whatsapp,
     number: string,
@@ -20,7 +47,8 @@ class BaileysProvider implements IWhatsAppProvider {
   ): Promise<WAMessage> {
     try {
       const wbot = await GetWhatsappWbot(whatsapp);
-      const chatId = `${number}@s.whatsapp.net`;
+      // CORREÇÃO: Usar buildChatJid para suportar grupos corretamente
+      const chatId = this.buildChatJid(number);
       const formattedBody = `\u200e${body}`;
 
       // Converter opções para o formato esperado pelo Baileys
@@ -48,7 +76,8 @@ class BaileysProvider implements IWhatsAppProvider {
   ): Promise<WAMessage> {
     try {
       const wbot = await GetWhatsappWbot(whatsapp);
-      const chatId = `${number}@s.whatsapp.net`;
+      // CORREÇÃO: Usar buildChatJid para suportar grupos corretamente
+      const chatId = this.buildChatJid(number);
 
       const messageOptions = await getMessageOptions(
         options?.fileName || "",

@@ -2,6 +2,7 @@ import { proto, WASocket } from "baileys";
 import {
   convertTextToSpeechAndSaveToFile,
   getBodyMessage,
+  getChatJid,
   keepOnlySpecifiedChars,
   transferQueue,
   verifyMediaMessage,
@@ -117,8 +118,10 @@ const sendTransferMessage = async (
       return;
     }
 
+    // CORREÇÃO: Usar getChatJid para obter o destino correto do chat
+    const chatJid = getChatJid(ticket);
     const transferMessage = await wbot.sendMessage(
-      `${contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`,
+      chatJid,
       {
         text: translatedMessage
       }

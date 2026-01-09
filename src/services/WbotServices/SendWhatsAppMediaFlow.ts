@@ -62,19 +62,31 @@ const nameFileDiscovery = (pathMedia: string) => {
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 
+/**
+ * Retorna o JID correto do chat para envio de mensagens.
+ * CORREÇÃO: Centraliza a lógica de construção do chatJid
+ */
+const getChatJid = (ticket: Ticket, contactNumber: string): string => {
+  const suffix = ticket.isGroup ? "g.us" : "s.whatsapp.net";
+  return `${contactNumber}@${suffix}`;
+};
+
 export const typeSimulation = async (ticket: Ticket, presence: WAPresence) => {
 
   const wbot = await GetTicketWbot(ticket);
 
+  // CORREÇÃO: Em grupos, ticket.contactId é o grupo, então contact.number é o JID do grupo
+  // Isso está correto porque ticket.contactId referencia o chat (grupo ou privado)
   let contact = await Contact.findOne({
     where: {
       id: ticket.contactId,
     }
   });
 
-  await wbot.sendPresenceUpdate(presence, `${contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`);
+  const chatJid = getChatJid(ticket, contact.number);
+  await wbot.sendPresenceUpdate(presence, chatJid);
   await delay(5000);
-  await wbot.sendPresenceUpdate('paused', `${contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`);
+  await wbot.sendPresenceUpdate('paused', chatJid);
 
 }
 
@@ -147,14 +159,16 @@ const SendWhatsAppMediaFlow = async ({
       };
     }
 
+    // CORREÇÃO: ticket.contactId é o chat correto (grupo ou contato privado)
     let contact = await Contact.findOne({
       where: {
         id: ticket.contactId,
       }
     });
 
+    const chatJid = getChatJid(ticket, contact.number);
     const sentMessage = await wbot.sendMessage(
-      `${contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`,
+      chatJid,
       {
         ...options
       }

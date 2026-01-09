@@ -245,6 +245,22 @@ function timeout(ms: number) {
 export async function sleep(time: number) {
   await timeout(time);
 }
+
+/**
+ * Retorna o JID correto do chat para envio de mensagens.
+ * - Em grupos: usa o JID do grupo (ticket.contact.number)
+ * - Em chats privados: usa o número do contato (ticket.contact.number)
+ * 
+ * IMPORTANTE: ticket.contact sempre representa o CHAT, não o remetente.
+ * - Em grupos, ticket.contact é o grupo
+ * - Em privado, ticket.contact é o contato da conversa
+ */
+export const getChatJid = (ticket: Ticket): string => {
+  const chatNumber = ticket.contact?.number || "";
+  const suffix = ticket.isGroup ? "g.us" : "s.whatsapp.net";
+  return `${chatNumber}@${suffix}`;
+};
+
 export const sendMessageImage = async (
   wbot: Session,
   contact,
@@ -253,9 +269,13 @@ export const sendMessageImage = async (
   caption: string
 ) => {
   let sentMessage;
+  // CORREÇÃO: Usar getChatJid para obter o destino correto do chat
+  // Em grupos, contact é o remetente, mas devemos enviar para o grupo (ticket.contact)
+  const chatJid = getChatJid(ticket);
+  
   try {
     sentMessage = await wbot.sendMessage(
-      `${contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`,
+      chatJid,
       {
         image: url
           ? { url }
@@ -267,7 +287,7 @@ export const sendMessageImage = async (
     );
   } catch (error) {
     sentMessage = await wbot.sendMessage(
-      `${contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`,
+      chatJid,
       {
         text: formatBody(
           "Não consegui enviar a imagem, tente novamente!",
@@ -287,9 +307,12 @@ export const sendMessageLink = async (
   caption: string
 ) => {
   let sentMessage;
+  // CORREÇÃO: Usar getChatJid para obter o destino correto do chat
+  const chatJid = getChatJid(ticket);
+  
   try {
     sentMessage = await wbot.sendMessage(
-      `${contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`,
+      chatJid,
       {
         document: url
           ? { url }
@@ -301,7 +324,7 @@ export const sendMessageLink = async (
     );
   } catch (error) {
     sentMessage = await wbot.sendMessage(
-      `${contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`,
+      chatJid,
       {
         text: formatBody("Não consegui enviar o PDF, tente novamente!", contact)
       }
@@ -886,8 +909,10 @@ const sendTransferMessage = async (
       return;
     }
 
+    // CORREÇÃO: Usar getChatJid para obter o destino correto do chat
+    const chatJid = getChatJid(ticket);
     const transferMessage = await wbot.sendMessage(
-      `${contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`,
+      chatJid,
       {
         text: translatedMessage
       }
@@ -1582,8 +1607,10 @@ const verifyQueue = async (
       const body = formatBody(`${greetingMessage}`, contact);
 
       if (body.trim().replace(/\u200e/g, '').length > 0) {
+        // CORREÇÃO: Usar getChatJid para obter o destino correto do chat
+        const chatJid = getChatJid(ticket);
         await wbot.sendMessage(
-          `${contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`,
+          chatJid,
           {
             text: body
           }
@@ -1682,8 +1709,10 @@ const verifyQueue = async (
       text: formatBody(`\u200e${greetingMessage}\n\n${options}`, contact)
     };
 
+    // CORREÇÃO: Usar getChatJid para obter o destino correto do chat
+    const chatJid = getChatJid(ticket);
     const sendMsg = await wbot.sendMessage(
-      `${contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`,
+      chatJid,
       textMessage
     );
 
@@ -1735,8 +1764,10 @@ const verifyQueue = async (
           );
 
           if (queue.outOfHoursMessage && queue.outOfHoursMessage.trim().length > 0) {
+            // CORREÇÃO: Usar getChatJid para obter o destino correto do chat
+            const chatJid = getChatJid(ticket);
             const sentMessage = await wbot.sendMessage(
-              `${contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`,
+              chatJid,
               {
                 text: body
               }
@@ -1815,8 +1846,10 @@ const verifyQueue = async (
         ticket.contact
       );
       if (choosenQueue.greetingMessage) {
+        // CORREÇÃO: Usar getChatJid para obter o destino correto do chat
+        const chatJid = getChatJid(ticket);
         const sentMessage = await wbot.sendMessage(
-          `${contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`,
+          chatJid,
           {
             text: body
           }

@@ -1,6 +1,8 @@
 import { FlowBuilderModel } from "../../models/FlowBuilder";
 import { WebhookModel } from "../../models/Webhook";
 import { randomString } from "../../utils/randomCode";
+import QueueIntegrations from "../../models/QueueIntegrations";
+import logger from "../../utils/logger";
 
 interface Request {
   userId: number;
@@ -33,9 +35,54 @@ const CreateFlowBuilderService = async ({
       name: name,
     });
 
+    logger.info('🔄 FlowBuilder criado, verificando integração...', {
+      flowId: flow.id,
+      flowName: name,
+      companyId
+    });
+
+    // Criar ou atualizar integração automaticamente
+    const integrationName = `FlowBuilder - ${name}`;
+    
+    let integration = await QueueIntegrations.findOne({
+      where: {
+        name: integrationName,
+        companyId,
+        type: 'flowbuilder'
+      }
+    });
+
+    if (!integration) {
+      integration = await QueueIntegrations.create({
+        type: 'flowbuilder',
+        name: integrationName,
+        projectName: name,
+        jsonContent: JSON.stringify({ flowId: flow.id }),
+        language: 'pt-BR',
+        companyId
+      });
+
+      logger.info('✅ Integração FlowBuilder criada automaticamente!', {
+        integrationId: integration.id,
+        integrationName,
+        flowId: flow.id
+      });
+    } else {
+      logger.info('ℹ️ Integração FlowBuilder já existe', {
+        integrationId: integration.id,
+        integrationName
+      });
+    }
+
+    logger.info('💡 Para ativar o flowbuilder, vincule a integração ao WhatsApp!', {
+      integrationId: integration.id,
+      message: 'Vá em Configurações do WhatsApp e selecione a integração criada'
+    });
+
     return flow;
   } catch (error) {
-    console.error("Erro ao inserir o usuário:", error);
+    console.error("Erro ao inserir o FlowBuilder:", error);
+    logger.error("Erro ao criar FlowBuilder:", error);
 
     return error
   }

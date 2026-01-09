@@ -3085,7 +3085,17 @@ export const handleMessageIntegration = async (
 ): Promise<void> => {
   const msgType = getTypeMessage(msg);
 
+  logger.info('🔗 === HANDLE MESSAGE INTEGRATION ===', {
+    integrationType: queueIntegration.type,
+    integrationId: queueIntegration.id,
+    integrationName: queueIntegration.name,
+    isMenu,
+    ticketId: ticket.id,
+    msgType
+  });
+
   if (queueIntegration.type === "n8n" || queueIntegration.type === "webhook") {
+    logger.info('📡 Processando integração N8N/Webhook');
     if (queueIntegration?.urlN8N) {
       const options = {
         method: "POST",
@@ -3108,12 +3118,18 @@ export const handleMessageIntegration = async (
       }
     }
   } else if (queueIntegration.type === "typebot") {
-    console.log("entrou no typebot");
+    logger.info('🤖 Processando integração Typebot');
     // await typebots(ticket, msg, wbot, queueIntegration);
     await typebotListener({ ticket, msg, wbot, typebot: queueIntegration });
   } else if (queueIntegration.type === "flowbuilder") {
-    if (!isMenu) {
+    logger.info('🌊 Processando integração FlowBuilder', {
+      isMenu,
+      ticketLastMessage: ticket.lastMessage,
+      ticketStatus: ticket.status
+    });
 
+    if (!isMenu) {
+      logger.info('✅ FlowBuilder: Modo DIRETO (não é menu)');
       await flowbuilderIntegration(
         msg,
         wbot,
@@ -3124,12 +3140,17 @@ export const handleMessageIntegration = async (
         isFirstMsg
       );
     } else {
+      logger.info('📋 FlowBuilder: Modo MENU', {
+        lastMessageIsNumber: !isNaN(parseInt(ticket.lastMessage)),
+        ticketStatus: ticket.status
+      });
 
       if (
         !isNaN(parseInt(ticket.lastMessage)) &&
         ticket.status !== "open" &&
         ticket.status !== "closed"
       ) {
+        logger.info('✅ Chamando flowBuilderQueue');
         await flowBuilderQueue(
           ticket,
           msg,
@@ -3139,8 +3160,12 @@ export const handleMessageIntegration = async (
           contact,
           isFirstMsg
         );
+      } else {
+        logger.warn('❌ FlowBuilderQueue não chamado - condições não atendidas');
       }
     }
+  } else {
+    logger.warn('⚠️ Tipo de integração desconhecido:', queueIntegration.type);
   }
 };
 
@@ -3783,6 +3808,18 @@ const handleMessage = async (
     });
 
     // integração flowbuilder
+    const checkFlowBuilder = {
+      isFromMe: isFromMe,
+      isGroup: ticket.isGroup,
+      hasQueue: !!ticket.queue,
+      hasUser: !!ticket.user,
+      hasIntegrationId: !isNil(whatsapp.integrationId),
+      integrationId: whatsapp.integrationId,
+      useIntegration: ticket.useIntegration
+    };
+
+    logger.info('🔍 === VERIFICAÇÃO FLOWBUILDER ===', checkFlowBuilder);
+
     if (
       !isFromMe &&
       !ticket.isGroup &&
@@ -3791,11 +3828,21 @@ const handleMessage = async (
       !isNil(whatsapp.integrationId) &&
       !ticket.useIntegration
     ) {
+      logger.info('✅ Condições atendidas! Buscando integração...', {
+        integrationId: whatsapp.integrationId,
+        companyId
+      });
 
       const integrations = await ShowQueueIntegrationService(
         whatsapp.integrationId,
         companyId
       );
+
+      logger.info('📋 Integração encontrada:', {
+        integrationId: integrations.id,
+        integrationType: integrations.type,
+        integrationName: integrations.name
+      });
 
       await handleMessageIntegration(
         msg,
@@ -3808,6 +3855,19 @@ const handleMessage = async (
         contact,
         isFirstMsg
       );
+    } else {
+      logger.warn('❌ FlowBuilder NÃO foi acionado. Motivos:', {
+        bloqueadoPor: {
+          isFromMe: isFromMe ? '❌ Mensagem enviada por mim' : '✅',
+          isGroup: ticket.isGroup ? '❌ É grupo' : '✅',
+          hasQueue: ticket.queue ? '❌ Já tem fila' : '✅',
+          hasUser: ticket.user ? '❌ Já tem usuário' : '✅',
+          noIntegrationId: isNil(whatsapp.integrationId) ? '❌ WhatsApp sem integrationId' : '✅',
+          useIntegration: ticket.useIntegration ? '❌ Ticket já usando integração' : '✅'
+        },
+        integrationId: whatsapp.integrationId,
+        ticketId: ticket.id
+      });
     }
 
     const dontReadTheFirstQuestion = ticket.queue === null;

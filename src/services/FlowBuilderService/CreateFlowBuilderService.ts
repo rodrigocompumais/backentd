@@ -2,7 +2,7 @@ import { FlowBuilderModel } from "../../models/FlowBuilder";
 import { WebhookModel } from "../../models/Webhook";
 import { randomString } from "../../utils/randomCode";
 import QueueIntegrations from "../../models/QueueIntegrations";
-import logger from "../../utils/logger";
+import { logger } from "../../utils/logger";
 
 interface Request {
   userId: number;

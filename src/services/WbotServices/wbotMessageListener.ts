@@ -1762,6 +1762,12 @@ export const verifyMediaMessage = async (
   const hasCap = hasCaption(body, media.filename);
   const bodyMessage = body ? hasCap ? formatBody(body, ticket.contact) : "-" : "-";
 
+  // Garantir ACK inicial correto para mensagens de mídia
+  let initialAck = msg.status;
+  if (initialAck === undefined || initialAck === null) {
+    initialAck = msg.key.fromMe ? 1 : 0;
+  }
+
   const messageData = {
     id: msg.key.id,
     ticketId: ticket.id,
@@ -1772,12 +1778,20 @@ export const verifyMediaMessage = async (
     mediaUrl: media.filename,
     mediaType: media.mimetype.split("/")[0],
     quotedMsgId: quotedMsg?.id,
-    ack: msg.status,
+    ack: initialAck,
     remoteJid: msg.key.remoteJid,
     participant: msg.key.participant,
     dataJson: JSON.stringify(msg),
     ticketTrakingId: ticketTraking?.id,
   };
+
+  logger.debug('💾 Salvando mensagem de mídia:', {
+    messageId: messageData.id,
+    ticketId: messageData.ticketId,
+    fromMe: messageData.fromMe,
+    initialAck: messageData.ack,
+    mediaType: messageData.mediaType
+  });
 
   await ticket.update({
     lastMessage: body || "Arquivo de mídia"
@@ -1835,6 +1849,15 @@ export const verifyMessage = async (
   const body = getBodyMessage(msg);
   const isEdited = getTypeMessage(msg) == "editedMessage";
 
+  // Garantir ACK inicial correto
+  // Se msg.status for undefined, usar valor padrão baseado em fromMe
+  let initialAck = msg.status;
+  if (initialAck === undefined || initialAck === null) {
+    // fromMe: começa em 1 (pendente/enviando)
+    // !fromMe: começa em 0 (recebida)
+    initialAck = msg.key.fromMe ? 1 : 0;
+  }
+
   const messageData = {
     id: isEdited
       ? msg?.message?.editedMessage?.message?.protocolMessage?.key?.id
@@ -1846,12 +1869,21 @@ export const verifyMessage = async (
     mediaType: getTypeMessage(msg),
     read: msg.key.fromMe,
     quotedMsgId: quotedMsg?.id,
-    ack: msg.status,
+    ack: initialAck,
     remoteJid: msg.key.remoteJid,
     participant: msg.key.participant,
     dataJson: JSON.stringify(msg),
     isEdited: isEdited
   };
+
+  logger.debug('💾 Salvando mensagem:', {
+    messageId: messageData.id,
+    ticketId: messageData.ticketId,
+    fromMe: messageData.fromMe,
+    initialAck: messageData.ack,
+    remoteJid: messageData.remoteJid,
+    participant: messageData.participant
+  });
 
   await ticket.update({
     lastMessage: body
@@ -3906,7 +3938,17 @@ const handleMsgAck = async (
   const io = getIO();
 
   try {
-    const messageToUpdate = await Message.findByPk(msg.key.id, {
+    // LOG: Informação do ACK recebido
+    logger.info('📨 === ACK RECEBIDO ===', {
+      messageId: msg.key.id,
+      ackStatus: chat,
+      fromMe: msg.key.fromMe,
+      remoteJid: msg.key.remoteJid,
+      participant: msg.key.participant
+    });
+
+    // BUSCA 1: Por ID primário (método padrão)
+    let messageToUpdate = await Message.findByPk(msg.key.id, {
       include: [
         "contact",
         {
@@ -3917,8 +3959,57 @@ const handleMsgAck = async (
       ]
     });
 
-    if (!messageToUpdate) return;
+    // BUSCA 2: Se não encontrou por ID, tentar por remoteJid/participant
+    if (!messageToUpdate) {
+      logger.warn(`⚠️ Mensagem não encontrada por ID: ${msg.key.id}, tentando busca alternativa...`);
+      
+      const where: any = {
+        id: msg.key.id
+      };
+
+      // Adicionar critérios alternativos
+      if (msg.key.remoteJid) {
+        where.remoteJid = msg.key.remoteJid;
+      }
+      if (msg.key.participant) {
+        where.participant = msg.key.participant;
+      }
+
+      messageToUpdate = await Message.findOne({
+        where,
+        include: [
+          "contact",
+          {
+            model: Message,
+            as: "quotedMsg",
+            include: ["contact"]
+          }
+        ]
+      });
+    }
+
+    if (!messageToUpdate) {
+      logger.error('❌ MENSAGEM NÃO ENCONTRADA PARA ATUALIZAR ACK', {
+        messageId: msg.key.id,
+        remoteJid: msg.key.remoteJid,
+        participant: msg.key.participant,
+        ackStatus: chat
+      });
+      return;
+    }
+
+    const oldAck = messageToUpdate.ack;
     await messageToUpdate.update({ ack: chat });
+    
+    logger.info('✅ ACK ATUALIZADO', {
+      messageId: messageToUpdate.id,
+      ticketId: messageToUpdate.ticketId,
+      oldAck: oldAck,
+      newAck: chat,
+      companyId: messageToUpdate.companyId
+    });
+
+    // Emitir evento para o frontend
     io.to(messageToUpdate.ticketId.toString()).emit(
       `company-${messageToUpdate.companyId}-appMessage`,
       {
@@ -3928,7 +4019,7 @@ const handleMsgAck = async (
     );
   } catch (err) {
     Sentry.captureException(err);
-    logger.error(`Error handling message ack. Err: ${err}`);
+    logger.error(`❌ Error handling message ack. Err: ${err}`);
   }
 };
 
@@ -4019,7 +4110,19 @@ const wbotMessageListener = async (
 
     wbot.ev.on("messages.update", (messageUpdate: WAMessageUpdate[]) => {
       if (messageUpdate.length === 0) return;
+      
+      logger.info(`📬 Recebidos ${messageUpdate.length} eventos de atualização de mensagem`, {
+        count: messageUpdate.length
+      });
+      
       messageUpdate.forEach(async (message: WAMessageUpdate) => {
+        logger.debug('📬 Evento messages.update:', {
+          messageId: message.key.id,
+          status: message.update.status,
+          fromMe: message.key.fromMe,
+          remoteJid: message.key.remoteJid
+        });
+
         (wbot as WASocket)!.readMessages([message.key]);
 
         handleMsgAck(message, message.update.status);

@@ -3,6 +3,7 @@ import Contact from "../../models/Contact";
 import ContactCustomField from "../../models/ContactCustomField";
 import { isNil } from "lodash";
 import { Op } from "sequelize";
+import { logger } from "../../utils/logger";
 interface ExtraInfo extends ContactCustomField {
   name: string;
   value: string;
@@ -30,6 +31,17 @@ const CreateOrUpdateContactService = async ({
   whatsappId
 }: Request): Promise<Contact> => {
   const number = isGroup ? rawNumber : rawNumber.replace(/[^0-9]/g, "");
+
+  // LOG CRÍTICO - Rastrear o que está sendo salvo
+  logger.info('💾 === CREATE OR UPDATE CONTACT SERVICE ===', {
+    rawNumber,
+    processedNumber: number,
+    numberLength: number.length,
+    isGroup,
+    companyId,
+    name,
+    whatsappId
+  });
 
   const io = getIO();
   let finalName = name;
@@ -65,6 +77,15 @@ const CreateOrUpdateContactService = async ({
       companyId,
       whatsappId
     }
+  });
+
+  // LOG DO RESULTADO
+  logger.info(`${created ? '✅ CONTATO CRIADO' : '🔄 CONTATO EXISTENTE'}`, {
+    contactId: contact.id,
+    contactNumber: contact.number,
+    contactName: contact.name,
+    created,
+    companyId
   });
 
   // Se o contato já existia, atualizar os dados

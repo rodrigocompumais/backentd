@@ -148,25 +148,50 @@ export const extractChatId = (msg: proto.IWebMessageInfo): string => {
 export const extractSenderId = (msg: proto.IWebMessageInfo): string => {
   const key = msg.key as any;
   
+  // LOG DETALHADO - CAPTURA TODOS OS CAMPOS PARA DIAGNÓSTICO
+  logger.info('🔍 === EXTRAÇÃO DE SENDER ID ===', {
+    messageId: msg.key.id,
+    fromMe: msg.key.fromMe,
+    remoteJid: msg.key.remoteJid,
+    participant: msg.key.participant,
+    participantAlt: key.participantAlt,
+    remoteJidAlt: key.remoteJidAlt,
+    msgParticipant: msg.participant,
+    pushName: msg.pushName,
+    verifiedBizName: (msg as any).verifiedBizName,
+    // Extrair números limpos de cada campo para comparação
+    remoteJidNumber: msg.key.remoteJid?.replace(/@.*$/, "").replace(/\D/g, ""),
+    participantNumber: msg.key.participant?.replace(/@.*$/, "").replace(/\D/g, ""),
+    participantAltNumber: key.participantAlt?.replace(/@.*$/, "").replace(/\D/g, ""),
+    remoteJidAltNumber: key.remoteJidAlt?.replace(/@.*$/, "").replace(/\D/g, "")
+  });
+  
   // Priorizar participant (remetente real em grupos)
+  let selectedField = "";
+  let selectedValue = "";
+  
   if (key.participantAlt) {
-    return jidNormalizedUser(key.participantAlt);
-  }
-  if (key.participant) {
-    return jidNormalizedUser(key.participant);
-  }
-  if (msg.participant) {
-    return jidNormalizedUser(msg.participant);
-  }
-  // Em chats privados, o remetente é o remoteJid
-  if (key.remoteJidAlt) {
-    return jidNormalizedUser(key.remoteJidAlt);
-  }
-  if (msg.key.remoteJid) {
-    return jidNormalizedUser(msg.key.remoteJid);
+    selectedField = "participantAlt";
+    selectedValue = jidNormalizedUser(key.participantAlt);
+  } else if (key.participant) {
+    selectedField = "participant";
+    selectedValue = jidNormalizedUser(key.participant);
+  } else if (msg.participant) {
+    selectedField = "msg.participant";
+    selectedValue = jidNormalizedUser(msg.participant);
+  } else if (key.remoteJidAlt) {
+    selectedField = "remoteJidAlt";
+    selectedValue = jidNormalizedUser(key.remoteJidAlt);
+  } else if (msg.key.remoteJid) {
+    selectedField = "remoteJid";
+    selectedValue = jidNormalizedUser(msg.key.remoteJid);
   }
   
-  return "";
+  const extractedNumber = selectedValue.replace(/@.*$/, "").replace(/\D/g, "");
+  
+  logger.info(`✅ Sender ID selecionado de: ${selectedField} = ${selectedValue} (número: ${extractedNumber})`);
+  
+  return selectedValue;
 };
 
 /**
@@ -229,6 +254,79 @@ export const getChatJid = (ticket: {
 };
 
 export const isNumeric = (value: string) => /^-?\d+$/.test(value);
+
+/**
+ * Valida se um número é um telefone válido.
+ * Verifica comprimento e código de país para evitar salvar IDs de sessão ou LIDs.
+ * 
+ * @param number - Número a ser validado (pode conter caracteres não numéricos)
+ * @returns true se o número é válido, false caso contrário
+ */
+export const isValidPhoneNumber = (number: string): boolean => {
+  const cleanNumber = number.replace(/\D/g, "");
+  
+  // Telefone válido tem entre 10-15 dígitos
+  if (cleanNumber.length < 10 || cleanNumber.length > 15) {
+    logger.warn(`❌ Número inválido (comprimento: ${cleanNumber.length}): ${cleanNumber}`);
+    return false;
+  }
+  
+  // Lista de códigos de país conhecidos (1-3 dígitos)
+  const knownCountryCodes = [
+    "1",    // EUA/Canadá
+    "44",   // Reino Unido
+    "49",   // Alemanha
+    "52",   // México
+    "55",   // Brasil
+    "56",   // Chile
+    "54",   // Argentina
+    "351",  // Portugal
+    "34",   // Espanha
+    "39",   // Itália
+    "33",   // França
+    "41",   // Suíça
+    "43",   // Áustria
+    "45",   // Dinamarca
+    "46",   // Suécia
+    "47",   // Noruega
+    "48",   // Polônia
+    "51",   // Peru
+    "53",   // Cuba
+    "57",   // Colômbia
+    "58",   // Venezuela
+    "60",   // Malásia
+    "61",   // Austrália
+    "62",   // Indonésia
+    "63",   // Filipinas
+    "64",   // Nova Zelândia
+    "65",   // Singapura
+    "66",   // Tailândia
+    "81",   // Japão
+    "82",   // Coreia do Sul
+    "84",   // Vietnã
+    "86",   // China
+    "90",   // Turquia
+    "91",   // Índia
+    "92",   // Paquistão
+    "93",   // Afeganistão
+    "94",   // Sri Lanka
+    "95",   // Myanmar
+    "98"    // Irã
+  ];
+  
+  // Verificar se começa com algum código de país conhecido
+  const hasValidCountryCode = knownCountryCodes.some(code => 
+    cleanNumber.startsWith(code)
+  );
+  
+  if (!hasValidCountryCode) {
+    logger.warn(`❌ Número com código de país não reconhecido: ${cleanNumber}`);
+    return false;
+  }
+  
+  logger.debug(`✅ Número válido: ${cleanNumber}`);
+  return true;
+};
 
 const writeFileAsync = promisify(writeFile);
 
@@ -626,6 +724,15 @@ const getContactMessage = async (msg: proto.IWebMessageInfo, wbot: Session) => {
   const { chatId, senderId, isGroup, isFromMe } = extractMessageContext(msg);
   let contactJid: string;
 
+  logger.info('📞 === GET CONTACT MESSAGE ===', {
+    messageId: msg.key.id,
+    chatId,
+    senderId,
+    isGroup,
+    isFromMe,
+    pushName: msg.pushName
+  });
+
   // Lógica de identificação do contato:
   // 1. Mensagem enviada por mim em chat privado → contato é o DESTINATÁRIO (chatId)
   // 2. Qualquer outro caso → contato é o REMETENTE (senderId)
@@ -633,18 +740,30 @@ const getContactMessage = async (msg: proto.IWebMessageInfo, wbot: Session) => {
     // Em privado, quando EU envio, o contato do ticket é o destinatário
     const key = msg.key as any;
     contactJid = key.remoteJidAlt || chatId;
+    logger.info(`📤 Mensagem ENVIADA por mim (privado): usando chatId como contato`);
   } else {
     // Em grupos ou mensagens recebidas, o contato é quem enviou
     contactJid = senderId;
+    logger.info(`📥 Mensagem RECEBIDA ou GRUPO: usando senderId como contato`);
   }
 
   // Extrair número limpo do JID
   const rawNumber = contactJid ? contactJid.replace(/@.*$/, "").replace(/\D/g, "") : "";
 
-  return {
+  const result = {
     id: contactJid || "",
     name: isFromMe ? rawNumber : msg.pushName
   };
+
+  logger.info('✅ === CONTATO EXTRAÍDO ===', {
+    resultId: result.id,
+    resultName: result.name,
+    rawNumber: rawNumber,
+    rawNumberLength: rawNumber.length,
+    isValidNumber: isValidPhoneNumber(rawNumber)
+  });
+
+  return result;
 };
 
 const downloadMedia = async (msg: proto.IWebMessageInfo) => {
@@ -697,12 +816,27 @@ const verifyContact = async (
   wbot: Session,
   companyId: number
 ): Promise<Contact> => {
+  // LOG INICIAL - Captura o que está entrando na função
+  logger.info('🔎 === VERIFY CONTACT (INÍCIO) ===', {
+    msgContactId: msgContact.id,
+    msgContactName: msgContact.name,
+    companyId: companyId,
+    msgContactIdLength: msgContact.id.length
+  });
+
   let profilePicUrl: string;
 
   // Normalizar o ID do contato para garantir formato correto
   const normalizedContactId = msgContact.id.includes("g.us")
     ? msgContact.id
     : jidNormalizedUser(msgContact.id);
+  
+  logger.info('🔄 JID Normalizado:', {
+    original: msgContact.id,
+    normalized: normalizedContactId,
+    isGroup: normalizedContactId.includes("g.us"),
+    isLid: normalizedContactId.includes("@lid")
+  });
 
   try {
     profilePicUrl = await wbot.profilePictureUrl(normalizedContactId);
@@ -717,18 +851,72 @@ const verifyContact = async (
     ? normalizedContactId
     : normalizedContactId.replace(/@.*$/, "").replace(/\D/g, "");
 
+  logger.info('📱 Número extraído inicialmente:', {
+    contactNumber,
+    contactNumberLength: contactNumber.length,
+    isGroup,
+    isLid: normalizedContactId.includes("@lid")
+  });
+
+  // Tentar resolver LID para PN (Phone Number)
   if (!isGroup && normalizedContactId.includes("@lid")) {
+    logger.info('🔄 Tentando resolver LID para PN...');
     const lidMappingStore = (wbot as any)?.signalRepository?.lidMapping;
     const getPNForLID = lidMappingStore?.getPNForLID;
     if (typeof getPNForLID === "function") {
       try {
         const pn = await Promise.resolve(getPNForLID(normalizedContactId));
         if (pn) {
-          contactNumber = pn.replace(/@.*$/, "").replace(/\D/g, "");
+          const resolvedNumber = pn.replace(/@.*$/, "").replace(/\D/g, "");
+          logger.info('✅ LID resolvido com sucesso:', {
+            lid: normalizedContactId,
+            pn: pn,
+            resolvedNumber: resolvedNumber
+          });
+          contactNumber = resolvedNumber;
+        } else {
+          logger.warn('⚠️ LID não pôde ser resolvido - getPNForLID retornou null');
         }
       } catch (e) {
+        logger.error('❌ Erro ao resolver LID:', e);
         Sentry.captureException(e);
       }
+    } else {
+      logger.warn('⚠️ Função getPNForLID não disponível no wbot');
+    }
+  }
+
+  // VALIDAÇÃO DO NÚMERO EXTRAÍDO
+  if (!isGroup) {
+    const isValid = isValidPhoneNumber(contactNumber);
+    
+    logger.info('🔍 Validação do número:', {
+      contactNumber,
+      isValid,
+      length: contactNumber.length,
+      normalizedContactId
+    });
+
+    if (!isValid) {
+      logger.error('❌ NÚMERO INVÁLIDO DETECTADO!', {
+        número: contactNumber,
+        comprimento: contactNumber.length,
+        jidOriginal: msgContact.id,
+        jidNormalizado: normalizedContactId,
+        empresa: companyId
+      });
+      
+      Sentry.setExtra("Número Inválido Detectado", {
+        número: contactNumber,
+        comprimento: contactNumber.length,
+        jidOriginal: msgContact.id,
+        jidNormalizado: normalizedContactId,
+        empresa: companyId
+      });
+      Sentry.captureMessage("CRÍTICO: Número de telefone inválido detectado no verifyContact");
+      
+      // IMPORTANTE: Não salvar número inválido - isso causará problemas de envio
+      throw new Error(`Número de telefone inválido: ${contactNumber} (${contactNumber.length} dígitos) - JID: ${normalizedContactId}`);
     }
   }
 

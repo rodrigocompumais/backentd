@@ -166,30 +166,57 @@ export const extractSenderId = (msg: proto.IWebMessageInfo): string => {
     remoteJidAltNumber: key.remoteJidAlt?.replace(/@.*$/, "").replace(/\D/g, "")
   });
   
-  // Priorizar participant (remetente real em grupos)
+  // NOVA LÓGICA: Priorizar campos que NÃO sejam LIDs
+  // LIDs têm formato: numero@lid (ex: 52171554951275@lid)
+  // Phone Numbers têm formato: numero@s.whatsapp.net
+  
+  const candidates = [
+    { field: "participantAlt", value: key.participantAlt },
+    { field: "participant", value: key.participant },
+    { field: "msg.participant", value: msg.participant },
+    { field: "remoteJid", value: msg.key.remoteJid },
+    { field: "remoteJidAlt", value: key.remoteJidAlt }
+  ];
+  
   let selectedField = "";
   let selectedValue = "";
   
-  if (key.participantAlt) {
-    selectedField = "participantAlt";
-    selectedValue = jidNormalizedUser(key.participantAlt);
-  } else if (key.participant) {
-    selectedField = "participant";
-    selectedValue = jidNormalizedUser(key.participant);
-  } else if (msg.participant) {
-    selectedField = "msg.participant";
-    selectedValue = jidNormalizedUser(msg.participant);
-  } else if (key.remoteJidAlt) {
-    selectedField = "remoteJidAlt";
-    selectedValue = jidNormalizedUser(key.remoteJidAlt);
-  } else if (msg.key.remoteJid) {
-    selectedField = "remoteJid";
-    selectedValue = jidNormalizedUser(msg.key.remoteJid);
+  // PRIMEIRA PASSAGEM: Buscar campos que NÃO sejam LIDs
+  for (const candidate of candidates) {
+    if (candidate.value) {
+      const normalized = jidNormalizedUser(candidate.value);
+      const isLid = normalized.includes("@lid");
+      const number = normalized.replace(/@.*$/, "").replace(/\D/g, "");
+      const isValidNumber = isValidPhoneNumber(number);
+      
+      logger.debug(`Avaliando ${candidate.field}: ${normalized} | isLid: ${isLid} | isValid: ${isValidNumber}`);
+      
+      // Priorizar campos que não sejam LID E tenham número válido
+      if (!isLid && isValidNumber) {
+        selectedField = candidate.field;
+        selectedValue = normalized;
+        logger.info(`✅ Campo válido encontrado: ${selectedField} = ${selectedValue}`);
+        break;
+      }
+    }
+  }
+  
+  // SEGUNDA PASSAGEM: Se não encontrou campo válido, usar o primeiro disponível (incluindo LID)
+  if (!selectedValue) {
+    logger.warn("⚠️ Nenhum campo com número válido encontrado, usando primeiro disponível");
+    for (const candidate of candidates) {
+      if (candidate.value) {
+        selectedField = candidate.field;
+        selectedValue = jidNormalizedUser(candidate.value);
+        logger.warn(`⚠️ Usando campo ${selectedField} = ${selectedValue} (pode ser LID)`);
+        break;
+      }
+    }
   }
   
   const extractedNumber = selectedValue.replace(/@.*$/, "").replace(/\D/g, "");
   
-  logger.info(`✅ Sender ID selecionado de: ${selectedField} = ${selectedValue} (número: ${extractedNumber})`);
+  logger.info(`✅ Sender ID FINAL selecionado de: ${selectedField} = ${selectedValue} (número: ${extractedNumber})`);
   
   return selectedValue;
 };
@@ -861,6 +888,8 @@ const verifyContact = async (
   // Tentar resolver LID para PN (Phone Number)
   if (!isGroup && normalizedContactId.includes("@lid")) {
     logger.info('🔄 Tentando resolver LID para PN...');
+    
+    // ESTRATÉGIA 1: Usar lidMapping.getPNForLID
     const lidMappingStore = (wbot as any)?.signalRepository?.lidMapping;
     const getPNForLID = lidMappingStore?.getPNForLID;
     if (typeof getPNForLID === "function") {
@@ -868,21 +897,57 @@ const verifyContact = async (
         const pn = await Promise.resolve(getPNForLID(normalizedContactId));
         if (pn) {
           const resolvedNumber = pn.replace(/@.*$/, "").replace(/\D/g, "");
-          logger.info('✅ LID resolvido com sucesso:', {
+          logger.info('✅ LID resolvido com sucesso (lidMapping):', {
             lid: normalizedContactId,
             pn: pn,
             resolvedNumber: resolvedNumber
           });
           contactNumber = resolvedNumber;
         } else {
-          logger.warn('⚠️ LID não pôde ser resolvido - getPNForLID retornou null');
+          logger.warn('⚠️ LID não pôde ser resolvido via lidMapping - retornou null');
         }
       } catch (e) {
-        logger.error('❌ Erro ao resolver LID:', e);
+        logger.error('❌ Erro ao resolver LID via lidMapping:', e);
         Sentry.captureException(e);
       }
     } else {
       logger.warn('⚠️ Função getPNForLID não disponível no wbot');
+    }
+    
+    // ESTRATÉGIA 2: Se ainda inválido, tentar onWhatsApp
+    if (!isValidPhoneNumber(contactNumber)) {
+      logger.info('🔄 Estratégia 2: Tentando wbot.onWhatsApp...');
+      try {
+        const onWhatsAppResult = await wbot.onWhatsApp(normalizedContactId);
+        if (onWhatsAppResult && onWhatsAppResult.length > 0) {
+          const jid = onWhatsAppResult[0].jid;
+          const phoneNumber = jid.replace(/@.*$/, "").replace(/\D/g, "");
+          logger.info('✅ Número obtido via onWhatsApp:', {
+            lid: normalizedContactId,
+            jid: jid,
+            phoneNumber: phoneNumber
+          });
+          contactNumber = phoneNumber;
+        } else {
+          logger.warn('⚠️ onWhatsApp não retornou resultados');
+        }
+      } catch (e) {
+        logger.error('❌ Erro ao usar onWhatsApp:', e);
+        Sentry.captureException(e);
+      }
+    }
+    
+    // ESTRATÉGIA 3: Se o JID original for diferente, tentar usar ele
+    if (!isValidPhoneNumber(contactNumber) && msgContact.id !== normalizedContactId) {
+      logger.info('🔄 Estratégia 3: Tentando JID original...');
+      const originalNumber = msgContact.id.replace(/@.*$/, "").replace(/\D/g, "");
+      if (isValidPhoneNumber(originalNumber)) {
+        logger.info('✅ Número válido encontrado no JID original:', {
+          original: msgContact.id,
+          number: originalNumber
+        });
+        contactNumber = originalNumber;
+      }
     }
   }
 

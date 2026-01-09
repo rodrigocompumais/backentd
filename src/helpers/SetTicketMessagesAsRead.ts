@@ -5,6 +5,7 @@ import Message from "../models/Message";
 import Ticket from "../models/Ticket";
 import { logger } from "../utils/logger";
 import GetTicketWbot from "./GetTicketWbot";
+import { getChatJid } from "../services/WbotServices/wbotMessageListener";
 
 const SetTicketMessagesAsRead = async (ticket: Ticket): Promise<void> => {
   await ticket.update({ unreadMessages: 0 });
@@ -28,12 +29,12 @@ const SetTicketMessagesAsRead = async (ticket: Ticket): Promise<void> => {
       );
 
       if (lastMessages.key && lastMessages.key.fromMe === false) {
+        // Usar getChatJid para obter o destino correto (chatId)
+        const chatJid = getChatJid(ticket);
         // Usar cast para MinimalMessage já que lastMessages tem a estrutura necessária
         await (wbot as WASocket).chatModify(
           { markRead: true, lastMessages: [lastMessages as any] },
-          `${ticket.contact.number}@${
-            ticket.isGroup ? "g.us" : "s.whatsapp.net"
-          }`
+          chatJid
         );
       }
     }

@@ -103,6 +103,131 @@ interface IMessage {
   isLatest: boolean;
 }
 
+// ============================================================================
+// PADRÃO DE IDENTIFICAÇÃO: chatId vs senderId
+// ============================================================================
+// 
+// CONCEITOS FUNDAMENTAIS:
+// - chatId (remoteJid): SEMPRE representa o contexto da conversa (chat)
+//   - Chat privado: 5511999999999@s.whatsapp.net
+//   - Grupo: 120363123456789@g.us
+//   - Status/Broadcast: status@broadcast
+//
+// - senderId (participant): SEMPRE representa o REMETENTE REAL da mensagem
+//   - Em grupos/broadcasts: msg.key.participant
+//   - Em chats privados: msg.key.remoteJid (participant é null)
+//
+// REGRAS:
+// 1. Para ENVIAR mensagens: use chatId (onde a conversa está)
+// 2. Para IDENTIFICAR quem enviou: use senderId
+// 3. Para VALIDAÇÕES de usuário (permissões, blacklist): use senderId
+// 4. Para IDENTIFICAR o ticket/conversa: use chatId
+// ============================================================================
+
+/**
+ * Extrai o identificador do CHAT (conversa) da mensagem.
+ * Representa ONDE a conversa está acontecendo.
+ * Use para: enviar respostas, identificar o ticket, verificar se é grupo.
+ */
+export const extractChatId = (msg: proto.IWebMessageInfo): string => {
+  return msg.key.remoteJid || "";
+};
+
+/**
+ * Extrai o identificador do REMETENTE REAL da mensagem.
+ * Representa QUEM enviou a mensagem.
+ * Use para: validações de usuário, permissões, histórico por usuário.
+ * 
+ * PRIORIDADE:
+ * 1. participantAlt (Baileys 7.x - PN quando principal é LID)
+ * 2. participant (grupos/broadcasts)
+ * 3. msg.participant (fallback)
+ * 4. remoteJidAlt (Baileys 7.x)
+ * 5. remoteJid (chats privados - participant é null)
+ */
+export const extractSenderId = (msg: proto.IWebMessageInfo): string => {
+  const key = msg.key as any;
+  
+  // Priorizar participant (remetente real em grupos)
+  if (key.participantAlt) {
+    return jidNormalizedUser(key.participantAlt);
+  }
+  if (key.participant) {
+    return jidNormalizedUser(key.participant);
+  }
+  if (msg.participant) {
+    return jidNormalizedUser(msg.participant);
+  }
+  // Em chats privados, o remetente é o remoteJid
+  if (key.remoteJidAlt) {
+    return jidNormalizedUser(key.remoteJidAlt);
+  }
+  if (msg.key.remoteJid) {
+    return jidNormalizedUser(msg.key.remoteJid);
+  }
+  
+  return "";
+};
+
+/**
+ * Verifica se a mensagem é de um grupo.
+ */
+export const isGroupMessage = (msg: proto.IWebMessageInfo): boolean => {
+  return msg.key.remoteJid?.endsWith("@g.us") || false;
+};
+
+/**
+ * Verifica se a mensagem é de um broadcast/status.
+ */
+export const isBroadcastMessage = (msg: proto.IWebMessageInfo): boolean => {
+  return msg.key.remoteJid === "status@broadcast";
+};
+
+/**
+ * Extrai informações padronizadas da mensagem.
+ * Retorna chatId, senderId e flags úteis.
+ */
+export const extractMessageContext = (msg: proto.IWebMessageInfo) => {
+  const chatId = extractChatId(msg);
+  const senderId = extractSenderId(msg);
+  const isGroup = isGroupMessage(msg);
+  const isBroadcast = isBroadcastMessage(msg);
+  const isFromMe = msg.key.fromMe || false;
+  
+  return {
+    chatId,           // Onde responder
+    senderId,         // Quem enviou
+    isGroup,          // É grupo?
+    isBroadcast,      // É broadcast/status?
+    isFromMe,         // Foi enviada por mim?
+    senderNumber: senderId.replace(/@.*$/, "").replace(/\D/g, ""),
+    chatNumber: chatId.replace(/@.*$/, "").replace(/\D/g, "")
+  };
+};
+
+/**
+ * Obtém o JID de destino para envio de mensagens de um ticket.
+ * 
+ * IMPORTANTE: Use esta função SEMPRE que for enviar mensagens para um ticket.
+ * Ela garante que a mensagem seja enviada para o destino correto:
+ * - Em grupos: retorna o JID do grupo (groupContact.number@g.us)
+ * - Em privado: retorna o JID do contato (contact.number@s.whatsapp.net)
+ * 
+ * @param ticket - O ticket para o qual enviar a mensagem
+ * @returns O JID formatado para envio
+ */
+export const getChatJid = (ticket: { 
+  contact: { number: string }; 
+  isGroup: boolean;
+  groupContact?: { number: string } | null;
+}): string => {
+  // Em grupos, usar o groupContact se disponível, senão usar o contact
+  if (ticket.isGroup && ticket.groupContact) {
+    return `${ticket.groupContact.number}@g.us`;
+  }
+  return `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"}`;
+};
+
 export const isNumeric = (value: string) => /^-?\d+$/.test(value);
 
 const writeFileAsync = promisify(writeFile);
@@ -245,21 +370,6 @@ function timeout(ms: number) {
 export async function sleep(time: number) {
   await timeout(time);
 }
-
-/**
- * Retorna o JID correto do chat para envio de mensagens.
- * - Em grupos: usa o JID do grupo (ticket.contact.number)
- * - Em chats privados: usa o número do contato (ticket.contact.number)
- * 
- * IMPORTANTE: ticket.contact sempre representa o CHAT, não o remetente.
- * - Em grupos, ticket.contact é o grupo
- * - Em privado, ticket.contact é o contato da conversa
- */
-export const getChatJid = (ticket: Ticket): string => {
-  const chatNumber = ticket.contact?.number || "";
-  const suffix = ticket.isGroup ? "g.us" : "s.whatsapp.net";
-  return `${chatNumber}@${suffix}`;
-};
 
 export const sendMessageImage = async (
   wbot: Session,
@@ -480,6 +590,16 @@ const getMeSocket = (wbot: Session): IMe => {
   };
 };
 
+/**
+ * Obtém o JID do REMETENTE da mensagem.
+ * 
+ * IMPORTANTE: Esta função retorna QUEM enviou a mensagem, não onde responder.
+ * - Em grupos: retorna o participant (membro que enviou)
+ * - Em privado: retorna o remoteJid (é o próprio remetente)
+ * - Se fromMe: retorna o JID do bot
+ * 
+ * @deprecated Prefira usar extractSenderId() para novo código
+ */
 const getSenderMessage = (
   msg: proto.IWebMessageInfo,
   wbot: Session
@@ -487,48 +607,43 @@ const getSenderMessage = (
   const me = getMeSocket(wbot);
   if (msg.key.fromMe) return me.id;
 
-  const key = msg.key as any;
-  let senderId: string | undefined;
-
-  // Baileys 7.x+ logic:
-  // participantAlt / remoteJidAlt contêm o PN se o principal for LID
-
-  if (key.participantAlt) {
-    senderId = key.participantAlt;
-  } else if (key.participant) {
-    senderId = key.participant;
-  } else if (msg.participant) {
-    senderId = msg.participant;
-  } else if (key.remoteJidAlt) {
-    senderId = key.remoteJidAlt;
-  } else if (msg.key.remoteJid) {
-    senderId = msg.key.remoteJid;
-  }
-
-  return senderId ? jidNormalizedUser(senderId) : undefined;
+  // Usa a função padronizada para extrair o senderId
+  return extractSenderId(msg);
 };
 
+/**
+ * Obtém os dados do CONTATO associado à mensagem.
+ * 
+ * LÓGICA:
+ * - Mensagem enviada por mim em PRIVADO: contato é o DESTINATÁRIO (remoteJid/chatId)
+ * - Mensagem recebida em PRIVADO: contato é o REMETENTE (senderId = remoteJid)
+ * - Mensagem em GRUPO: contato é o REMETENTE (senderId = participant)
+ * 
+ * Isso é necessário porque em tickets privados, quando ENVIAMOS uma mensagem,
+ * o ticket deve ser do contato para quem enviamos, não nosso.
+ */
 const getContactMessage = async (msg: proto.IWebMessageInfo, wbot: Session) => {
-  const isGroup = msg.key.remoteJid?.includes("g.us") || false;
-  let contactJid: string | undefined;
+  const { chatId, senderId, isGroup, isFromMe } = extractMessageContext(msg);
+  let contactJid: string;
 
-  // Correção para mensagens enviadas por mim no privado
-  // Se for outgoing e privado, o 'Contact' do ticket é o destinatário (remoteJid), não eu (sender)
-  if (!isGroup && msg.key.fromMe) {
+  // Lógica de identificação do contato:
+  // 1. Mensagem enviada por mim em chat privado → contato é o DESTINATÁRIO (chatId)
+  // 2. Qualquer outro caso → contato é o REMETENTE (senderId)
+  if (!isGroup && isFromMe) {
+    // Em privado, quando EU envio, o contato do ticket é o destinatário
     const key = msg.key as any;
-    contactJid = key.remoteJidAlt || msg.key.remoteJid;
+    contactJid = key.remoteJidAlt || chatId;
   } else {
-    // Para grupos (incoming/outgoing) ou privado (incoming), usar a lógica padrão de sender
-    contactJid = getSenderMessage(msg, wbot);
+    // Em grupos ou mensagens recebidas, o contato é quem enviou
+    contactJid = senderId;
   }
 
-  // Extrair número apenas se tivermos um JID válido
-  // Garantir que removemos qualquer sufixo e caracteres não numéricos
+  // Extrair número limpo do JID
   const rawNumber = contactJid ? contactJid.replace(/@.*$/, "").replace(/\D/g, "") : "";
 
   return {
-    id: contactJid || "", // Passar o JID completo (pode ser PN@s.whatsapp.net)
-    name: msg.key.fromMe ? rawNumber : msg.pushName
+    id: contactJid || "",
+    name: isFromMe ? rawNumber : msg.pushName
   };
 };
 
@@ -2118,9 +2233,10 @@ const handleChartbot = async (
         headerType: 4
       };
 
+      // Usar getChatJid para obter destino correto
+      const chatJid = getChatJid(ticket);
       const sendMsg = await wbot.sendMessage(
-        `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
-        }`,
+        chatJid,
         buttonMessage
       );
 
@@ -2143,9 +2259,10 @@ const handleChartbot = async (
         )
       };
 
+      // Usar getChatJid para obter destino correto
+      const chatJid = getChatJid(ticket);
       const sendMsg = await wbot.sendMessage(
-        `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
-        }`,
+        chatJid,
         textMessage
       );
 
@@ -2211,9 +2328,10 @@ const handleChartbot = async (
           sections
         };
 
+        // Usar getChatJid para obter destino correto
+        const chatJid = getChatJid(ticket);
         const sendMsg = await wbot.sendMessage(
-          `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
-          }`,
+          chatJid,
           listMessage
         );
 
@@ -2241,9 +2359,10 @@ const handleChartbot = async (
           headerType: 4
         };
 
+        // Usar getChatJid para obter destino correto
+        const chatJid = getChatJid(ticket);
         const sendMsg = await wbot.sendMessage(
-          `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
-          }`,
+          chatJid,
           buttonMessage
         );
 
@@ -2265,9 +2384,10 @@ const handleChartbot = async (
           )
         };
 
+        // Usar getChatJid para obter destino correto
+        const chatJid = getChatJid(ticket);
         const sendMsg = await wbot.sendMessage(
-          `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
-          }`,
+          chatJid,
           textMessage
         );
 
@@ -2811,10 +2931,25 @@ const handleMessage = async (
   }
 
   try {
+    // ========================================================================
+    // EXTRAÇÃO PADRONIZADA DE IDENTIFICADORES
+    // ========================================================================
+    // chatId: ONDE a conversa está (grupo, privado, broadcast)
+    // senderId: QUEM enviou a mensagem (participant em grupos, remoteJid em privado)
+    // ========================================================================
+    const { 
+      chatId,      // Onde responder (remoteJid)
+      senderId,    // Quem enviou (participant ?? remoteJid)
+      isGroup,     // É grupo?
+      isBroadcast, // É broadcast/status?
+      isFromMe     // Foi enviada por mim?
+    } = extractMessageContext(msg);
+
+    // Log de debug com identificadores claros
+    logger.debug(`📨 Processando mensagem: chatId=${chatId}, senderId=${senderId}, isGroup=${isGroup}, fromMe=${isFromMe}, empresa=${companyId}`);
+
     let msgContact: IMe;
     let groupContact: Contact | undefined;
-
-    const isGroup = msg.key.remoteJid?.endsWith("@g.us");
 
     const msgIsGroupBlock = await Setting.findOne({
       where: {
@@ -2833,29 +2968,9 @@ const handleMessage = async (
       msg.message?.documentMessage ||
       msg.message?.documentWithCaptionMessage ||
       msg.message.stickerMessage;
-    if (msg.key.fromMe) {
-      // Validação de \u200e (caractere de direção) - pode estar bloqueando mensagens legítimas
-      // Comentado temporariamente para permitir todas as mensagens fromMe
-      // if (/\u200e/.test(bodyMessage)) {
-      //   logger.warn(`Mensagem fromMe bloqueada por conter \\u200e: ${msg.key.id}`);
-      //   return;
-      // }
 
-      // Validação de tipos de mensagem fromMe - muito restritiva, pode estar bloqueando mensagens legítimas
-      // Comentado temporariamente para permitir todos os tipos de mensagem fromMe
-      // if (
-      //   !hasMedia &&
-      //   msgType !== "conversation" &&
-      //   msgType !== "extendedTextMessage" &&
-      //   msgType !== "vcard"
-      // ) {
-      //   logger.warn(`Mensagem fromMe bloqueada por tipo não permitido: ${msgType} (id: ${msg.key.id})`);
-      //   return;
-      // }
-      msgContact = await getContactMessage(msg, wbot);
-    } else {
-      msgContact = await getContactMessage(msg, wbot);
-    }
+    // Obter dados do contato (REMETENTE em grupos, CONTATO em privado)
+    msgContact = await getContactMessage(msg, wbot);
 
     // VALIDAÇÃO DE NÚMEROS BRASILEIROS DESABILITADA - Estava bloqueando mensagens legítimas
     // Se necessário reativar, verificar a lógica de validação para não bloquear números válidos
@@ -2880,8 +2995,10 @@ const handleMessage = async (
 
     if (msgIsGroupBlock?.value === "enabled" && isGroup) return;
 
+    // Em grupos, criar contato separado para o GRUPO (usado para vincular ticket)
     if (isGroup) {
-      const grupoMeta = await wbot.groupMetadata(msg.key.remoteJid);
+      // Usar chatId (remoteJid) para obter metadados do grupo
+      const grupoMeta = await wbot.groupMetadata(chatId);
       const msgGroupContact = {
         id: grupoMeta.id,
         name: grupoMeta.subject,
@@ -2893,11 +3010,15 @@ const handleMessage = async (
     }
 
     const whatsapp = await ShowWhatsAppService(wbot.id!, companyId);
+    
+    // contact = contato do REMETENTE (quem enviou a mensagem)
+    // Em grupos: é o membro que enviou
+    // Em privado: é o contato da conversa
     const contact = await verifyContact(msgContact, wbot, companyId);
 
     let unreadMessages = 0;
 
-    if (msg.key.fromMe) {
+    if (isFromMe) {
       await cacheLayer.set(`contacts:${contact.id}:unreads`, "0");
     } else {
       const unreads = await cacheLayer.get(`contacts:${contact.id}:unreads`);
@@ -2957,8 +3078,7 @@ const handleMessage = async (
     });
 
     try {
-      if (!msg.key.fromMe) {
-
+      if (!isFromMe) {
         if (ticketTraking !== null && verifyRating(ticketTraking)) {
           handleRating(parseFloat(bodyMessage), ticket, ticketTraking);
           return;
@@ -2972,7 +3092,7 @@ const handleMessage = async (
     // Atualiza o ticket se a ultima mensagem foi enviada por mim, para que possa ser finalizado.
     try {
       await ticket.update({
-        fromMe: msg.key.fromMe
+        fromMe: isFromMe
       });
     } catch (e) {
       Sentry.captureException(e);
@@ -2994,7 +3114,7 @@ const handleMessage = async (
     });
 
     try {
-      if (!msg.key.fromMe && scheduleType) {
+      if (!isFromMe && scheduleType) {
         /**
          * Tratamento para envio de mensagem quando a empresa está fora do expediente
          */
@@ -3009,9 +3129,10 @@ const handleMessage = async (
             async () => {
               // Verifica se a mensagem de fora de horário existe e não está vazia (ignorando caracteres invisíveis)
               if (whatsapp.outOfHoursMessage && whatsapp.outOfHoursMessage.trim().length > 0) {
+                // Usar getChatJid para obter destino correto
+                const chatJid = getChatJid(ticket);
                 await wbot.sendMessage(
-                  `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
-                  }`,
+                  chatJid,
                   {
                     text: body
                   }
@@ -3061,9 +3182,10 @@ const handleMessage = async (
               const debouncedSentMessage = debounce(
                 async () => {
                   if (queue.outOfHoursMessage && queue.outOfHoursMessage.trim().length > 0) {
+                    // Usar getChatJid para obter destino correto
+                    const chatJid = getChatJid(ticket);
                     await wbot.sendMessage(
-                      `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
-                      }`,
+                      chatJid,
                       {
                         text: body
                       }
@@ -3106,7 +3228,7 @@ const handleMessage = async (
           ?.type === "question";
     }
 
-    if (!isNil(flow) && isQuestion && !msg.key.fromMe) {
+    if (!isNil(flow) && isQuestion && !isFromMe) {
       console.log(
         "|============= QUESTION =============|",
         JSON.stringify(flow, null, 4)
@@ -3236,7 +3358,7 @@ const handleMessage = async (
     if (
       !ticket.queue &&
       !isGroup &&
-      !msg.key.fromMe &&
+      !isFromMe &&
       !ticket.userId &&
       !isNil(whatsapp.promptId)
     ) {
@@ -3260,7 +3382,7 @@ const handleMessage = async (
 
     //integraçao na conexao
     if (
-      !msg.key.fromMe &&
+      !isFromMe &&
       !ticket.isGroup &&
       !ticket.queue &&
       !ticket.user &&
@@ -3289,7 +3411,7 @@ const handleMessage = async (
     //openai/gemini na fila
     if (
       !isGroup &&
-      !msg.key.fromMe &&
+      !isFromMe &&
       !ticket.userId &&
       !isNil(ticket.promptId) &&
       ticket.useIntegration &&
@@ -3314,7 +3436,7 @@ const handleMessage = async (
     }
 
     if (
-      !msg.key.fromMe &&
+      !isFromMe &&
       !ticket.isGroup &&
       !ticket.userId &&
       ticket.integrationId &&
@@ -3352,7 +3474,7 @@ const handleMessage = async (
     if (
       !ticket.queue &&
       !ticket.isGroup &&
-      !msg.key.fromMe &&
+      !isFromMe &&
       !ticket.userId &&
       whatsapp.queues.length >= 1 &&
       !ticket.useIntegration
@@ -3377,7 +3499,7 @@ const handleMessage = async (
 
     // integração flowbuilder
     if (
-      !msg.key.fromMe &&
+      !isFromMe &&
       !ticket.isGroup &&
       !ticket.queue &&
       !ticket.user &&
@@ -3409,7 +3531,7 @@ const handleMessage = async (
 
     try {
       //Fluxo fora do expediente
-      if (!msg.key.fromMe && scheduleType && ticket.queueId !== null) {
+      if (!isFromMe && scheduleType && ticket.queueId !== null) {
         /**
          * Tratamento para envio de mensagem quando a fila está fora do expediente
          */
@@ -3444,9 +3566,10 @@ const handleMessage = async (
             const body = queue.outOfHoursMessage;
             const debouncedSentMessage = debounce(
               async () => {
+                // Usar getChatJid para obter destino correto
+                const chatJid = getChatJid(ticket);
                 await wbot.sendMessage(
-                  `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
-                  }`,
+                  chatJid,
                   {
                     text: body
                   }
@@ -3469,7 +3592,7 @@ const handleMessage = async (
       !whatsapp?.queues?.length &&
       !ticket.userId &&
       !isGroup &&
-      !msg.key.fromMe
+      !isFromMe
     ) {
       const lastMessage = await Message.findOne({
         where: {
@@ -3486,9 +3609,10 @@ const handleMessage = async (
       if (whatsapp.greetingMessage) {
         const debouncedSentMessage = debounce(
           async () => {
+            // Usar getChatJid para obter destino correto
+            const chatJid = getChatJid(ticket);
             await wbot.sendMessage(
-              `${ticket.contact.number}@${ticket.isGroup ? "g.us" : "s.whatsapp.net"
-              }`,
+              chatJid,
               {
                 text: whatsapp.greetingMessage
               }
@@ -3503,13 +3627,13 @@ const handleMessage = async (
     }
 
     if (whatsapp.queues.length == 1 && ticket.queue) {
-      if (ticket.chatbot && !msg.key.fromMe && msg.key) {
+      if (ticket.chatbot && !isFromMe && msg.key) {
         await handleChartbot(ticket, msg as WAMessage, wbot);
       }
     }
 
     if (whatsapp.queues.length > 1 && ticket.queue) {
-      if (ticket.chatbot && !msg.key.fromMe && msg.key) {
+      if (ticket.chatbot && !isFromMe && msg.key) {
         await handleChartbot(ticket, msg as WAMessage, wbot, dontReadTheFirstQuestion);
       }
     }

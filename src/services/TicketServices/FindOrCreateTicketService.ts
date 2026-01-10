@@ -33,8 +33,28 @@ const FindOrCreateTicketService = async (
     order: [["id", "DESC"]]
   });
 
+  const whatsapp = await Whatsapp.findOne({
+    where: { id: whatsappId }
+  });
+
   if (ticket) {
-    await ticket.update({ unreadMessages, whatsappId });
+    // Atualizar ticket existente com configurações atualizadas do WhatsApp
+    await ticket.update({ 
+      unreadMessages, 
+      whatsappId,
+      // Atualizar integração se mudou no WhatsApp
+      integrationId: whatsapp?.integrationId || ticket.integrationId,
+      promptId: whatsapp?.promptId || ticket.promptId,
+      useIntegration: !!whatsapp?.integrationId
+    });
+
+    logger.debug('🔄 Ticket existente atualizado com config do WhatsApp', {
+      ticketId: ticket.id,
+      integrationId: ticket.integrationId,
+      promptId: ticket.promptId,
+      useIntegration: ticket.useIntegration,
+      atualizouIntegracao: whatsapp?.integrationId !== ticket.integrationId
+    });
   }
 
   if (ticket?.status === "closed") {
@@ -100,10 +120,6 @@ const FindOrCreateTicketService = async (
       });
     }
   }
-
-  const whatsapp = await Whatsapp.findOne({
-    where: { id: whatsappId }
-  });
 
   if (!ticket) {
     // Criar ticket herdando configurações do WhatsApp

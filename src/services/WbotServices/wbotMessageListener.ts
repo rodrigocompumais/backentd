@@ -2712,6 +2712,32 @@ const flowbuilderIntegration = async (
   const quotedMsg = await verifyQuotedMessage(msg);
   const body = getBodyMessage(msg);
 
+  // 🔍 LOG DETALHADO - INÍCIO
+  logger.info('🌊 === FLOWBUILDER INTEGRATION START ===', {
+    ticketId: ticket.id,
+    contactId: contact.id,
+    contactNumber: contact.number,
+    whatsappId: wbot.id,
+    integrationId: queueIntegration.id,
+    integrationName: queueIntegration.name,
+    isFirstMsg: !!isFirstMsg,
+    isTranfered: !!isTranfered,
+    messageBody: body,
+    fromMe: msg.key.fromMe,
+    ticketStatus: ticket.status,
+    ticketUseIntegration: ticket.useIntegration
+  });
+
+  // Buscar WhatsApp para verificar flowIdWelcome e flowIdNotPhrase
+  const whatsapp = await Whatsapp.findByPk(wbot.id);
+  logger.info('🔍 Configuração WhatsApp FlowBuilder:', {
+    whatsappId: wbot.id,
+    flowIdWelcome: whatsapp?.flowIdWelcome,
+    flowIdNotPhrase: whatsapp?.flowIdNotPhrase,
+    hasFlowWelcome: !!whatsapp?.flowIdWelcome,
+    hasFlowNotPhrase: !!whatsapp?.flowIdNotPhrase
+  });
+
   /*
   const messageData = {
     wid: msg.key.id,

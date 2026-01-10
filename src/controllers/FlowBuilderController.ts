@@ -20,17 +20,17 @@ export const createFlow = async (
   const userId = parseInt(req.user.id);
   const { companyId } = req.user;
 
-  const flow = await CreateFlowBuilderService({
+  const result = await CreateFlowBuilderService({
     userId,
     name,
     companyId
   });
 
-  if (flow === 'exist') {
+  if (result === 'exist') {
     return res.status(402).json('exist')
   }
 
-  return res.status(200).json(flow);
+  return res.status(200).json(result);
 };
 
 export const updateFlow = async (

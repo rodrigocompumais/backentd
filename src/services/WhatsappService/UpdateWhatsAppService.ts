@@ -77,7 +77,9 @@ const UpdateWhatsAppService = async ({
     timeUseBotQueues,
     expiresTicket,
     expiresInactiveMessage,
-    integrationId
+    integrationId,
+    flowIdWelcome,
+    flowIdNotPhrase
   } = whatsappData;
 
   try {
@@ -133,7 +135,9 @@ const UpdateWhatsAppService = async ({
     timeUseBotQueues,
     expiresTicket,
     expiresInactiveMessage,
-    integrationId
+    integrationId,
+    flowIdWelcome,
+    flowIdNotPhrase
   });
 
   await AssociateWhatsappQueue(whatsapp, queueIds);

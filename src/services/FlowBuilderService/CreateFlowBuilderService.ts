@@ -10,11 +10,16 @@ interface Request {
   companyId: number
 }
 
+interface Response {
+  flow: FlowBuilderModel;
+  integration: QueueIntegrations;
+}
+
 const CreateFlowBuilderService = async ({
   userId,
   name,
   companyId
-}: Request): Promise<FlowBuilderModel | string> => {
+}: Request): Promise<Response | string> => {
   try {
     
     const nameExist = await FlowBuilderModel.findOne({
@@ -76,10 +81,11 @@ const CreateFlowBuilderService = async ({
 
     logger.info('💡 Para ativar o flowbuilder, vincule a integração ao WhatsApp!', {
       integrationId: integration.id,
-      message: 'Vá em Configurações do WhatsApp e selecione a integração criada'
+      flowId: flow.id,
+      message: 'Vá em Configurações do WhatsApp e configure o Fluxo de Boas-vindas'
     });
 
-    return flow;
+    return { flow, integration };
   } catch (error) {
     console.error("Erro ao inserir o FlowBuilder:", error);
     logger.error("Erro ao criar FlowBuilder:", error);

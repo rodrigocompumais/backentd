@@ -3741,6 +3741,12 @@ const handleMessage = async (
         isMenu
       );
 
+      // ✅ Marcar ticket como usando integração para evitar reexecução
+      await ticket.update({
+        useIntegration: true,
+        integrationId: integrations.id
+      });
+
       return;
     }
 
@@ -3881,6 +3887,17 @@ const handleMessage = async (
         contact,
         isFirstMsg
       );
+
+      // ✅ Marcar ticket como usando integração para evitar reexecução
+      await ticket.update({
+        useIntegration: true,
+        integrationId: integrations.id
+      });
+
+      logger.info('✅ FlowBuilder executado! Ticket marcado como useIntegration: true', {
+        ticketId: ticket.id,
+        integrationId: integrations.id
+      });
     } else {
       logger.warn('❌ FlowBuilder NÃO foi acionado. Motivos:', {
         bloqueadoPor: {

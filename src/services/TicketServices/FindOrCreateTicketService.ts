@@ -39,13 +39,14 @@ const FindOrCreateTicketService = async (
 
   if (ticket) {
     // Atualizar ticket existente com configurações atualizadas do WhatsApp
+    // IMPORTANTE: NÃO atualizar useIntegration aqui para permitir que execute novamente
     await ticket.update({ 
       unreadMessages, 
       whatsappId,
       // Atualizar integração se mudou no WhatsApp
       integrationId: whatsapp?.integrationId || ticket.integrationId,
-      promptId: whatsapp?.promptId || ticket.promptId,
-      useIntegration: !!whatsapp?.integrationId
+      promptId: whatsapp?.promptId || ticket.promptId
+      // useIntegration mantém o valor atual do ticket (não forçar true)
     });
 
     logger.debug('🔄 Ticket existente atualizado com config do WhatsApp', {
@@ -123,6 +124,7 @@ const FindOrCreateTicketService = async (
 
   if (!ticket) {
     // Criar ticket herdando configurações do WhatsApp
+    // useIntegration inicia como FALSE para permitir que o FlowBuilder execute
     ticket = await Ticket.create({
       contactId: groupContact ? groupContact.id : contact.id,
       status: "pending",
@@ -134,7 +136,7 @@ const FindOrCreateTicketService = async (
       // ✅ Herdar integração e prompt do WhatsApp
       integrationId: whatsapp?.integrationId || null,
       promptId: whatsapp?.promptId || null,
-      useIntegration: !!whatsapp?.integrationId
+      useIntegration: false  // Sempre FALSE para permitir primeira execução
     });
 
     logger.info('🎫 === TICKET CRIADO ===', {

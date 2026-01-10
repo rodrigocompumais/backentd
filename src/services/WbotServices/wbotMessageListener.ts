@@ -2729,13 +2729,13 @@ const flowbuilderIntegration = async (
   });
 
   // Buscar WhatsApp para verificar flowIdWelcome e flowIdNotPhrase
-  const whatsapp = await Whatsapp.findByPk(wbot.id);
+  const whatsappFlow = await Whatsapp.findByPk(wbot.id);
   logger.info('🔍 Configuração WhatsApp FlowBuilder:', {
     whatsappId: wbot.id,
-    flowIdWelcome: whatsapp?.flowIdWelcome,
-    flowIdNotPhrase: whatsapp?.flowIdNotPhrase,
-    hasFlowWelcome: !!whatsapp?.flowIdWelcome,
-    hasFlowNotPhrase: !!whatsapp?.flowIdNotPhrase
+    flowIdWelcome: whatsappFlow?.flowIdWelcome,
+    flowIdNotPhrase: whatsappFlow?.flowIdNotPhrase,
+    hasFlowWelcome: !!whatsappFlow?.flowIdWelcome,
+    hasFlowNotPhrase: !!whatsappFlow?.flowIdNotPhrase
   });
 
   /*

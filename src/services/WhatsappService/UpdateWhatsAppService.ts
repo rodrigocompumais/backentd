@@ -29,7 +29,9 @@ interface WhatsappData {
   timeUseBotQueues?: number;
   expiresTicket?: number;
   expiresInactiveMessage?: string;
-  integrationId?: number
+  integrationId?: number;
+  flowIdWelcome?: number;
+  flowIdNotPhrase?: number;
 }
 
 interface Request {

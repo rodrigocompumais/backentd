@@ -6,6 +6,7 @@ import ShowTicketService from "./ShowTicketService";
 import FindOrCreateATicketTrakingService from "./FindOrCreateATicketTrakingService";
 import Setting from "../../models/Setting";
 import Whatsapp from "../../models/Whatsapp";
+import { logger } from "../../utils/logger";
 
 interface TicketData {
   status?: string;
@@ -100,11 +101,12 @@ const FindOrCreateTicketService = async (
     }
   }
 
-    const whatsapp = await Whatsapp.findOne({
+  const whatsapp = await Whatsapp.findOne({
     where: { id: whatsappId }
   });
 
   if (!ticket) {
+    // Criar ticket herdando configurações do WhatsApp
     ticket = await Ticket.create({
       contactId: groupContact ? groupContact.id : contact.id,
       status: "pending",
@@ -112,8 +114,23 @@ const FindOrCreateTicketService = async (
       unreadMessages,
       whatsappId,
       whatsapp,
-      companyId
+      companyId,
+      // ✅ Herdar integração e prompt do WhatsApp
+      integrationId: whatsapp?.integrationId || null,
+      promptId: whatsapp?.promptId || null,
+      useIntegration: !!whatsapp?.integrationId
     });
+
+    logger.info('🎫 === TICKET CRIADO ===', {
+      ticketId: ticket.id,
+      contactId: ticket.contactId,
+      whatsappId: ticket.whatsappId,
+      integrationId: ticket.integrationId,
+      promptId: ticket.promptId,
+      useIntegration: ticket.useIntegration,
+      herdouIntegração: !!whatsapp?.integrationId
+    });
+
     await FindOrCreateATicketTrakingService({
       ticketId: ticket.id,
       companyId,

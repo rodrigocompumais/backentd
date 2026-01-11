@@ -176,7 +176,7 @@ export const duplicate = async (
     throw new AppError("ERR_FORM_NOT_FOUND", 404);
   }
 
-  const formData = originalForm.toJSON();
+  const formData: any = originalForm.toJSON();
   delete formData.id;
   delete formData.createdAt;
   delete formData.updatedAt;
@@ -186,7 +186,7 @@ export const duplicate = async (
     ...formData,
     name: `${formData.name} (Cópia)`,
     companyId,
-    createdBy: userId,
+    createdBy: userId || 0,
     fields: formData.fields?.map((f: any) => {
       const fieldData = { ...f };
       delete fieldData.id;

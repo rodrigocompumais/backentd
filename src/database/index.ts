@@ -43,6 +43,10 @@ import { FlowAudioModel } from "../models/FlowAudio";
 import { FlowCampaignModel } from "../models/FlowCampaign";
 import { FlowImgModel } from "../models/FlowImg";
 import Task from "../models/Task";
+import Form from "../models/Form";
+import FormField from "../models/FormField";
+import FormResponse from "../models/FormResponse";
+import ResponseAnswer from "../models/ResponseAnswer";
 
 // eslint-disable-next-line
 const dbConfig = require("../config/database");
@@ -95,6 +99,10 @@ const models = [
   FlowCampaignModel,
   FlowImgModel,
   Task,
+  Form,
+  FormField,
+  FormResponse,
+  ResponseAnswer,
 ];
 
 sequelize.addModels(models);

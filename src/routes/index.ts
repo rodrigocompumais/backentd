@@ -39,6 +39,7 @@ import aiRoutes from "./aiRoutes";
 import mercadoPagoRoutes from "./mercadoPagoRoutes";
 import gupshupWebhookRoutes from "./gupshupWebhookRoutes";
 import gupshupValidationRoutes from "./gupshupValidationRoutes";
+import formRoutes from "./formRoutes";
 const routes = Router();
 
 routes.use(userRoutes);
@@ -82,5 +83,6 @@ routes.use(aiRoutes);
 routes.use(mercadoPagoRoutes);
 routes.use(gupshupWebhookRoutes);
 routes.use(gupshupValidationRoutes);
+routes.use(formRoutes);
 
 export default routes;

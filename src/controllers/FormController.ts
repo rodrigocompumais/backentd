@@ -186,7 +186,7 @@ export const duplicate = async (
     ...formData,
     name: `${formData.name} (Cópia)`,
     companyId,
-    createdBy: userId || 0,
+    createdBy: Number(userId) || 0,
     fields: formData.fields?.map((f: any) => {
       const fieldData = { ...f };
       delete fieldData.id;

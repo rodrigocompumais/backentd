@@ -31,11 +31,13 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
     include: [
       {
         association: "fields",
+        separate: true,
         order: [["order", "ASC"]],
       },
       {
         association: "responses",
         attributes: ["id"],
+        required: false,
       },
     ],
     limit,
@@ -43,10 +45,17 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
     order: [["createdAt", "DESC"]],
   });
 
-  const formsWithStats = forms.map((form) => ({
-    ...form.toJSON(),
-    responseCount: form.responses?.length || 0,
-  }));
+  const formsWithStats = forms.map((form) => {
+    const formData = form.toJSON();
+    // Sort fields by order manually if needed
+    if (formData.fields) {
+      formData.fields.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+    }
+    return {
+      ...formData,
+      responseCount: formData.responses?.length || 0,
+    };
+  });
 
   return res.json({
     forms: formsWithStats,
@@ -64,6 +73,7 @@ export const show = async (req: Request, res: Response): Promise<Response> => {
     include: [
       {
         association: "fields",
+        separate: true,
         order: [["order", "ASC"]],
       },
       {
@@ -77,7 +87,13 @@ export const show = async (req: Request, res: Response): Promise<Response> => {
     throw new AppError("ERR_FORM_NOT_FOUND", 404);
   }
 
-  return res.json(form);
+  const formData = form.toJSON();
+  // Sort fields by order manually if needed
+  if (formData.fields) {
+    formData.fields.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+  }
+
+  return res.json(formData);
 };
 
 export const store = async (req: Request, res: Response): Promise<Response> => {

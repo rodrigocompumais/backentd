@@ -29,6 +29,7 @@ interface Request {
 const ProcessFormResponseService = async ({
   formId,
   answers,
+  quotationItems,
   responderPhone,
   responderEmail,
   responderName,
@@ -75,16 +76,31 @@ const ProcessFormResponseService = async ({
   for (const answer of answers) {
     const field = fields.find((f) => f.id === answer.fieldId);
     if (field) {
-      if (field.fieldType === "text" && field.label.toLowerCase().includes("nome")) {
+      if (field.metadata?.autoFieldType === "supplierName" || (field.fieldType === "text" && field.label.toLowerCase().includes("nome do fornecedor"))) {
+        contactName = typeof answer.answer === "string" ? answer.answer : contactName;
+      } else if (field.metadata?.autoFieldType === "name" || (field.fieldType === "text" && field.label.toLowerCase().includes("nome"))) {
         contactName = typeof answer.answer === "string" ? answer.answer : contactName;
       }
-      if (field.fieldType === "phone") {
+      if (field.metadata?.autoFieldType === "phone" || field.fieldType === "phone") {
         contactPhone = typeof answer.answer === "string" ? answer.answer : contactPhone;
       }
       if (field.fieldType === "email") {
         contactEmail = typeof answer.answer === "string" ? answer.answer : contactEmail;
       }
     }
+  }
+
+  // Check if form is quotation type and process quotationItems
+  const formSettings = form.settings as any;
+  const isQuotationForm = formSettings?.formType === "quotation";
+  
+  // Prepare metadata with quotationItems if applicable
+  const responseMetadata: any = metadata || {};
+  if (isQuotationForm && quotationItems && quotationItems.length > 0) {
+    responseMetadata.quotationItems = quotationItems;
+    console.log("ProcessFormResponseService: Saving quotationItems:", quotationItems);
+  } else if (isQuotationForm) {
+    console.log("ProcessFormResponseService: Form is quotation but no quotationItems received");
   }
 
   // Create FormResponse
@@ -95,7 +111,7 @@ const ProcessFormResponseService = async ({
     responderName: contactName,
     ipAddress,
     userAgent,
-    metadata,
+    metadata: responseMetadata,
   });
 
   // Create ResponseAnswers
@@ -152,7 +168,7 @@ const ProcessFormResponseService = async ({
   // Send Webhook if configured
   if (form.sendWebhook && form.webhookUrl) {
     try {
-      const payload = {
+      const payload: any = {
         event: "form.submitted",
         formId: form.id,
         formName: form.name,
@@ -172,6 +188,11 @@ const ProcessFormResponseService = async ({
           };
         }),
       };
+
+      // Include quotationItems if form is quotation type
+      if (isQuotationForm && quotationItems && quotationItems.length > 0) {
+        payload.quotationItems = quotationItems;
+      }
 
       await axios.post(form.webhookUrl, payload, {
         timeout: 5000,

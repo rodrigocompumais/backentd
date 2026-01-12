@@ -78,11 +78,38 @@ const CreateFormService = async ({
   const formSettings = form.settings as any;
   const isQuotationForm = formSettings?.formType === "quotation";
 
-  // Se for cotação, não criar campos (os dados estão em quotationItems)
-  if (!isQuotationForm) {
-    // Se não for anônimo, criar campos automáticos de Nome e Telefone
-    const fieldsToCreate: Field[] = [];
-    
+  const fieldsToCreate: Field[] = [];
+
+  if (isQuotationForm) {
+    // Para formulários de cotação, criar campos automáticos: Nome do Fornecedor, Telefone, Nome do Vendedor
+    fieldsToCreate.push({
+      label: "Nome do Fornecedor",
+      fieldType: "text",
+      placeholder: "Digite o nome do fornecedor",
+      isRequired: true,
+      order: 0,
+      metadata: { isAutoField: true, autoFieldType: "supplierName" },
+    } as Field);
+
+    fieldsToCreate.push({
+      label: "Telefone",
+      fieldType: "phone",
+      placeholder: "Digite o telefone (ex: 5534999999999)",
+      isRequired: true,
+      order: 1,
+      metadata: { isAutoField: true, autoFieldType: "phone" },
+    } as Field);
+
+    fieldsToCreate.push({
+      label: "Nome do Vendedor",
+      fieldType: "text",
+      placeholder: "Digite o nome do vendedor",
+      isRequired: true,
+      order: 2,
+      metadata: { isAutoField: true, autoFieldType: "sellerName" },
+    } as Field);
+  } else {
+    // Se não for cotação, criar campos automáticos de Nome e Telefone se não for anônimo
     if (!form.isAnonymous) {
       // Campo Nome (primeiro)
       fieldsToCreate.push({
@@ -98,7 +125,7 @@ const CreateFormService = async ({
       fieldsToCreate.push({
         label: "Telefone",
         fieldType: "phone",
-        placeholder: "Digite seu telefone",
+        placeholder: "Digite seu telefone (ex: 5534999999999)",
         isRequired: true,
         order: 1,
         metadata: { isAutoField: true, autoFieldType: "phone" },
@@ -114,14 +141,14 @@ const CreateFormService = async ({
         });
       });
     }
+  }
 
-    if (fieldsToCreate.length > 0) {
-      const fieldsToInsert = fieldsToCreate.map((field) => ({
-        ...field,
-        formId: form.id,
-      }));
-      await FormField.bulkCreate(fieldsToInsert);
-    }
+  if (fieldsToCreate.length > 0) {
+    const fieldsToInsert = fieldsToCreate.map((field) => ({
+      ...field,
+      formId: form.id,
+    }));
+    await FormField.bulkCreate(fieldsToInsert);
   }
 
   // Reload form with fields

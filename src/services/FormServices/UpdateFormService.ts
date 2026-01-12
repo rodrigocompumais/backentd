@@ -55,24 +55,56 @@ const UpdateFormService = async ({
     throw new AppError("ERR_FORM_NOT_FOUND", 404);
   }
 
+  // Salvar valores antigos antes de atualizar
+  const oldIsQuotationForm = (form.settings as any)?.formType === "quotation";
+  const oldIsAnonymous = form.isAnonymous;
+
   await form.update(formData);
   await form.reload();
 
-  // Verificar se é formulário de cotação
+  // Verificar se é formulário de cotação (após atualização)
   const formSettings = form.settings as any;
   const isQuotationForm = formSettings?.formType === "quotation";
 
-  if (fields !== undefined) {
+  // Se mudou formType ou isAnonymous, recriar campos automáticos
+  if (fields !== undefined || (isQuotationForm !== oldIsQuotationForm) || (oldIsAnonymous !== form.isAnonymous)) {
     // Delete all existing fields (incluindo campos automáticos se existirem)
     await FormField.destroy({
       where: { formId: form.id },
     });
 
-    // Se for cotação, não criar campos (os dados estão em quotationItems)
-    if (!isQuotationForm) {
-      // Criar campos: automáticos (se não anônimo) + customizados
-      const fieldsToCreate: Field[] = [];
-      
+    const fieldsToCreate: Field[] = [];
+
+    if (isQuotationForm) {
+      // Para formulários de cotação, criar campos automáticos: Nome do Fornecedor, Telefone, Nome do Vendedor
+      fieldsToCreate.push({
+        label: "Nome do Fornecedor",
+        fieldType: "text",
+        placeholder: "Digite o nome do fornecedor",
+        isRequired: true,
+        order: 0,
+        metadata: { isAutoField: true, autoFieldType: "supplierName" },
+      } as Field);
+
+      fieldsToCreate.push({
+        label: "Telefone",
+        fieldType: "phone",
+        placeholder: "Digite o telefone (ex: 5534999999999)",
+        isRequired: true,
+        order: 1,
+        metadata: { isAutoField: true, autoFieldType: "phone" },
+      } as Field);
+
+      fieldsToCreate.push({
+        label: "Nome do Vendedor",
+        fieldType: "text",
+        placeholder: "Digite o nome do vendedor",
+        isRequired: true,
+        order: 2,
+        metadata: { isAutoField: true, autoFieldType: "sellerName" },
+      } as Field);
+    } else {
+      // Se não for cotação, criar campos automáticos de Nome e Telefone se não for anônimo
       if (!form.isAnonymous) {
         // Campo Nome (primeiro)
         fieldsToCreate.push({
@@ -88,7 +120,7 @@ const UpdateFormService = async ({
         fieldsToCreate.push({
           label: "Telefone",
           fieldType: "phone",
-          placeholder: "Digite seu telefone",
+          placeholder: "Digite seu telefone (ex: 5534999999999)",
           isRequired: true,
           order: 1,
           metadata: { isAutoField: true, autoFieldType: "phone" },
@@ -96,7 +128,7 @@ const UpdateFormService = async ({
       }
 
       // Adicionar campos customizados após os automáticos
-      if (fields.length > 0) {
+      if (fields && fields.length > 0) {
         fields.forEach((field, index) => {
           fieldsToCreate.push({
             ...field,
@@ -104,14 +136,14 @@ const UpdateFormService = async ({
           });
         });
       }
+    }
 
-      if (fieldsToCreate.length > 0) {
-        const fieldsToInsert = fieldsToCreate.map((field) => ({
-          ...field,
-          formId: form.id,
-        }));
-        await FormField.bulkCreate(fieldsToInsert);
-      }
+    if (fieldsToCreate.length > 0) {
+      const fieldsToInsert = fieldsToCreate.map((field) => ({
+        ...field,
+        formId: form.id,
+      }));
+      await FormField.bulkCreate(fieldsToInsert);
     }
   }
 

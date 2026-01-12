@@ -122,6 +122,71 @@ export const remove = async (
   return res.send();
 };
 
+export const sendMessageByPhone = async (req: Request, res: Response): Promise<Response> => {
+  const messageData: MessageData & { number: string } = req.body;
+  const { companyId } = req.user;
+
+  try {
+    if (!messageData.number) {
+      throw new Error("O número é obrigatório");
+    }
+
+    if (!messageData.body) {
+      throw new Error("A mensagem é obrigatória");
+    }
+
+    // Buscar WhatsApp padrão da empresa
+    const defaultWhatsapp = await Whatsapp.findOne({
+      where: { isDefault: true, companyId, status: 'CONNECTED' }
+    }) || await Whatsapp.findOne({
+      where: { companyId, status: 'CONNECTED' }
+    });
+
+    if (!defaultWhatsapp) {
+      throw new Error("Nenhuma conexão WhatsApp disponível");
+    }
+
+    const numberToTest = messageData.number;
+    const body = messageData.body;
+
+    const CheckValidNumber = await CheckContactNumber(numberToTest, companyId);
+    const number = CheckValidNumber.jid.replace(/\D/g, "");
+    const profilePicUrl = await GetProfilePicUrl(
+      number,
+      companyId
+    );
+    const contactData = {
+      name: `${number}`,
+      number,
+      profilePicUrl,
+      isGroup: false,
+      companyId
+    };
+
+    const contact = await CreateOrUpdateContactService(contactData);
+
+    const ticket = await FindOrCreateTicketService(contact, defaultWhatsapp.id!, 0, companyId);
+
+    await SendWhatsAppMessage({ body: formatBody(body, contact), ticket });
+
+    await ticket.update({
+      lastMessage: body,
+    });
+
+    SetTicketMessagesAsRead(ticket);
+
+    return res.send({ mensagem: "Mensagem enviada" });
+  } catch (err: any) {
+    if (Object.keys(err).length === 0) {
+      throw new AppError(
+        "Não foi possível enviar a mensagem, tente novamente em alguns instantes"
+      );
+    } else {
+      throw new AppError(err.message);
+    }
+  }
+};
+
 export const send = async (req: Request, res: Response): Promise<Response> => {
   const { whatsappId } = req.params as unknown as { whatsappId: number };
   const messageData: MessageData = req.body;

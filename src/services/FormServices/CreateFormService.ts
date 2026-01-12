@@ -22,7 +22,7 @@ interface Request {
   description?: string;
   companyId: number;
   createdBy: number;
-  fields: Field[];
+  fields?: Field[];
   primaryColor?: string;
   secondaryColor?: string;
   logoPosition?: string;
@@ -81,7 +81,18 @@ const CreateFormService = async ({
     await FormField.bulkCreate(fieldsToCreate);
   }
 
-  return form;
+  // Reload form with fields
+  const formWithFields = await Form.findByPk(form.id, {
+    include: [
+      {
+        association: "fields",
+        separate: true,
+        order: [["order", "ASC"]],
+      },
+    ],
+  });
+
+  return formWithFields || form;
 };
 
 export default CreateFormService;

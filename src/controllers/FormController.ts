@@ -114,7 +114,7 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
         fieldType: Yup.string().required(),
         order: Yup.number().required(),
       })
-    ),
+    ).nullable(),
   });
 
   try {

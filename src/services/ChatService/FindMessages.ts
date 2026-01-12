@@ -33,6 +33,10 @@ const FindMessages = async ({
   const limit = 20;
   const offset = limit * (+pageNumber - 1);
 
+  // Para a primeira página, buscar as mensagens mais recentes
+  // Para páginas seguintes, buscar mensagens mais antigas (scroll infinito)
+  const isFirstPage = pageNumber === "1";
+  
   const { count, rows: records } = await ChatMessage.findAndCountAll({
     where: {
       chatId
@@ -40,16 +44,18 @@ const FindMessages = async ({
     include: [{ model: User, as: "sender", attributes: ["id", "name"] }],
     limit,
     offset,
-
-    order: [["createdAt", "DESC"]]
+    order: isFirstPage 
+      ? [["createdAt", "DESC"], ["id", "DESC"]] // Primeira página: mais recentes primeiro
+      : [["createdAt", "ASC"], ["id", "ASC"]]   // Páginas seguintes: mais antigas primeiro
   });
 
   const hasMore = count > offset + records.length;
 
-  const sorted = sortBy(records, ["id", "ASC"]);
+  // Se é a primeira página, reverter a ordem para mostrar mais antigas primeiro, mais recentes por último
+  const sortedRecords = isFirstPage ? records.reverse() : records;
 
   return {
-    records: sorted,
+    records: sortedRecords,
     count,
     hasMore
   };

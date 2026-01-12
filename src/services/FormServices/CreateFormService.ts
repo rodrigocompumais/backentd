@@ -74,47 +74,54 @@ const CreateFormService = async ({
     ...otherSettings,
   });
 
-  // Se não for anônimo, criar campos automáticos de Nome e Telefone
-  const fieldsToCreate: Field[] = [];
-  
-  if (!form.isAnonymous) {
-    // Campo Nome (primeiro)
-    fieldsToCreate.push({
-      label: "Nome",
-      fieldType: "text",
-      placeholder: "Digite seu nome",
-      isRequired: true,
-      order: 0,
-      metadata: { isAutoField: true, autoFieldType: "name" },
-    } as Field);
+  // Verificar se é formulário de cotação
+  const formSettings = form.settings as any;
+  const isQuotationForm = formSettings?.formType === "quotation";
+
+  // Se for cotação, não criar campos (os dados estão em quotationItems)
+  if (!isQuotationForm) {
+    // Se não for anônimo, criar campos automáticos de Nome e Telefone
+    const fieldsToCreate: Field[] = [];
     
-    // Campo Telefone (segundo)
-    fieldsToCreate.push({
-      label: "Telefone",
-      fieldType: "phone",
-      placeholder: "Digite seu telefone",
-      isRequired: true,
-      order: 1,
-      metadata: { isAutoField: true, autoFieldType: "phone" },
-    } as Field);
-  }
-
-  // Adicionar campos customizados após os automáticos
-  if (fields && fields.length > 0) {
-    fields.forEach((field, index) => {
+    if (!form.isAnonymous) {
+      // Campo Nome (primeiro)
       fieldsToCreate.push({
-        ...field,
-        order: (form.isAnonymous ? 0 : 2) + index, // Ajustar ordem
-      });
-    });
-  }
+        label: "Nome",
+        fieldType: "text",
+        placeholder: "Digite seu nome",
+        isRequired: true,
+        order: 0,
+        metadata: { isAutoField: true, autoFieldType: "name" },
+      } as Field);
+      
+      // Campo Telefone (segundo)
+      fieldsToCreate.push({
+        label: "Telefone",
+        fieldType: "phone",
+        placeholder: "Digite seu telefone",
+        isRequired: true,
+        order: 1,
+        metadata: { isAutoField: true, autoFieldType: "phone" },
+      } as Field);
+    }
 
-  if (fieldsToCreate.length > 0) {
-    const fieldsToInsert = fieldsToCreate.map((field) => ({
-      ...field,
-      formId: form.id,
-    }));
-    await FormField.bulkCreate(fieldsToInsert);
+    // Adicionar campos customizados após os automáticos
+    if (fields && fields.length > 0) {
+      fields.forEach((field, index) => {
+        fieldsToCreate.push({
+          ...field,
+          order: (form.isAnonymous ? 0 : 2) + index, // Ajustar ordem
+        });
+      });
+    }
+
+    if (fieldsToCreate.length > 0) {
+      const fieldsToInsert = fieldsToCreate.map((field) => ({
+        ...field,
+        formId: form.id,
+      }));
+      await FormField.bulkCreate(fieldsToInsert);
+    }
   }
 
   // Reload form with fields

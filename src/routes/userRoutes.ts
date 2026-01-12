@@ -22,6 +22,19 @@ userRoutes.delete("/users/:userId", isAuth, UserController.remove);
 
 userRoutes.post("/users/set-language/:newLanguage", isAuth, UserController.setLanguage);
 
-userRoutes.post("/users/:userId/avatar", isAuth, upload.single("avatar"), UserController.uploadAvatar);
+userRoutes.post(
+  "/users/:userId/avatar", 
+  isAuth, 
+  (req, res, next) => {
+    upload.single("avatar")(req, res, (err) => {
+      if (err) {
+        console.error("Multer error:", err);
+        return res.status(400).json({ error: err.message });
+      }
+      next();
+    });
+  },
+  UserController.uploadAvatar
+);
 
 export default userRoutes;

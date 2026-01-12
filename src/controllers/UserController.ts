@@ -173,8 +173,13 @@ export const setLanguage = async (req: Request, res: Response): Promise<Response
 export const uploadAvatar = async (req: Request, res: Response): Promise<Response> => {
   const { userId } = req.params;
   const { companyId, id: requestUserId } = req.user;
-  const files = req.files as Express.Multer.File[];
-  const file = files?.[0];
+  
+  // Debug: verificar o que está chegando
+  console.log("Upload Avatar - req.file:", req.file);
+  console.log("Upload Avatar - req.files:", req.files);
+  console.log("Upload Avatar - req.body:", req.body);
+  
+  const file = req.file as Express.Multer.File;
 
   if (!file) {
     throw new AppError("ERR_NO_FILE", 400);

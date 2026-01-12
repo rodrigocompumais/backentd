@@ -76,12 +76,13 @@ const ProcessFormResponseService = async ({
   for (const answer of answers) {
     const field = fields.find((f) => f.id === answer.fieldId);
     if (field) {
-      if (field.metadata?.autoFieldType === "supplierName" || (field.fieldType === "text" && field.label.toLowerCase().includes("nome do fornecedor"))) {
+      const fieldMetadata = field.metadata as any;
+      if (fieldMetadata?.autoFieldType === "supplierName" || (field.fieldType === "text" && field.label.toLowerCase().includes("nome do fornecedor"))) {
         contactName = typeof answer.answer === "string" ? answer.answer : contactName;
-      } else if (field.metadata?.autoFieldType === "name" || (field.fieldType === "text" && field.label.toLowerCase().includes("nome"))) {
+      } else if (fieldMetadata?.autoFieldType === "name" || (field.fieldType === "text" && field.label.toLowerCase().includes("nome"))) {
         contactName = typeof answer.answer === "string" ? answer.answer : contactName;
       }
-      if (field.metadata?.autoFieldType === "phone" || field.fieldType === "phone") {
+      if (fieldMetadata?.autoFieldType === "phone" || field.fieldType === "phone") {
         contactPhone = typeof answer.answer === "string" ? answer.answer : contactPhone;
       }
       if (field.fieldType === "email") {

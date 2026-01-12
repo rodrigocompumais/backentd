@@ -258,23 +258,68 @@ export const exportData = async (
 
   // Build Excel data
   const fields = form.fields || [];
-  const headers = ["ID", "Nome", "Telefone", "Email", "Data", ...fields.map((f) => f.label)];
+  const formSettings = form.settings as any;
+  const isQuotationForm = formSettings?.formType === "quotation";
+  
+  let headers: string[] = [];
+  if (isQuotationForm) {
+    headers = ["ID", "Nome", "Telefone", "Email", "Data", "Produto", "Quantidade", "Valor Unitário", "Valor Total", "Observações"];
+  } else {
+    headers = ["ID", "Nome", "Telefone", "Email", "Data", ...fields.map((f) => f.label)];
+  }
 
-  const rows = responses.map((response) => {
-    const row: any = {
-      ID: response.id,
-      Nome: response.responderName || "",
-      Telefone: response.responderPhone || "",
-      Email: response.responderEmail || "",
-      Data: response.submittedAt,
-    };
+  const rows: any[] = [];
+  
+  responses.forEach((response) => {
+    if (isQuotationForm) {
+      const quotationItems = (response.metadata as any)?.quotationItems || [];
+      if (quotationItems.length > 0) {
+        quotationItems.forEach((item: any, index: number) => {
+          const row: any = {
+            ID: index === 0 ? response.id : "", // Only show ID in first row
+            Nome: index === 0 ? (response.responderName || "") : "",
+            Telefone: index === 0 ? (response.responderPhone || "") : "",
+            Email: index === 0 ? (response.responderEmail || "") : "",
+            Data: index === 0 ? response.submittedAt : "",
+            Produto: item.productName || "",
+            Quantidade: item.quantity || 0,
+            "Valor Unitário": item.unitValue ? parseFloat(item.unitValue).toFixed(2) : "0.00",
+            "Valor Total": item.totalValue ? parseFloat(item.totalValue).toFixed(2) : "0.00",
+            Observações: item.observations || "",
+          };
+          rows.push(row);
+        });
+      } else {
+        // No quotation items, still create a row with basic info
+        rows.push({
+          ID: response.id,
+          Nome: response.responderName || "",
+          Telefone: response.responderPhone || "",
+          Email: response.responderEmail || "",
+          Data: response.submittedAt,
+          Produto: "",
+          Quantidade: "",
+          "Valor Unitário": "",
+          "Valor Total": "",
+          Observações: "",
+        });
+      }
+    } else {
+      const row: any = {
+        ID: response.id,
+        Nome: response.responderName || "",
+        Telefone: response.responderPhone || "",
+        Email: response.responderEmail || "",
+        Data: response.submittedAt,
+      };
 
-    fields.forEach((field) => {
-      const answer = response.answers?.find((a) => a.fieldId === field.id);
-      row[field.label] = answer?.answer || "";
-    });
+      fields.forEach((field) => {
+        const answer = response.answers?.find((a) => a.fieldId === field.id);
+        row[field.label] = answer?.answer || "";
+      });
 
-    return row;
+      rows.push(row);
+    }
   });
 
   const worksheet = XLSX.utils.json_to_sheet(rows);

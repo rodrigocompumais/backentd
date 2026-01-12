@@ -17,6 +17,7 @@ interface Answer {
 interface Request {
   formId: number;
   answers: Answer[];
+  quotationItems?: object[];
   responderPhone?: string;
   responderEmail?: string;
   responderName?: string;

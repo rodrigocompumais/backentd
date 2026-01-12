@@ -8,7 +8,7 @@ import ShowFromUuidService from "../services/ChatService/ShowFromUuidService";
 import DeleteService from "../services/ChatService/DeleteService";
 import FindMessages from "../services/ChatService/FindMessages";
 import UpdateService from "../services/ChatService/UpdateService";
-import CreateOrFindUserChatService from "../services/ChatService/CreateOrFindUserChatService";
+import CreateIndividualChatsForUserService from "../services/ChatService/CreateIndividualChatsForUserService";
 
 import Chat from "../models/Chat";
 import CreateMessageService from "../services/ChatService/CreateMessageService";
@@ -37,15 +37,12 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
   const ownerId = +req.user.id;
   const { companyId } = req.user;
 
-  // Se não há chats, criar automaticamente o chat individual do usuário
-  const { records: existingChats } = await ListService({
-    ownerId,
-    pageNumber: "1"
-  });
-
-  if (existingChats.length === 0) {
-    // Criar chat individual automaticamente
-    await CreateOrFindUserChatService({
+  // Se estamos buscando chats individuais (isGroup === false ou não especificado)
+  const isGroupFilter = isGroup === "true" ? true : isGroup === "false" ? false : undefined;
+  
+  if (isGroupFilter === false || isGroupFilter === undefined) {
+    // Criar ou atualizar chats individuais com todos os usuários da empresa
+    await CreateIndividualChatsForUserService({
       userId: ownerId,
       companyId
     });
@@ -54,7 +51,7 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
   const { records, count, hasMore } = await ListService({
     ownerId,
     pageNumber,
-    isGroup: isGroup === "true" ? true : isGroup === "false" ? false : undefined
+    isGroup: isGroupFilter
   });
 
   return res.json({ records, count, hasMore });

@@ -228,21 +228,27 @@ export const getPublicForm = async (
 ): Promise<Response> => {
   const { slug } = req.params;
 
+  console.log(`[PublicForm] Buscando formulário com slug: ${slug}`);
+
   const form = await Form.findOne({
     where: { slug, isActive: true },
     include: [
       {
         association: "fields",
+        separate: true,
         order: [["order", "ASC"]],
       },
     ],
   });
 
   if (!form) {
+    console.log(`[PublicForm] Formulário não encontrado: ${slug}`);
     throw new AppError("ERR_FORM_NOT_FOUND", 404);
   }
 
-  return res.json(form);
+  const formData: any = form.toJSON();
+  console.log(`[PublicForm] Formulário encontrado: ${formData.name} (${formData.fields?.length || 0} campos)`);
+  return res.json(formData);
 };
 
 export const getStats = async (

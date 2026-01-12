@@ -2,6 +2,7 @@ import {
   Table,
   Column,
   CreatedAt,
+  UpdatedAt,
   Model,
   DataType,
   PrimaryKey,
@@ -44,6 +45,9 @@ class ResponseAnswer extends Model<ResponseAnswer> {
 
   @CreatedAt
   createdAt: Date;
+
+  @UpdatedAt
+  updatedAt: Date;
 }
 
 export default ResponseAnswer;

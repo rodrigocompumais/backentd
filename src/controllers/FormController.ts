@@ -68,8 +68,14 @@ export const show = async (req: Request, res: Response): Promise<Response> => {
   const { id } = req.params;
   const { companyId } = req.user;
 
+  // Validate that id is a number
+  const formId = Number(id);
+  if (isNaN(formId)) {
+    throw new AppError("ERR_FORM_NOT_FOUND", 404);
+  }
+
   const form = await Form.findOne({
-    where: { id, companyId },
+    where: { id: formId, companyId },
     include: [
       {
         association: "fields",

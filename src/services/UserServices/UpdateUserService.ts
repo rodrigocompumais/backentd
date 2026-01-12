@@ -14,6 +14,7 @@ interface UserData {
   queueIds?: number[];
   whatsappId?: number;
   allTicket?: string;
+  avatar?: string;
 }
 
 interface Request {
@@ -52,7 +53,7 @@ const UpdateUserService = async ({
 	allTicket: Yup.string()
   });
 
-  const { email, password, profile, name, queueIds = [], whatsappId, allTicket } = userData;
+  const { email, password, profile, name, queueIds = [], whatsappId, allTicket, avatar } = userData;
 
   try {
     await schema.validate({ email, password, profile, name, allTicket });
@@ -66,7 +67,8 @@ const UpdateUserService = async ({
     profile,
     name,
     whatsappId: whatsappId || null,
-	allTicket
+	allTicket,
+    avatar: avatar !== undefined ? avatar : user.avatar
   });
 
   await user.$set("queues", queueIds);
@@ -82,7 +84,8 @@ const UpdateUserService = async ({
     profile: user.profile,
     companyId: user.companyId,
     company,
-    queues: user.queues
+    queues: user.queues,
+    avatar: user.avatar
   };
 
   return serializedUser;

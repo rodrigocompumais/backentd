@@ -12,7 +12,8 @@ interface SerializedUser {
   company: Company | null;
   super: boolean;
   queues: Queue[];
-  allTicket: string,
+  allTicket: string;
+  avatar: string;
 }
 
 export const SerializeUser = async (user: User): Promise<SerializedUser> => {
@@ -26,5 +27,6 @@ export const SerializeUser = async (user: User): Promise<SerializedUser> => {
     super: user.super,
     queues: user.queues,
 	allTicket: user.allTicket,
+    avatar: user.avatar || null,
   };
 };

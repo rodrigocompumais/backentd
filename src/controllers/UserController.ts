@@ -169,3 +169,38 @@ export const setLanguage = async (req: Request, res: Response): Promise<Response
 
   return res.status(200).json({message: "Language updated successfully"});
 }
+
+export const uploadAvatar = async (req: Request, res: Response): Promise<Response> => {
+  const { userId } = req.params;
+  const { companyId, id: requestUserId } = req.user;
+  const files = req.files as Express.Multer.File[];
+  const file = files?.[0];
+
+  if (!file) {
+    throw new AppError("ERR_NO_FILE", 400);
+  }
+
+  const user = await ShowUserService(userId);
+
+  // Verificar se o usuário pertence à mesma empresa ou se é o próprio usuário
+  if (user.companyId !== companyId && +requestUserId !== user.id) {
+    throw new AppError("ERR_NO_PERMISSION", 403);
+  }
+
+  // Permitir que o usuário atualize seu próprio avatar ou admin atualize qualquer usuário
+  if (req.user.profile !== "admin" && +requestUserId !== user.id) {
+    throw new AppError("ERR_NO_PERMISSION", 403);
+  }
+
+  const avatarPath = `users/${file.filename}`;
+
+  await user.update({ avatar: avatarPath });
+
+  const io = getIO();
+  io.to(`company-${companyId}-mainchannel`).emit(`company-${companyId}-user`, {
+    action: "update",
+    user: await user.reload()
+  });
+
+  return res.status(200).json({ avatar: avatarPath });
+};

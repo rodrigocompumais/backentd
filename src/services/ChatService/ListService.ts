@@ -42,8 +42,8 @@ const ListService = async ({
   const { count, rows: records } = await Chat.findAndCountAll({
     where: whereCondition,
     include: [
-      { model: User, as: "owner" },
-      { model: ChatUser, as: "users", include: [{ model: User, as: "user" }] }
+      { model: User, as: "owner", attributes: ["id", "name", "avatar"] },
+      { model: ChatUser, as: "users", include: [{ model: User, as: "user", attributes: ["id", "name", "avatar"] }] }
     ],
     limit,
     offset,

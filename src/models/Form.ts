@@ -67,6 +67,10 @@ class Form extends Model<Form> {
   @Column
   allowMultipleSubmissions: boolean;
 
+  @Default(false)
+  @Column
+  isAnonymous: boolean;
+
   // Actions after submission
   @Default(true)
   @Column

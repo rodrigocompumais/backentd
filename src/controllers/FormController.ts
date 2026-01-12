@@ -46,7 +46,7 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
   });
 
   const formsWithStats = forms.map((form) => {
-    const formData = form.toJSON();
+    const formData: any = form.toJSON();
     // Sort fields by order manually if needed
     if (formData.fields) {
       formData.fields.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
@@ -87,7 +87,7 @@ export const show = async (req: Request, res: Response): Promise<Response> => {
     throw new AppError("ERR_FORM_NOT_FOUND", 404);
   }
 
-  const formData = form.toJSON();
+  const formData: any = form.toJSON();
   // Sort fields by order manually if needed
   if (formData.fields) {
     formData.fields.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));

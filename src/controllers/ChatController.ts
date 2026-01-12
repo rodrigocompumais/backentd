@@ -8,6 +8,7 @@ import ShowFromUuidService from "../services/ChatService/ShowFromUuidService";
 import DeleteService from "../services/ChatService/DeleteService";
 import FindMessages from "../services/ChatService/FindMessages";
 import UpdateService from "../services/ChatService/UpdateService";
+import CreateOrFindUserChatService from "../services/ChatService/CreateOrFindUserChatService";
 
 import Chat from "../models/Chat";
 import CreateMessageService from "../services/ChatService/CreateMessageService";
@@ -23,6 +24,7 @@ type IndexQuery = {
 type StoreData = {
   users: any[];
   title: string;
+  isGroup?: boolean;
 };
 
 type FindParams = {
@@ -31,12 +33,28 @@ type FindParams = {
 };
 
 export const index = async (req: Request, res: Response): Promise<Response> => {
-  const { pageNumber } = req.query as unknown as IndexQuery;
+  const { pageNumber, isGroup } = req.query as unknown as IndexQuery & { isGroup?: string };
   const ownerId = +req.user.id;
+  const { companyId } = req.user;
+
+  // Se não há chats, criar automaticamente o chat individual do usuário
+  const { records: existingChats } = await ListService({
+    ownerId,
+    pageNumber: "1"
+  });
+
+  if (existingChats.length === 0) {
+    // Criar chat individual automaticamente
+    await CreateOrFindUserChatService({
+      userId: ownerId,
+      companyId
+    });
+  }
 
   const { records, count, hasMore } = await ListService({
     ownerId,
-    pageNumber
+    pageNumber,
+    isGroup: isGroup === "true" ? true : isGroup === "false" ? false : undefined
   });
 
   return res.json({ records, count, hasMore });
@@ -50,7 +68,8 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
   const record = await CreateService({
     ...data,
     ownerId,
-    companyId
+    companyId,
+    isGroup: data.isGroup !== undefined ? data.isGroup : (data.users && data.users.length > 0)
   });
 
   const io = getIO();

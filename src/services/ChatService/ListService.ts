@@ -6,6 +6,7 @@ import User from "../../models/User";
 interface Request {
   ownerId: number;
   pageNumber?: string;
+  isGroup?: boolean;
 }
 
 interface Response {
@@ -16,7 +17,8 @@ interface Response {
 
 const ListService = async ({
   ownerId,
-  pageNumber = "1"
+  pageNumber = "1",
+  isGroup
 }: Request): Promise<Response> => {
   const chatUsers = await ChatUser.findAll({
     where: { userId: ownerId }
@@ -27,12 +29,18 @@ const ListService = async ({
   const limit = 20;
   const offset = limit * (+pageNumber - 1);
 
+  const whereCondition: any = {
+    id: {
+      [Op.in]: chatIds
+    }
+  };
+
+  if (isGroup !== undefined) {
+    whereCondition.isGroup = isGroup;
+  }
+
   const { count, rows: records } = await Chat.findAndCountAll({
-    where: {
-      id: {
-        [Op.in]: chatIds
-      }
-    },
+    where: whereCondition,
     include: [
       { model: User, as: "owner" },
       { model: ChatUser, as: "users", include: [{ model: User, as: "user" }] }

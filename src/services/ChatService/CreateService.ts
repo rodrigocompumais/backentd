@@ -7,15 +7,17 @@ interface Data {
   companyId: number;
   users: any[];
   title: string;
+  isGroup?: boolean;
 }
 
 const CreateService = async (data: Data): Promise<Chat> => {
-  const { ownerId, companyId, users, title } = data;
+  const { ownerId, companyId, users, title, isGroup = false } = data;
 
   const record = await Chat.create({
     ownerId,
     companyId,
-    title
+    title,
+    isGroup
   });
 
   if (Array.isArray(users) && users.length > 0) {

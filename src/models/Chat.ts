@@ -41,6 +41,10 @@ class Chat extends Model<Chat> {
   @Column({ defaultValue: "" })
   lastMessage: string;
 
+  @Default(false)
+  @Column
+  isGroup: boolean;
+
   @ForeignKey(() => Company)
   @Column
   companyId: number;

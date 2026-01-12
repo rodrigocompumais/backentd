@@ -141,11 +141,22 @@ export const saveMessage = async (
   const { id } = req.params;
   const senderId = +req.user.id;
   const chatId = +id;
+  const file = req.file as Express.Multer.File;
+
+  let mediaPath = null;
+  let mediaName = null;
+
+  if (file) {
+    mediaPath = `chat-media/${file.filename}`;
+    mediaName = file.originalname;
+  }
 
   const newMessage = await CreateMessageService({
     chatId,
     senderId,
-    message
+    message: message || "",
+    mediaPath,
+    mediaName
   });
 
   const chat = await Chat.findByPk(chatId, {

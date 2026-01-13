@@ -19,7 +19,7 @@ const ReorderUserQuickButtonsService = async ({
   userId,
   buttons,
 }: Request): Promise<void> => {
-  const transaction: Transaction = await database.connection.transaction();
+  const transaction: Transaction = await database.transaction();
 
   try {
     // Validar que todos os botões pertencem ao usuário

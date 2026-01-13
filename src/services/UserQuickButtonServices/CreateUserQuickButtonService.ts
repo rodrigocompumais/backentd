@@ -82,7 +82,7 @@ const CreateUserQuickButtonService = async ({
     const maxOrder = await UserQuickButton.max("order", {
       where: { companyId, userId },
     });
-    finalOrder = (maxOrder || 0) + 1;
+    finalOrder = (Number(maxOrder) || 0) + 1;
   }
 
   const button = await UserQuickButton.create({

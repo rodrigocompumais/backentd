@@ -151,10 +151,14 @@ export const saveMessage = async (
     mediaName = file.originalname;
   }
 
+  // Se há arquivo mas não há mensagem, envia string vazia
+  // Se há arquivo e mensagem, envia a mensagem normalmente
+  const messageText = file && !message ? "" : (message || "");
+
   const newMessage = await CreateMessageService({
     chatId,
     senderId,
-    message: message || "",
+    message: messageText,
     mediaPath,
     mediaName
   });

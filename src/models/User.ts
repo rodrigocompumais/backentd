@@ -62,6 +62,10 @@ class User extends Model<User> {
   @Column
   avatar: string;
 
+  @Default(true)
+  @Column
+  repeatPendingChatSound: boolean;
+
   @CreatedAt
   createdAt: Date;
 

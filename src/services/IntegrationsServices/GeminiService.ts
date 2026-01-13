@@ -29,6 +29,7 @@ import Company from "../../models/Company";
 import Queue from "../../models/Queue";
 import User from "../../models/User";
 import ListSettingsServiceOne from "../SettingServices/ListSettingsServiceOne";
+import ListQueuesService from "../QueueService/ListQueuesService";
 
 type Session = WASocket & {
   id?: number;
@@ -190,9 +191,14 @@ export const handleGemini = async (
     limit: maxHistoryMessages
   });
 
+  // Buscar filas disponíveis para permitir que a IA escolha
+  const availableQueues = await ListQueuesService({ companyId: ticket.companyId });
+  const queuesList = availableQueues.map(q => `- ${q.name} (ID: ${q.id})`).join('\n');
+  const queuesNames = availableQueues.map(q => q.name).join(', ');
+
   // Prompt do sistema otimizado e mais curto
   const contactName = sanitizeName(contact.name || "Amigo(a)");
-  let promptSystem = `Você é um assistente de atendimento. O nome do CLIENTE que você está atendendo é: ${contactName}. Use este nome ao se dirigir ao cliente nas suas respostas.\n${geminiSettings.prompt}\n\nIMPORTANTE: Seja direto e objetivo. Para transferir, comece com 'Ação: Transferir para o setor de atendimento'.`;
+  let promptSystem = `Você é um assistente de atendimento. O nome do CLIENTE que você está atendendo é: ${contactName}. Use este nome ao se dirigir ao cliente nas suas respostas.\n${geminiSettings.prompt}\n\nFILAS DISPONÍVEIS PARA TRANSFERÊNCIA:\n${queuesList}\n\nIMPORTANTE: Seja direto e objetivo. Para transferir, use o formato: 'Ação: Transferir para o setor de atendimento [Fila: Nome da Fila]' ou apenas 'Ação: Transferir para o setor de atendimento' para usar a fila padrão.`;
   
   // Adicionar instruções sobre mensagens internas se habilitado
   if (geminiSettings.canSendInternalMessages) {
@@ -408,49 +414,82 @@ export const handleGemini = async (
 
       // Verificar se precisa transferir para fila
       if (response.includes("Ação: Transferir para o setor de atendimento")) {
-        // Determinar fila de destino
-        const targetQueueId = geminiSettings.transferQueueId || geminiSettings.queueId;
+        let targetQueueId: number | null = null;
+        let targetQueueName: string | null = null;
 
-        // Se canTransferToAgent estiver habilitado, gerar resumo antes de transferir
-        if (geminiSettings.canTransferToAgent) {
-          try {
-            // Gerar resumo do contexto
-            const summary = await generateContextSummary({
-              ticketId: ticket.id,
-              companyId: ticket.companyId,
-              provider: "gemini",
-              maxMessages: geminiSettings.maxMessages
-            });
-
-            // Enviar resumo como mensagem interna
-            const summaryMessageData: MessageData = {
-              id: `${ticket.id}-${Date.now()}-summary`,
-              body: `📋 RESUMO DO CONTEXTO (antes da transferência):\n\n${summary}`,
-              ticketId: ticket.id,
-              contactId: ticket.contactId,
-              fromMe: true,
-              read: true,
-              isInternal: true,
-              mediaType: "conversation"
-            };
-            await CreateMessageService({ messageData: summaryMessageData, companyId: ticket.companyId });
-            logger.info(`Resumo do contexto gerado antes da transferência do ticket ${ticket.id}`);
-          } catch (err: any) {
-            logger.error(`Erro ao gerar resumo antes da transferência: ${err.message}`);
-            // Continua com a transferência mesmo se o resumo falhar
+        // Tentar extrair o nome da fila especificada pela IA
+        const queueMatch = response.match(/\[Fila:\s*([^\]]+)\]/i);
+        if (queueMatch && queueMatch[1]) {
+          const specifiedQueueName = queueMatch[1].trim();
+          
+          // Buscar fila pelo nome (case-insensitive)
+          const matchedQueue = availableQueues.find(
+            q => q.name.toLowerCase() === specifiedQueueName.toLowerCase()
+          );
+          
+          if (matchedQueue) {
+            targetQueueId = matchedQueue.id;
+            targetQueueName = matchedQueue.name;
+            logger.info(`IA especificou fila: "${specifiedQueueName}" -> ID: ${targetQueueId}`);
+          } else {
+            logger.warn(`Fila especificada pela IA não encontrada: "${specifiedQueueName}". Usando fila padrão.`);
           }
         }
 
-        // Transferir para a fila
-        await transferQueue(targetQueueId, ticket, contact);
-        logger.info(`Ticket ${ticket.id} transferido para fila ${targetQueueId}`);
-        
-        // Enviar mensagem automática de transferência
-        await sendTransferMessage(ticket, contact, targetQueueId, null);
+        // Se não encontrou fila especificada, usar a fila padrão configurada
+        if (!targetQueueId) {
+          targetQueueId = geminiSettings.transferQueueId || geminiSettings.queueId;
+          const defaultQueue = availableQueues.find(q => q.id === targetQueueId);
+          targetQueueName = defaultQueue?.name || "Atendimento";
+          logger.info(`Usando fila padrão configurada: ID ${targetQueueId}`);
+        }
 
-        cleanedResponse = cleanedResponse
-          .replace("Ação: Transferir para o setor de atendimento", "")
-          .trim();
+        if (!targetQueueId) {
+          logger.error(`Nenhuma fila disponível para transferência do ticket ${ticket.id}`);
+        } else {
+          // Se canTransferToAgent estiver habilitado, gerar resumo antes de transferir
+          if (geminiSettings.canTransferToAgent) {
+            try {
+              // Gerar resumo do contexto
+              const summary = await generateContextSummary({
+                ticketId: ticket.id,
+                companyId: ticket.companyId,
+                provider: "gemini",
+                maxMessages: geminiSettings.maxMessages
+              });
+
+              // Enviar resumo como mensagem interna
+              const summaryMessageData: MessageData = {
+                id: `${ticket.id}-${Date.now()}-summary`,
+                body: `📋 RESUMO DO CONTEXTO (antes da transferência):\n\n${summary}`,
+                ticketId: ticket.id,
+                contactId: ticket.contactId,
+                fromMe: true,
+                read: true,
+                isInternal: true,
+                mediaType: "conversation"
+              };
+              await CreateMessageService({ messageData: summaryMessageData, companyId: ticket.companyId });
+              logger.info(`Resumo do contexto gerado antes da transferência do ticket ${ticket.id}`);
+            } catch (err: any) {
+              logger.error(`Erro ao gerar resumo antes da transferência: ${err.message}`);
+              // Continua com a transferência mesmo se o resumo falhar
+            }
+          }
+
+          // Transferir para a fila
+          await transferQueue(targetQueueId, ticket, contact);
+          logger.info(`Ticket ${ticket.id} transferido para fila ${targetQueueId} (${targetQueueName})`);
+          
+          // Enviar mensagem automática de transferência
+          await sendTransferMessage(ticket, contact, targetQueueId, null);
+
+          // Remover ação e especificação de fila da resposta
+          cleanedResponse = cleanedResponse
+            .replace(/Ação: Transferir para o setor de atendimento\s*\[Fila:[^\]]+\]/gi, "")
+            .replace("Ação: Transferir para o setor de atendimento", "")
+            .trim();
+        }
       }
 
       // Validação final: garantir que nenhum marcador [INTERNA] seja enviado ao cliente

@@ -43,6 +43,7 @@ import { FlowAudioModel } from "../models/FlowAudio";
 import { FlowCampaignModel } from "../models/FlowCampaign";
 import { FlowImgModel } from "../models/FlowImg";
 import Task from "../models/Task";
+import UserQuickButton from "../models/UserQuickButton";
 import Form from "../models/Form";
 import FormField from "../models/FormField";
 import FormResponse from "../models/FormResponse";
@@ -99,6 +100,7 @@ const models = [
   FlowCampaignModel,
   FlowImgModel,
   Task,
+  UserQuickButton,
   Form,
   FormField,
   FormResponse,

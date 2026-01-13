@@ -191,9 +191,8 @@ export const handleGemini = async (
   });
 
   // Prompt do sistema otimizado e mais curto
-  let promptSystem = `Você é um assistente de atendimento. Use o nome ${sanitizeName(
-    contact.name || "Amigo(a)"
-  )} para personalizar.\n${geminiSettings.prompt}\n\nIMPORTANTE: Seja direto e objetivo. Para transferir, comece com 'Ação: Transferir para o setor de atendimento'.`;
+  const contactName = sanitizeName(contact.name || "Amigo(a)");
+  let promptSystem = `Você é um assistente de atendimento. O nome do CLIENTE que você está atendendo é: ${contactName}. Use este nome ao se dirigir ao cliente nas suas respostas.\n${geminiSettings.prompt}\n\nIMPORTANTE: Seja direto e objetivo. Para transferir, comece com 'Ação: Transferir para o setor de atendimento'.`;
   
   // Adicionar instruções sobre mensagens internas se habilitado
   if (geminiSettings.canSendInternalMessages) {

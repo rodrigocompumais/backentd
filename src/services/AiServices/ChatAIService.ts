@@ -447,3 +447,133 @@ IMPORTANTE: Retorne APENAS o texto da resposta sugerida, sem explicações ou co
   }
 };
 
+interface GenerateTicketInfoParams {
+  ticketId: number;
+  companyId: number;
+}
+
+interface GenerateTicketInfoResponse {
+  title: string;
+  description: string;
+  clientName: string;
+}
+
+// Gerar informações do ticket para criação em sistema externo
+export const generateTicketInfo = async ({
+  ticketId,
+  companyId
+}: GenerateTicketInfoParams): Promise<GenerateTicketInfoResponse> => {
+  // Selecionar provider usando configuração automática (usa "messageImprovement" como tipo)
+  const provider = await AIProviderSelector.getProvider(companyId, "messageImprovement");
+
+  const ticket = await ShowTicketService(ticketId, companyId);
+  if (!ticket) {
+    throw new AppError("ERR_NO_TICKET_FOUND", 404);
+  }
+
+  // Buscar informações do ticket
+  const ticketData = await Ticket.findByPk(ticketId, {
+    include: [
+      { model: Contact, attributes: ["id", "name", "number"] },
+      { model: User, attributes: ["id", "name"] },
+      { model: Queue, attributes: ["id", "name"] }
+    ]
+  });
+
+  if (!ticketData) {
+    throw new AppError("ERR_NO_TICKET_FOUND", 404);
+  }
+
+  // Buscar últimas 20 mensagens para contexto
+  const messages = await fetchLastMessages(ticketId, companyId);
+
+  // Construir contexto das mensagens
+  const messagesContext = messages.length > 0
+    ? messages.map((msg, index) => {
+        return `[${msg.createdAt}] ${msg.sender} (${msg.contactName}): ${msg.body || "[Mídia]"}`;
+      }).join("\n")
+    : "Nenhuma mensagem anterior na conversa.";
+
+  // Construir prompt para gerar informações do ticket
+  const systemPrompt = `Você é o Compuchat, um assistente de IA especializado em criar tickets de atendimento.
+
+CONTEXTO DO TICKET:
+- Status: ${ticketData.status}
+- Contato: ${ticketData.contact?.name || "Desconhecido"}
+- Número do Contato: ${ticketData.contact?.number || "Não informado"}
+- Atendente: ${ticketData.user?.name || "Sem atendente"}
+- Fila: ${ticketData.queue?.name || "Sem fila"}
+- Criado em: ${formatDateTime(ticketData.createdAt)}
+
+ÚLTIMAS 20 MENSAGENS DA CONVERSA:
+${messagesContext}
+
+INSTRUÇÕES:
+- Analise o contexto da conversa acima
+- Gere um TÍTULO curto e objetivo (máximo 100 caracteres) que resuma o problema principal
+- Gere uma DESCRIÇÃO detalhada (máximo 500 caracteres) que explique o problema e o contexto
+- Use o NOME DO CLIENTE exatamente como aparece no contexto: "${ticketData.contact?.name || "Cliente"}"
+- O título deve ser claro e direto
+- A descrição deve incluir informações relevantes do contexto da conversa
+- Seja objetivo e profissional
+
+IMPORTANTE: Retorne APENAS um JSON válido com este formato exato:
+{
+  "title": "título do ticket",
+  "description": "descrição detalhada do ticket",
+  "clientName": "nome do cliente"
+}
+
+Não inclua explicações, comentários ou texto adicional. Apenas o JSON.`;
+
+  try {
+    console.log(`📤 Enviando requisição para ${provider.name} - Gerar informações do ticket...`);
+    const textResponse = await provider.generateText(systemPrompt, {
+      temperature: 0.3,
+      maxTokens: 1024
+    });
+
+    console.log(`✅ Informações do ticket geradas com sucesso usando ${provider.name}`);
+
+    // Extrair JSON da resposta
+    let parsedResponse: any = {};
+    try {
+      const jsonMatch = textResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        parsedResponse = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error("JSON não encontrado na resposta");
+      }
+    } catch (parseError) {
+      console.error("Erro ao parsear JSON:", parseError);
+      // Fallback: usar informações básicas do ticket
+      parsedResponse = {
+        title: `Atendimento - ${ticketData.contact?.name || "Cliente"}`,
+        description: messagesContext.substring(0, 500) || "Sem descrição disponível",
+        clientName: ticketData.contact?.name || "Cliente"
+      };
+    }
+
+    // Garantir que todos os campos existem
+    return {
+      title: parsedResponse.title || `Atendimento - ${ticketData.contact?.name || "Cliente"}`,
+      description: parsedResponse.description || messagesContext.substring(0, 500) || "Sem descrição disponível",
+      clientName: parsedResponse.clientName || ticketData.contact?.name || "Cliente"
+    };
+  } catch (err: any) {
+    console.error(`❌ Erro ao gerar informações do ticket com ${provider.name}:`, {
+      message: err.message
+    });
+
+    if (err instanceof AppError) {
+      throw err;
+    }
+
+    // Fallback: retornar informações básicas
+    return {
+      title: `Atendimento - ${ticketData.contact?.name || "Cliente"}`,
+      description: messagesContext.substring(0, 500) || "Sem descrição disponível",
+      clientName: ticketData.contact?.name || "Cliente"
+    };
+  }
+};

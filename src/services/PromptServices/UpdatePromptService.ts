@@ -88,9 +88,6 @@ const UpdatePromptService = async ({
         }
     }
 
-    // Não salvar apiKey no prompt (usará das Settings)
-    promptData.apiKey = "";
-
     // Garantir que provider tenha valor
     const updateData: any = { 
         name, 
@@ -106,15 +103,10 @@ const UpdatePromptService = async ({
         provider,
         canSendInternalMessages: canSendInternalMessages !== undefined ? canSendInternalMessages : false,
         canTransferToAgent: canTransferToAgent !== undefined ? canTransferToAgent : false,
-        transferQueueId: transferQueueId || null
+        transferQueueId: transferQueueId || null,
+        // Sempre definir apiKey como string vazia - será buscada das Settings
+        apiKey: ""
     };
-    
-    // Só incluir apiKey se for OpenAI
-    if (provider === "openai" && apiKey) {
-        updateData.apiKey = apiKey;
-    } else if (provider === "gemini") {
-        updateData.apiKey = "";
-    }
 
     await promptTable.update(updateData);
     await promptTable.reload();

@@ -1,5 +1,4 @@
 import { Readable } from "stream";
-import OpenAI from "openai";
 import {
   IAIProvider,
   GenerateTextOptions,
@@ -42,7 +41,7 @@ export class OpenAIProvider implements IAIProvider {
     try {
       const model = OPENAI_DEFAULT_MODEL;
       
-      const completion = await this.client.chat.completions.create({
+      const completion = await this.client.createChatCompletion({
         model,
         messages: [
           {
@@ -55,7 +54,7 @@ export class OpenAIProvider implements IAIProvider {
         top_p: topP
       });
 
-      const text = completion.choices[0]?.message?.content;
+      const text = completion.data.choices[0]?.message?.content;
       if (!text || text.trim() === "") {
         throw new AppError("A IA não retornou resposta válida", 500);
       }
@@ -88,7 +87,7 @@ export class OpenAIProvider implements IAIProvider {
         content: msg.content
       }));
 
-      const completion = await this.client.chat.completions.create({
+      const completion = await this.client.createChatCompletion({
         model,
         messages: openAIMessages,
         temperature,
@@ -96,7 +95,7 @@ export class OpenAIProvider implements IAIProvider {
         top_p: topP
       });
 
-      const text = completion.choices[0]?.message?.content;
+      const text = completion.data.choices[0]?.message?.content;
       if (!text || text.trim() === "") {
         throw new AppError("A IA não retornou resposta válida", 500);
       }
@@ -136,14 +135,17 @@ export class OpenAIProvider implements IAIProvider {
         file = audioInput;
       }
 
-      const transcription = await this.client.audio.transcriptions.create({
-        file: file,
-        model: OPENAI_TRANSCRIPTION_MODEL,
-        language: options.language,
-        prompt: options.prompt
-      });
+      const response = await this.client.createTranscription(
+        file as any, // FileStream ou Buffer
+        OPENAI_TRANSCRIPTION_MODEL,
+        options.prompt,
+        "text", // responseFormat
+        undefined, // temperature
+        options.language
+      );
 
-      const text = transcription.text;
+      // Na API antiga, createTranscription retorna uma string diretamente ou um objeto
+      const text = typeof response === "string" ? response : (response as any).text || (response as any).data?.text || "";
       if (!text || text.trim() === "") {
         throw new AppError("A transcrição retornada está vazia", 500);
       }

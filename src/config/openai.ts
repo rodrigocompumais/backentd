@@ -1,7 +1,7 @@
-import OpenAI from "openai";
+import { Configuration, OpenAIApi } from "openai";
 
 // Configuração centralizada do OpenAI
-export const OPENAI_DEFAULT_MODEL = "gpt-4o-mini";
+export const OPENAI_DEFAULT_MODEL = "gpt-3.5-turbo";
 export const OPENAI_TRANSCRIPTION_MODEL = "whisper-1";
 
 // Validação da chave da API
@@ -21,10 +21,10 @@ export const validateOpenAIApiKey = (apiKey: string | null | undefined): string 
 
 // Interpretação de erros da API do OpenAI
 export const interpretOpenAIError = (error: any): string => {
-  if (error?.status === 401) {
+  if (error?.response?.status === 401) {
     return "Chave da API do OpenAI inválida ou expirada. Verifique se a chave está correta.";
   }
-  if (error?.status === 429) {
+  if (error?.response?.status === 429) {
     const errorType = error?.response?.data?.error?.type;
     if (errorType === "insufficient_quota") {
       return "Limite de créditos da API do OpenAI atingido. Verifique seu saldo.";
@@ -34,17 +34,17 @@ export const interpretOpenAIError = (error: any): string => {
     }
     return "Limite de uso da API do OpenAI atingido. Aguarde alguns minutos.";
   }
-  if (error?.status === 400) {
+  if (error?.response?.status === 400) {
     const message = error?.response?.data?.error?.message || "";
     if (message.includes("model")) {
       return "Modelo OpenAI não encontrado ou não disponível. Verifique o modelo configurado.";
     }
     return `Requisição inválida: ${message}`;
   }
-  if (error?.status === 404) {
+  if (error?.response?.status === 404) {
     return "Recurso da API do OpenAI não encontrado.";
   }
-  if (error?.status === 500 || error?.status === 503) {
+  if (error?.response?.status === 500 || error?.response?.status === 503) {
     return "Serviço da API do OpenAI temporariamente indisponível. Tente novamente em alguns instantes.";
   }
   
@@ -58,12 +58,13 @@ export const handleOpenAIError = (err: any): never => {
   throw new Error(userMessage);
 };
 
-// Criar cliente OpenAI
+// Criar cliente OpenAI (usando API antiga compatível com versão 3.3.0)
 export const createOpenAIClient = (apiKey: string) => {
   const validatedKey = validateOpenAIApiKey(apiKey);
-  return new OpenAI({
+  const configuration = new Configuration({
     apiKey: validatedKey
   });
+  return new OpenAIApi(configuration);
 };
 
 // Teste automático da chave da API
@@ -71,8 +72,8 @@ export const testOpenAIApiKey = async (apiKey: string): Promise<boolean> => {
   try {
     const client = createOpenAIClient(apiKey);
     
-    // Fazer uma requisição simples para testar a chave
-    await client.chat.completions.create({
+    // Fazer uma requisição simples para testar a chave (API antiga)
+    await client.createChatCompletion({
       model: OPENAI_DEFAULT_MODEL,
       messages: [
         {
@@ -86,7 +87,7 @@ export const testOpenAIApiKey = async (apiKey: string): Promise<boolean> => {
     return true;
   } catch (err: any) {
     console.error("❌ Falha no teste da chave OpenAI:", {
-      status: err?.status,
+      status: err?.response?.status,
       error: err?.response?.data?.error,
       message: err?.message
     });

@@ -20,6 +20,7 @@ import Message from "../../models/Message";
 import TicketTraking from "../../models/TicketTraking";
 import ShowWhatsAppService from "../WhatsappService/ShowWhatsAppService";
 import Whatsapp from "../../models/Whatsapp";
+import Setting from "../../models/Setting";
 import { logger } from "../../utils/logger";
 
 type Session = WASocket & {
@@ -103,8 +104,21 @@ export const handleOpenAi = async (
   const openAiIndex = sessionsOpenAi.findIndex(s => s.id === ticket.id);
 
   if (openAiIndex === -1) {
+    // Buscar API key das Settings em vez do prompt
+    const openaiSetting = await Setting.findOne({
+      where: {
+        key: "openaiApiKey",
+        companyId: ticket.companyId
+      }
+    });
+
+    if (!openaiSetting?.value) {
+      logger.error(`API Key do OpenAI não configurada para empresa ${ticket.companyId}`);
+      return;
+    }
+
     const configuration = new Configuration({
-      apiKey: openAiSettings.apiKey
+      apiKey: openaiSetting.value
     });
     openai = new OpenAIApi(configuration);
     openai.id = ticket.id;

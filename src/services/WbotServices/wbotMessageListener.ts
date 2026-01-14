@@ -1337,8 +1337,21 @@ const handleOpenAi = async (
   const openAiIndex = sessionsOpenAi.findIndex(s => s.id === wbot.id);
 
   if (openAiIndex === -1) {
+    // Buscar API key das Settings em vez do prompt
+    const openaiSetting = await Setting.findOne({
+      where: {
+        key: "openaiApiKey",
+        companyId: ticket.companyId
+      }
+    });
+
+    if (!openaiSetting?.value) {
+      logger.error(`API Key do OpenAI não configurada para empresa ${ticket.companyId}`);
+      return;
+    }
+
     const configuration = new Configuration({
-      apiKey: prompt.apiKey
+      apiKey: openaiSetting.value
     });
     openai = new OpenAIApi(configuration);
     openai.id = wbot.id;

@@ -4,6 +4,7 @@ import Prompt from "../../models/Prompt";
 import ShowPromptService from "./ShowPromptService";
 import Setting from "../../models/Setting";
 import { validateGeminiApiKey } from "../../config/gemini";
+import { validateOpenAIApiKey } from "../../config/openai";
 
 interface PromptData {
     name: string;
@@ -37,18 +38,14 @@ const CreatePromptService = async (promptData: PromptData): Promise<Prompt> => {
         provider: Yup.string().oneOf(["openai", "gemini"], "ERR_PROMPT_PROVIDER_INVALID")
     });
 
-    // Se for OpenAI, apiKey é obrigatória
-    if (provider === "openai") {
-        promptSchema.fields.apiKey = Yup.string().required("ERR_PROMPT_APIKEY_INVALID");
-    }
-
+    // Não exigir apiKey no prompt - será buscada das Settings
     try {
-        await promptSchema.validate({ name, apiKey, prompt, queueId, maxMessages, companyId, provider });
+        await promptSchema.validate({ name, prompt, queueId, maxMessages, companyId, provider });
     } catch (err) {
         throw new AppError(`${JSON.stringify(err, undefined, 2)}`);
     }
 
-    // Se for Gemini, validar que a API key está nas Settings
+    // Validar que a API key está nas Settings (tanto para Gemini quanto OpenAI)
     if (provider === "gemini") {
         const geminiSetting = await Setting.findOne({
             where: {
@@ -62,10 +59,23 @@ const CreatePromptService = async (promptData: PromptData): Promise<Prompt> => {
         } catch (err: any) {
             throw new AppError("Para usar Gemini, configure a API Key do Gemini em Configurações → Integrações → Chave da API do Gemini", 400);
         }
+    } else if (provider === "openai") {
+        const openaiSetting = await Setting.findOne({
+            where: {
+                key: "openaiApiKey",
+                companyId
+            }
+        });
 
-        // Para Gemini, não salvar apiKey no prompt (usará das Settings)
-        promptData.apiKey = "";
+        try {
+            validateOpenAIApiKey(openaiSetting?.value);
+        } catch (err: any) {
+            throw new AppError("Para usar OpenAI, configure a API Key do OpenAI em Configurações → Integrações → Chave da API do OpenAI", 400);
+        }
     }
+
+    // Não salvar apiKey no prompt (usará das Settings)
+    promptData.apiKey = "";
 
     // Garantir que provider tenha valor default
     if (!promptData.provider) {

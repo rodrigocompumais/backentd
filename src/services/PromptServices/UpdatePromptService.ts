@@ -88,7 +88,9 @@ const UpdatePromptService = async ({
         }
     }
 
-    // Garantir que provider tenha valor
+    // Garantir que provider tenha valor e modelo tenha valor default se não fornecido
+    const finalModel = model || (provider === "gemini" ? "gemini-2.5-flash" : "gpt-4o-mini");
+    
     const updateData: any = { 
         name, 
         prompt, 
@@ -99,7 +101,7 @@ const UpdatePromptService = async ({
         totalTokens, 
         queueId, 
         maxMessages, 
-        model, 
+        model: finalModel, 
         provider,
         canSendInternalMessages: canSendInternalMessages !== undefined ? canSendInternalMessages : false,
         canTransferToAgent: canTransferToAgent !== undefined ? canTransferToAgent : false,

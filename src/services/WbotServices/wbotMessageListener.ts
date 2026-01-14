@@ -68,6 +68,7 @@ import GetTicketWbot from "../../helpers/GetTicketWbot";
 import Company from "../../models/Company";
 import ListSettingsServiceOne from "../SettingServices/ListSettingsServiceOne";
 import ShowUserService from "../UserServices/ShowUserService";
+import ListQueuesService from "../QueueService/ListQueuesService";
 
 import { IConnections, INodes } from "../WebhookService/DispatchWebHookService";
 import { ActionsWebhookService } from "../WebhookService/ActionsWebhookService";
@@ -1426,19 +1427,23 @@ const handleOpenAi = async (
     openai = sessionsOpenAi[openAiIndex];
   }
 
-  let maxMessages = prompt.maxMessages;
-
+  // Limitar histórico para não consumir todos os tokens
+  // Pegar apenas as últimas mensagens relevantes (máximo 20 para não consumir muitos tokens)
+  const maxHistoryMessages = Math.min(prompt.maxMessages, 20);
+  
   const messages = await Message.findAll({
     where: { ticketId: ticket.id },
     order: [["createdAt", "DESC"]],
-    limit: maxMessages
+    limit: maxHistoryMessages
   });
 
-  let promptSystem = `Nas respostas utilize o nome ${sanitizeName(
-    contact.name || "Amigo(a)"
-  )} para identificar o cliente.\nSua resposta deve usar no máximo ${prompt.maxTokens
-    } tokens e cuide para não truncar o final.\nSempre que possível, mencione o nome dele para ser mais personalizado o atendimento e mais educado. Quando a resposta requer uma transferência para o setor de atendimento, comece sua resposta com 'Ação: Transferir para o setor de atendimento'.\n
-  ${prompt.prompt}\n`;
+  // Buscar filas disponíveis para permitir que a IA escolha
+  const availableQueues = await ListQueuesService({ companyId: ticket.companyId });
+  const queuesList = availableQueues.map(q => `- ${q.name} (ID: ${q.id})`).join('\n');
+
+  // Prompt do sistema otimizado e mais completo (igual ao Gemini)
+  const contactName = sanitizeName(contact.name || "Amigo(a)");
+  let promptSystem = `Você é um assistente de atendimento. O nome do CLIENTE que você está atendendo é: ${contactName}. Use este nome ao se dirigir ao cliente nas suas respostas.\n${prompt.prompt}\n\nFILAS DISPONÍVEIS PARA TRANSFERÊNCIA:\n${queuesList}\n\nIMPORTANTE: Seja direto e objetivo. Para transferir, use o formato: 'Ação: Transferir para o setor de atendimento [Fila: Nome da Fila]' ou apenas 'Ação: Transferir para o setor de atendimento' para usar a fila padrão. Sua resposta deve usar no máximo ${prompt.maxTokens} tokens e cuide para não truncar o final.`;
 
   // Adicionar instruções sobre mensagens internas se habilitado
   if (prompt.canSendInternalMessages) {
@@ -1456,8 +1461,15 @@ const handleOpenAi = async (
   if (msg.message?.conversation || msg.message?.extendedTextMessage?.text) {
     messagesOpenAi = [];
     messagesOpenAi.push({ role: "system", content: promptSystem });
-    for (let i = 0; i < Math.min(maxMessages, messages.length); i++) {
-      const message = messages[i];
+    
+    // Adicionar histórico de mensagens (inverter ordem para ter do mais antigo ao mais recente)
+    const sortedMessages = [...messages].reverse();
+    for (
+      let i = 0;
+      i < Math.min(maxHistoryMessages, sortedMessages.length);
+      i++
+    ) {
+      const message = sortedMessages[i];
       if (
         message.mediaType === "conversation" ||
         message.mediaType === "extendedTextMessage"
@@ -1469,6 +1481,8 @@ const handleOpenAi = async (
         }
       }
     }
+    
+    // Adicionar mensagem atual do usuário
     messagesOpenAi.push({ role: "user", content: bodyMessage! });
 
     const chat = await openai.createChatCompletion({
@@ -1633,8 +1647,11 @@ const handleOpenAi = async (
 
     messagesOpenAi = [];
     messagesOpenAi.push({ role: "system", content: promptSystem });
-    for (let i = 0; i < Math.min(maxMessages, messages.length); i++) {
-      const message = messages[i];
+    
+    // Adicionar histórico de mensagens (inverter ordem para ter do mais antigo ao mais recente)
+    const sortedAudioMessages = [...messages].reverse();
+    for (let i = 0; i < Math.min(maxHistoryMessages, sortedAudioMessages.length); i++) {
+      const message = sortedAudioMessages[i];
       if (
         message.mediaType === "conversation" ||
         message.mediaType === "extendedTextMessage"
@@ -1647,10 +1664,14 @@ const handleOpenAi = async (
       }
     }
     messagesOpenAi.push({ role: "user", content: transcription.data.text });
+    
+    // Garantir que há tokens suficientes para a resposta
+    const maxTokensToUse = Math.max(prompt.maxTokens, 1024);
+    
     const chat = await openai.createChatCompletion({
-      model: prompt.model,
+      model: prompt.model || "gpt-4o-mini", // Fallback se modelo não estiver definido
       messages: messagesOpenAi,
-      max_tokens: prompt.maxTokens,
+      max_tokens: maxTokensToUse,
       temperature: prompt.temperature
     });
     let response = chat.data.choices[0].message?.content;

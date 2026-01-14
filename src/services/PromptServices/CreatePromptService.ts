@@ -22,6 +22,7 @@ interface PromptData {
     provider?: string;
     canSendInternalMessages?: boolean;
     canTransferToAgent?: boolean;
+    canChangeTag?: boolean;
     transferQueueId?: number | null;
 }
 
@@ -36,19 +37,15 @@ const CreatePromptService = async (promptData: PromptData): Promise<Prompt> => {
     // Desestruturar dados do prompt
     const { name, prompt, queueId, maxMessages, provider = "openai" } = promptData;
 
-    // Garantir que queueId e maxMessages sejam números
-    const queueIdNumber = queueId ? (typeof queueId === "string" ? parseInt(queueId, 10) : queueId) : undefined;
+    // Garantir que queueId e maxMessages sejam números (queueId agora é opcional)
+    const queueIdNumber = queueId ? (typeof queueId === "string" ? parseInt(queueId, 10) : queueId) : null;
     const maxMessagesNumber = maxMessages ? (typeof maxMessages === "string" ? parseInt(maxMessages, 10) : maxMessages) : 10;
 
-    if (!queueIdNumber || isNaN(queueIdNumber)) {
-        throw new AppError("queueId é obrigatório e deve ser um número válido", 400);
-    }
-
-    // Validação baseada no provider
+    // Validação baseada no provider (queueId agora é opcional)
     const promptSchema = Yup.object().shape({
         name: Yup.string().required("ERR_PROMPT_NAME_INVALID"),
         prompt: Yup.string().required("ERR_PROMPT_INTELLIGENCE_INVALID"),
-        queueId: Yup.number().required("ERR_PROMPT_QUEUEID_INVALID"),
+        queueId: Yup.number().nullable(),
         maxMessages: Yup.number().required("ERR_PROMPT_MAX_MESSAGES_INVALID"),
         companyId: Yup.number().required("ERR_PROMPT_companyId_INVALID"),
         provider: Yup.string().oneOf(["openai", "gemini"], "ERR_PROMPT_PROVIDER_INVALID")
@@ -103,6 +100,9 @@ const CreatePromptService = async (promptData: PromptData): Promise<Prompt> => {
         promptData.provider = "openai";
     }
 
+    // Garantir que o modelo seja definido corretamente
+    const finalModel = promptData.model || (provider === "gemini" ? "gemini-2.5-flash" : "gpt-3.5-turbo-1106");
+
     // Criar objeto de dados para salvar, sempre com apiKey como string vazia
     const promptToCreate: any = {
         name: promptData.name,
@@ -114,12 +114,13 @@ const CreatePromptService = async (promptData: PromptData): Promise<Prompt> => {
         promptTokens: promptData.promptTokens || 0,
         completionTokens: promptData.completionTokens || 0,
         totalTokens: promptData.totalTokens || 0,
-        model: promptData.model || (provider === "gemini" ? "gemini-2.5-flash" : "gpt-3.5-turbo-1106"),
+        model: finalModel,
         provider: provider,
         companyId: companyIdNumber,
         apiKey: "", // Sempre string vazia - será buscada das Settings
         canSendInternalMessages: promptData.canSendInternalMessages || false,
         canTransferToAgent: promptData.canTransferToAgent || false,
+        canChangeTag: promptData.canChangeTag || false,
         transferQueueId: promptData.transferQueueId || null
     };
 

@@ -23,6 +23,7 @@ interface PromptData {
     provider?: string;
     canSendInternalMessages?: boolean;
     canTransferToAgent?: boolean;
+    canChangeTag?: boolean;
     transferQueueId?: number | null;
 }
 
@@ -41,17 +42,17 @@ const UpdatePromptService = async ({
 
     const provider = promptData.provider || promptTable.provider || "openai";
 
-    // Validação baseada no provider
+    // Validação baseada no provider (queueId agora é opcional)
     const promptSchema = Yup.object().shape({
         name: Yup.string().required("ERR_PROMPT_NAME_INVALID"),
         prompt: Yup.string().required("ERR_PROMPT_PROMPT_INVALID"),
-        queueId: Yup.number().required("ERR_PROMPT_QUEUEID_INVALID"),
+        queueId: Yup.number().nullable(),
         maxMessages: Yup.number().required("ERR_PROMPT_MAX_MESSAGES_INVALID"),
         provider: Yup.string().oneOf(["openai", "gemini"], "ERR_PROMPT_PROVIDER_INVALID")
     });
 
     // Não exigir apiKey no prompt - será buscada das Settings
-    const { name, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, model, canSendInternalMessages, canTransferToAgent, transferQueueId } = promptData;
+    const { name, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, model, canSendInternalMessages, canTransferToAgent, canChangeTag, transferQueueId } = promptData;
 
     try {
         await promptSchema.validate({ name, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, provider });
@@ -105,6 +106,7 @@ const UpdatePromptService = async ({
         provider,
         canSendInternalMessages: canSendInternalMessages !== undefined ? canSendInternalMessages : false,
         canTransferToAgent: canTransferToAgent !== undefined ? canTransferToAgent : false,
+        canChangeTag: canChangeTag !== undefined ? canChangeTag : false,
         transferQueueId: transferQueueId || null,
         // Sempre definir apiKey como string vazia - será buscada das Settings
         apiKey: ""

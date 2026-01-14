@@ -30,6 +30,8 @@ import Queue from "../../models/Queue";
 import User from "../../models/User";
 import ListSettingsServiceOne from "../SettingServices/ListSettingsServiceOne";
 import ListQueuesService from "../QueueService/ListQueuesService";
+import Tag from "../../models/Tag";
+import SyncTags from "../TagServices/SyncTagsService";
 
 type Session = WASocket & {
   id?: number;
@@ -47,6 +49,7 @@ interface IGemini {
   maxMessages: number;
   canSendInternalMessages?: boolean;
   canTransferToAgent?: boolean;
+  canChangeTag?: boolean;
   transferQueueId?: number | null;
 }
 
@@ -196,9 +199,22 @@ export const handleGemini = async (
   const queuesList = availableQueues.map(q => `- ${q.name} (ID: ${q.id})`).join('\n');
   const queuesNames = availableQueues.map(q => q.name).join(', ');
 
+  // Buscar tags disponíveis se canChangeTag estiver habilitado
+  let tagsList = '';
+  let availableTags: Tag[] = [];
+  if (geminiSettings.canChangeTag) {
+    availableTags = await Tag.findAll({ where: { companyId: ticket.companyId } });
+    tagsList = availableTags.map(t => `- ${t.name} (ID: ${t.id})`).join('\n');
+  }
+
   // Prompt do sistema otimizado e mais curto
   const contactName = sanitizeName(contact.name || "Amigo(a)");
   let promptSystem = `Você é um assistente de atendimento. O nome do CLIENTE que você está atendendo é: ${contactName}. Use este nome ao se dirigir ao cliente nas suas respostas.\n${geminiSettings.prompt}\n\nFILAS DISPONÍVEIS PARA TRANSFERÊNCIA:\n${queuesList}\n\nIMPORTANTE: Seja direto e objetivo. Para transferir, use o formato: 'Ação: Transferir para o setor de atendimento [Fila: Nome da Fila]' ou apenas 'Ação: Transferir para o setor de atendimento' para usar a fila padrão.`;
+
+  // Adicionar instruções sobre tags se habilitado
+  if (geminiSettings.canChangeTag && tagsList) {
+    promptSystem += `\n\nTAGS DISPONÍVEIS PARA ALTERAÇÃO:\n${tagsList}\n\nPara alterar a tag/estágio do ticket, use o formato: 'Ação: Alterar tag [Tag: Nome da Tag]'`;
+  }
   
   // Adicionar instruções sobre mensagens internas se habilitado
   if (geminiSettings.canSendInternalMessages) {
@@ -412,8 +428,63 @@ export const handleGemini = async (
         }
       }
 
+      // Verificar se precisa alterar tag
+      if (geminiSettings.canChangeTag && response.includes("Ação: Alterar tag")) {
+        // Tentar extrair o nome da tag especificada pela IA
+        const tagMatch = response.match(/\[Tag:\s*([^\]]+)\]/i);
+        if (tagMatch && tagMatch[1]) {
+          const specifiedTagName = tagMatch[1].trim();
+          
+          // Buscar tag pelo nome (case-insensitive)
+          const matchedTag = availableTags.find(
+            t => t.name.toLowerCase() === specifiedTagName.toLowerCase()
+          );
+          
+          if (matchedTag) {
+            try {
+              // Sincronizar tag do ticket
+              await SyncTags({ tags: [matchedTag], ticketId: ticket.id });
+              logger.info(`Tag alterada para "${matchedTag.name}" no ticket ${ticket.id}`);
+            } catch (err: any) {
+              logger.error(`Erro ao alterar tag: ${err.message}`);
+            }
+          } else {
+            logger.warn(`Tag especificada pela IA não encontrada: "${specifiedTagName}"`);
+          }
+        }
+
+        // Remover ação de alteração de tag da resposta
+        cleanedResponse = cleanedResponse
+          .replace(/Ação: Alterar tag\s*\[Tag:[^\]]+\]/gi, "")
+          .replace("Ação: Alterar tag", "")
+          .trim();
+      }
+
       // Verificar se precisa transferir para fila
       if (response.includes("Ação: Transferir para o setor de atendimento")) {
+        // Se canTransferToAgent não estiver habilitado, apenas enviar mensagem
+        if (!geminiSettings.canTransferToAgent) {
+          const company = await Company.findByPk(ticket.companyId);
+          const language = company?.language || "pt";
+          const wbot = await GetTicketWbot(ticket);
+          
+          const waitMessage = {
+            pt: "Aguarde que algum de nossos atendentes já irá lhe atender.",
+            en: "Please wait, one of our attendants will assist you shortly.",
+            es: "Por favor espere, uno de nuestros atendentes le atenderá en breve."
+          };
+          
+          const messageText = waitMessage[language as keyof typeof waitMessage] || waitMessage.pt;
+          const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
+            text: messageText
+          });
+          await verifyMessage(sentMessage!, ticket, contact);
+          
+          cleanedResponse = cleanedResponse
+            .replace(/Ação: Transferir para o setor de atendimento\s*\[Fila:[^\]]+\]/gi, "")
+            .replace("Ação: Transferir para o setor de atendimento", "")
+            .trim();
+        } else {
         let targetQueueId: number | null = null;
         let targetQueueName: string | null = null;
 
@@ -444,37 +515,32 @@ export const handleGemini = async (
           logger.info(`Usando fila padrão configurada: ID ${targetQueueId}`);
         }
 
-        if (!targetQueueId) {
-          logger.error(`Nenhuma fila disponível para transferência do ticket ${ticket.id}`);
-        } else {
-          // Se canTransferToAgent estiver habilitado, gerar resumo antes de transferir
-          if (geminiSettings.canTransferToAgent) {
-            try {
-              // Gerar resumo do contexto
-              const summary = await generateContextSummary({
-                ticketId: ticket.id,
-                companyId: ticket.companyId,
-                provider: "gemini",
-                maxMessages: geminiSettings.maxMessages
-              });
+        if (targetQueueId) {
+          try {
+            // Gerar resumo do contexto antes de transferir
+            const summary = await generateContextSummary({
+              ticketId: ticket.id,
+              companyId: ticket.companyId,
+              provider: "gemini",
+              maxMessages: geminiSettings.maxMessages
+            });
 
-              // Enviar resumo como mensagem interna
-              const summaryMessageData: MessageData = {
-                id: `${ticket.id}-${Date.now()}-summary`,
-                body: `📋 RESUMO DO CONTEXTO (antes da transferência):\n\n${summary}`,
-                ticketId: ticket.id,
-                contactId: ticket.contactId,
-                fromMe: true,
-                read: true,
-                isInternal: true,
-                mediaType: "conversation"
-              };
-              await CreateMessageService({ messageData: summaryMessageData, companyId: ticket.companyId });
-              logger.info(`Resumo do contexto gerado antes da transferência do ticket ${ticket.id}`);
-            } catch (err: any) {
-              logger.error(`Erro ao gerar resumo antes da transferência: ${err.message}`);
-              // Continua com a transferência mesmo se o resumo falhar
-            }
+            // Enviar resumo como mensagem interna
+            const summaryMessageData: MessageData = {
+              id: `${ticket.id}-${Date.now()}-summary`,
+              body: `📋 RESUMO DO CONTEXTO (antes da transferência):\n\n${summary}`,
+              ticketId: ticket.id,
+              contactId: ticket.contactId,
+              fromMe: true,
+              read: true,
+              isInternal: true,
+              mediaType: "conversation"
+            };
+            await CreateMessageService({ messageData: summaryMessageData, companyId: ticket.companyId });
+            logger.info(`Resumo do contexto gerado antes da transferência do ticket ${ticket.id}`);
+          } catch (err: any) {
+            logger.error(`Erro ao gerar resumo antes da transferência: ${err.message}`);
+            // Continua com a transferência mesmo se o resumo falhar
           }
 
           // Transferir para a fila
@@ -483,14 +549,17 @@ export const handleGemini = async (
           
           // Enviar mensagem automática de transferência
           await sendTransferMessage(ticket, contact, targetQueueId, null);
-
-          // Remover ação e especificação de fila da resposta
-          cleanedResponse = cleanedResponse
-            .replace(/Ação: Transferir para o setor de atendimento\s*\[Fila:[^\]]+\]/gi, "")
-            .replace("Ação: Transferir para o setor de atendimento", "")
-            .trim();
+        } else {
+          logger.error(`Nenhuma fila disponível para transferência do ticket ${ticket.id}`);
         }
+
+        // Remover ação e especificação de fila da resposta
+        cleanedResponse = cleanedResponse
+          .replace(/Ação: Transferir para o setor de atendimento\s*\[Fila:[^\]]+\]/gi, "")
+          .replace("Ação: Transferir para o setor de atendimento", "")
+          .trim();
       }
+    }
 
       // Validação final: garantir que nenhum marcador [INTERNA] seja enviado ao cliente
       if (cleanedResponse.includes("[INTERNA]") || cleanedResponse.includes("[/INTERNA]")) {

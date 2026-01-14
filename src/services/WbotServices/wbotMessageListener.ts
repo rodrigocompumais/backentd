@@ -69,6 +69,8 @@ import Company from "../../models/Company";
 import ListSettingsServiceOne from "../SettingServices/ListSettingsServiceOne";
 import ShowUserService from "../UserServices/ShowUserService";
 import ListQueuesService from "../QueueService/ListQueuesService";
+import Tag from "../../models/Tag";
+import SyncTags from "../TagServices/SyncTagsService";
 
 import { IConnections, INodes } from "../WebhookService/DispatchWebHookService";
 import { ActionsWebhookService } from "../WebhookService/ActionsWebhookService";
@@ -1441,9 +1443,22 @@ const handleOpenAi = async (
   const availableQueues = await ListQueuesService({ companyId: ticket.companyId });
   const queuesList = availableQueues.map(q => `- ${q.name} (ID: ${q.id})`).join('\n');
 
+  // Buscar tags disponíveis se canChangeTag estiver habilitado
+  let tagsList = '';
+  let availableTags: Tag[] = [];
+  if (prompt.canChangeTag) {
+    availableTags = await Tag.findAll({ where: { companyId: ticket.companyId } });
+    tagsList = availableTags.map(t => `- ${t.name} (ID: ${t.id})`).join('\n');
+  }
+
   // Prompt do sistema otimizado e mais completo (igual ao Gemini)
   const contactName = sanitizeName(contact.name || "Amigo(a)");
   let promptSystem = `Você é um assistente de atendimento. O nome do CLIENTE que você está atendendo é: ${contactName}. Use este nome ao se dirigir ao cliente nas suas respostas.\n${prompt.prompt}\n\nFILAS DISPONÍVEIS PARA TRANSFERÊNCIA:\n${queuesList}\n\nIMPORTANTE: Seja direto e objetivo. Para transferir, use o formato: 'Ação: Transferir para o setor de atendimento [Fila: Nome da Fila]' ou apenas 'Ação: Transferir para o setor de atendimento' para usar a fila padrão. Sua resposta deve usar no máximo ${prompt.maxTokens} tokens e cuide para não truncar o final.`;
+
+  // Adicionar instruções sobre tags se habilitado
+  if (prompt.canChangeTag && tagsList) {
+    promptSystem += `\n\nTAGS DISPONÍVEIS PARA ALTERAÇÃO:\n${tagsList}\n\nPara alterar a tag/estágio do ticket, use o formato: 'Ação: Alterar tag [Tag: Nome da Tag]'`;
+  }
 
   // Adicionar instruções sobre mensagens internas se habilitado
   if (prompt.canSendInternalMessages) {
@@ -1570,51 +1585,140 @@ const handleOpenAi = async (
       }
     }
 
-    // Verificar se precisa transferir para fila
-    if (response?.includes("Ação: Transferir para o setor de atendimento")) {
-      // Determinar fila de destino
-      const targetQueueId = prompt.transferQueueId || prompt.queueId;
-
-      // Se canTransferToAgent estiver habilitado, gerar resumo antes de transferir
-      if (prompt.canTransferToAgent) {
-        try {
-          // Gerar resumo do contexto
-          const summary = await generateContextSummary({
-            ticketId: ticket.id,
-            companyId: ticket.companyId,
-            provider: "openai",
-            maxMessages: prompt.maxMessages
-          });
-
-          // Enviar resumo como mensagem interna
-          const summaryMessageData: MessageData = {
-            id: `${ticket.id}-${Date.now()}-summary`,
-            body: `📋 RESUMO DO CONTEXTO (antes da transferência):\n\n${summary}`,
-            ticketId: ticket.id,
-            contactId: ticket.contactId,
-            fromMe: true,
-            read: true,
-            isInternal: true,
-            mediaType: "conversation"
-          };
-          await CreateMessageService({ messageData: summaryMessageData, companyId: ticket.companyId });
-          logger.info(`Resumo do contexto gerado antes da transferência do ticket ${ticket.id}`);
-        } catch (err: any) {
-          logger.error(`Erro ao gerar resumo antes da transferência: ${err.message}`);
-          // Continua com a transferência mesmo se o resumo falhar
+    // Verificar se precisa alterar tag
+    if (prompt.canChangeTag && response?.includes("Ação: Alterar tag")) {
+      // Tentar extrair o nome da tag especificada pela IA
+      const tagMatch = response.match(/\[Tag:\s*([^\]]+)\]/i);
+      if (tagMatch && tagMatch[1]) {
+        const specifiedTagName = tagMatch[1].trim();
+        
+        // Buscar tag pelo nome (case-insensitive)
+        const matchedTag = availableTags.find(
+          t => t.name.toLowerCase() === specifiedTagName.toLowerCase()
+        );
+        
+        if (matchedTag) {
+          try {
+            // Sincronizar tag do ticket
+            await SyncTags({ tags: [matchedTag], ticketId: ticket.id });
+            logger.info(`Tag alterada para "${matchedTag.name}" no ticket ${ticket.id}`);
+          } catch (err: any) {
+            logger.error(`Erro ao alterar tag: ${err.message}`);
+          }
+        } else {
+          logger.warn(`Tag especificada pela IA não encontrada: "${specifiedTagName}"`);
         }
       }
 
-      // Transferir para a fila
-      await transferQueue(targetQueueId, ticket, contact);
-      logger.info(`Ticket ${ticket.id} transferido para fila ${targetQueueId}`);
-
-      // Enviar mensagem automática de transferência
-      await sendTransferMessage(ticket, contact, targetQueueId, null);
-
+      // Remover ação de alteração de tag da resposta
       cleanedResponse = cleanedResponse
-        .replace("Ação: Transferir para o setor de atendimento", "")
+        .replace(/Ação: Alterar tag\s*\[Tag:[^\]]+\]/gi, "")
+        .replace("Ação: Alterar tag", "")
         .trim();
+    }
+
+    // Verificar se precisa transferir para fila
+    if (response?.includes("Ação: Transferir para o setor de atendimento")) {
+      // Se canTransferToAgent não estiver habilitado, apenas enviar mensagem
+      if (!prompt.canTransferToAgent) {
+        const company = await Company.findByPk(ticket.companyId);
+        const language = company?.language || "pt";
+        const wbot = await GetTicketWbot(ticket);
+        
+        const waitMessage = {
+          pt: "Aguarde que algum de nossos atendentes já irá lhe atender.",
+          en: "Please wait, one of our attendants will assist you shortly.",
+          es: "Por favor espere, uno de nuestros atendentes le atenderá en breve."
+        };
+        
+        const messageText = waitMessage[language as keyof typeof waitMessage] || waitMessage.pt;
+        const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
+          text: messageText
+        });
+        await verifyMessage(sentMessage!, ticket, contact);
+        
+        cleanedResponse = cleanedResponse
+          .replace(/Ação: Transferir para o setor de atendimento\s*\[Fila:[^\]]+\]/gi, "")
+          .replace("Ação: Transferir para o setor de atendimento", "")
+          .trim();
+      } else {
+        // Determinar fila de destino (usar padrão do Gemini)
+        let targetQueueId: number | null = null;
+        let targetQueueName: string | null = null;
+
+        // Tentar extrair o nome da fila especificada pela IA
+        const queueMatch = response.match(/\[Fila:\s*([^\]]+)\]/i);
+        if (queueMatch && queueMatch[1]) {
+          const specifiedQueueName = queueMatch[1].trim();
+          
+          // Buscar fila pelo nome (case-insensitive)
+          const matchedQueue = availableQueues.find(
+            q => q.name.toLowerCase() === specifiedQueueName.toLowerCase()
+          );
+          
+          if (matchedQueue) {
+            targetQueueId = matchedQueue.id;
+            targetQueueName = matchedQueue.name;
+            logger.info(`IA especificou fila: "${specifiedQueueName}" -> ID: ${targetQueueId}`);
+          } else {
+            logger.warn(`Fila especificada pela IA não encontrada: "${specifiedQueueName}". Usando fila padrão.`);
+          }
+        }
+
+        // Se não encontrou fila especificada, usar a fila padrão configurada
+        if (!targetQueueId) {
+          targetQueueId = prompt.transferQueueId || prompt.queueId || null;
+          const defaultQueue = availableQueues.find(q => q.id === targetQueueId);
+          targetQueueName = defaultQueue?.name || null;
+          if (targetQueueId) {
+            logger.info(`Usando fila padrão configurada: ID ${targetQueueId}`);
+          }
+        }
+
+        if (targetQueueId) {
+          try {
+            // Gerar resumo do contexto antes de transferir
+            const summary = await generateContextSummary({
+              ticketId: ticket.id,
+              companyId: ticket.companyId,
+              provider: "openai",
+              maxMessages: prompt.maxMessages
+            });
+
+            // Enviar resumo como mensagem interna
+            const summaryMessageData: MessageData = {
+              id: `${ticket.id}-${Date.now()}-summary`,
+              body: `📋 RESUMO DO CONTEXTO (antes da transferência):\n\n${summary}`,
+              ticketId: ticket.id,
+              contactId: ticket.contactId,
+              fromMe: true,
+              read: true,
+              isInternal: true,
+              mediaType: "conversation"
+            };
+            await CreateMessageService({ messageData: summaryMessageData, companyId: ticket.companyId });
+            logger.info(`Resumo do contexto gerado antes da transferência do ticket ${ticket.id}`);
+          } catch (err: any) {
+            logger.error(`Erro ao gerar resumo antes da transferência: ${err.message}`);
+            // Continua com a transferência mesmo se o resumo falhar
+          }
+
+          // Transferir para a fila
+          await transferQueue(targetQueueId, ticket, contact);
+          logger.info(`Ticket ${ticket.id} transferido para fila ${targetQueueId} (${targetQueueName})`);
+
+          // Enviar mensagem automática de transferência
+          await sendTransferMessage(ticket, contact, targetQueueId, null);
+        } else {
+          logger.error(`Nenhuma fila disponível para transferência do ticket ${ticket.id}`);
+        }
+
+        // Remover ação e especificação de fila da resposta
+        cleanedResponse = cleanedResponse
+          .replace(/Ação: Transferir para o setor de atendimento\s*\[Fila:[^\]]+\]/gi, "")
+          .replace("Ação: Transferir para o setor de atendimento", "")
+          .trim();
+      }
     }
 
     // Validação final: garantir que nenhum marcador [INTERNA] seja enviado ao cliente
@@ -1744,48 +1848,137 @@ const handleOpenAi = async (
       }
     }
 
-    if (response?.includes("Ação: Transferir para o setor de atendimento")) {
-      // Determinar fila de destino
-      const targetQueueId = prompt.transferQueueId || prompt.queueId;
-
-      // Se canTransferToAgent estiver habilitado, gerar resumo antes de transferir
-      if (prompt.canTransferToAgent) {
-        try {
-          const summary = await generateContextSummary({
-            ticketId: ticket.id,
-            companyId: ticket.companyId,
-            provider: "openai",
-            maxMessages: prompt.maxMessages
-          });
-
-          const summaryMessageData: MessageData = {
-            id: `${ticket.id}-${Date.now()}-summary`,
-            body: `📋 RESUMO DO CONTEXTO (antes da transferência):\n\n${summary}`,
-            ticketId: ticket.id,
-            contactId: ticket.contactId,
-            fromMe: true,
-            read: true,
-            isInternal: true,
-            mediaType: "conversation"
-          };
-          await CreateMessageService({ messageData: summaryMessageData, companyId: ticket.companyId });
-          logger.info(`Resumo do contexto gerado antes da transferência do ticket ${ticket.id}`);
-        } catch (err: any) {
-          logger.error(`Erro ao gerar resumo antes da transferência: ${err.message}`);
-          // Continua com a transferência mesmo se o resumo falhar
+    // Verificar se precisa alterar tag (áudio)
+    if (prompt.canChangeTag && response?.includes("Ação: Alterar tag")) {
+      // Tentar extrair o nome da tag especificada pela IA
+      const tagMatch = response.match(/\[Tag:\s*([^\]]+)\]/i);
+      if (tagMatch && tagMatch[1]) {
+        const specifiedTagName = tagMatch[1].trim();
+        
+        // Buscar tag pelo nome (case-insensitive)
+        const matchedTag = availableTags.find(
+          t => t.name.toLowerCase() === specifiedTagName.toLowerCase()
+        );
+        
+        if (matchedTag) {
+          try {
+            // Sincronizar tag do ticket
+            await SyncTags({ tags: [matchedTag], ticketId: ticket.id });
+            logger.info(`Tag alterada para "${matchedTag.name}" no ticket ${ticket.id} (áudio)`);
+          } catch (err: any) {
+            logger.error(`Erro ao alterar tag (áudio): ${err.message}`);
+          }
+        } else {
+          logger.warn(`Tag especificada pela IA não encontrada (áudio): "${specifiedTagName}"`);
         }
       }
 
-      // Transferir para a fila
-      await transferQueue(targetQueueId, ticket, contact);
-      logger.info(`Ticket ${ticket.id} transferido para fila ${targetQueueId}`);
-
-      // Enviar mensagem automática de transferência
-      await sendTransferMessage(ticket, contact, targetQueueId, null);
-
+      // Remover ação de alteração de tag da resposta
       cleanedAudioResponse = cleanedAudioResponse
-        .replace("Ação: Transferir para o setor de atendimento", "")
+        .replace(/Ação: Alterar tag\s*\[Tag:[^\]]+\]/gi, "")
+        .replace("Ação: Alterar tag", "")
         .trim();
+    }
+
+    if (response?.includes("Ação: Transferir para o setor de atendimento")) {
+      // Se canTransferToAgent não estiver habilitado, apenas enviar mensagem
+      if (!prompt.canTransferToAgent) {
+        const company = await Company.findByPk(ticket.companyId);
+        const language = company?.language || "pt";
+        const wbot = await GetTicketWbot(ticket);
+        
+        const waitMessage = {
+          pt: "Aguarde que algum de nossos atendentes já irá lhe atender.",
+          en: "Please wait, one of our attendants will assist you shortly.",
+          es: "Por favor espere, uno de nuestros atendentes le atenderá en breve."
+        };
+        
+        const messageText = waitMessage[language as keyof typeof waitMessage] || waitMessage.pt;
+        const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
+          text: messageText
+        });
+        await verifyMessage(sentMessage!, ticket, contact);
+        
+        cleanedAudioResponse = cleanedAudioResponse
+          .replace(/Ação: Transferir para o setor de atendimento\s*\[Fila:[^\]]+\]/gi, "")
+          .replace("Ação: Transferir para o setor de atendimento", "")
+          .trim();
+      } else {
+        // Determinar fila de destino (usar padrão do Gemini)
+        let targetQueueId: number | null = null;
+        let targetQueueName: string | null = null;
+
+        // Tentar extrair o nome da fila especificada pela IA
+        const queueMatch = response.match(/\[Fila:\s*([^\]]+)\]/i);
+        if (queueMatch && queueMatch[1]) {
+          const specifiedQueueName = queueMatch[1].trim();
+          
+          // Buscar fila pelo nome (case-insensitive)
+          const matchedQueue = availableQueues.find(
+            q => q.name.toLowerCase() === specifiedQueueName.toLowerCase()
+          );
+          
+          if (matchedQueue) {
+            targetQueueId = matchedQueue.id;
+            targetQueueName = matchedQueue.name;
+            logger.info(`IA especificou fila (áudio): "${specifiedQueueName}" -> ID: ${targetQueueId}`);
+          } else {
+            logger.warn(`Fila especificada pela IA não encontrada (áudio): "${specifiedQueueName}". Usando fila padrão.`);
+          }
+        }
+
+        // Se não encontrou fila especificada, usar a fila padrão configurada
+        if (!targetQueueId) {
+          targetQueueId = prompt.transferQueueId || prompt.queueId || null;
+          const defaultQueue = availableQueues.find(q => q.id === targetQueueId);
+          targetQueueName = defaultQueue?.name || null;
+          if (targetQueueId) {
+            logger.info(`Usando fila padrão configurada (áudio): ID ${targetQueueId}`);
+          }
+        }
+
+        if (targetQueueId) {
+          try {
+            const summary = await generateContextSummary({
+              ticketId: ticket.id,
+              companyId: ticket.companyId,
+              provider: "openai",
+              maxMessages: prompt.maxMessages
+            });
+
+            const summaryMessageData: MessageData = {
+              id: `${ticket.id}-${Date.now()}-summary`,
+              body: `📋 RESUMO DO CONTEXTO (antes da transferência):\n\n${summary}`,
+              ticketId: ticket.id,
+              contactId: ticket.contactId,
+              fromMe: true,
+              read: true,
+              isInternal: true,
+              mediaType: "conversation"
+            };
+            await CreateMessageService({ messageData: summaryMessageData, companyId: ticket.companyId });
+            logger.info(`Resumo do contexto gerado antes da transferência do ticket ${ticket.id} (áudio)`);
+          } catch (err: any) {
+            logger.error(`Erro ao gerar resumo antes da transferência (áudio): ${err.message}`);
+            // Continua com a transferência mesmo se o resumo falhar
+          }
+
+          // Transferir para a fila
+          await transferQueue(targetQueueId, ticket, contact);
+          logger.info(`Ticket ${ticket.id} transferido para fila ${targetQueueId} (${targetQueueName}) (áudio)`);
+
+          // Enviar mensagem automática de transferência
+          await sendTransferMessage(ticket, contact, targetQueueId, null);
+        } else {
+          logger.error(`Nenhuma fila disponível para transferência do ticket ${ticket.id} (áudio)`);
+        }
+
+        // Remover ação e especificação de fila da resposta
+        cleanedAudioResponse = cleanedAudioResponse
+          .replace(/Ação: Transferir para o setor de atendimento\s*\[Fila:[^\]]+\]/gi, "")
+          .replace("Ação: Transferir para o setor de atendimento", "")
+          .trim();
+      }
     }
 
     // Validação final para áudio: garantir que nenhum marcador [INTERNA] seja enviado ao cliente

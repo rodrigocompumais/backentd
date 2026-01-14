@@ -62,6 +62,9 @@ class Prompt extends Model<Prompt> {
   @Column({ defaultValue: false })
   canTransferToAgent: boolean;
 
+  @Column({ defaultValue: false })
+  canChangeTag: boolean;
+
   @AllowNull
   @ForeignKey(() => Queue)
   @Column

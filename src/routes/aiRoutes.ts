@@ -23,6 +23,7 @@ routes.post("/chat-ai/analyze", isAuth, validateAIApiKey, ChatAIController.analy
 routes.post("/chat-ai/audio-summary", isAuth, validateAIApiKey, ChatAIController.audioSummary);
 routes.post("/chat-ai/improve", isAuth, validateAIApiKey, ChatAIController.improve);
 routes.post("/chat-ai/transcribe/:messageId", isAuth, validateAIApiKey, ChatAIController.transcribe);
+routes.post("/chat-ai/generate-ticket", isAuth, validateAIApiKey, ChatAIController.generateTicket);
 
 // Rotas para IA em campanhas
 routes.post("/ai/campaign/initial", isAuth, validateAIApiKey, CampaignAIController.generateCampaignInitialMessage);

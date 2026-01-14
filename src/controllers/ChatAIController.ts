@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { analyzeChatContext, summarizeUnreadAudios, improveMessage } from "../services/AiServices/ChatAIService";
+import { analyzeChatContext, summarizeUnreadAudios, improveMessage, generateTicketInfo } from "../services/AiServices/ChatAIService";
 import transcribeAudio from "../services/AiServices/TranscribeAudioService";
 import AppError from "../errors/AppError";
 
@@ -172,3 +172,48 @@ export const transcribe = async (
   }
 };
 
+export const generateTicket = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  try {
+    const { companyId } = req.user;
+    const { ticketId } = req.body;
+
+    if (!ticketId) {
+      return res.status(400).json({ error: "ticketId é obrigatório" });
+    }
+
+    console.log(`[ChatAIController] Gerando informações do ticket - ticketId: ${ticketId}, companyId: ${companyId}`);
+
+    const result = await generateTicketInfo({
+      ticketId: Number(ticketId),
+      companyId
+    });
+
+    console.log(`[ChatAIController] Informações do ticket geradas com sucesso`);
+
+    return res.status(200).json(result);
+  } catch (err: any) {
+    console.error("[ChatAIController] Erro ao gerar informações do ticket:", err);
+    console.error("[ChatAIController] Stack trace:", err.stack);
+    
+    if (err.message?.includes("API Key") || err.message?.includes("GEMINI_KEY") || err.message?.includes("OPENAI")) {
+      return res.status(400).json({ 
+        error: "AI_KEY_MISSING",
+        message: err.message || "API Key de IA não configurada"
+      });
+    }
+    
+    if (err instanceof AppError) {
+      return res.status(err.statusCode || 500).json({
+        error: err.message || "Erro ao gerar informações do ticket"
+      });
+    }
+    
+    return res.status(500).json({
+      error: "ERR_CHAT_AI_GENERATE_TICKET",
+      message: err.message || "Erro ao gerar informações do ticket com IA"
+    });
+  }
+};

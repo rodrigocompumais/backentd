@@ -64,6 +64,8 @@ const transcribeAudio = async ({
   messageId,
   companyId
 }: TranscribeAudioParams): Promise<TranscribeAudioResponse> => {
+  let providerName = "IA";
+  
   try {
     // Buscar mensagem
     const message = await Message.findOne({
@@ -81,7 +83,8 @@ const transcribeAudio = async ({
 
     // Selecionar provider usando configuração automática
     const provider = await AIProviderSelector.getProvider(companyId, "transcription");
-
+    providerName = provider.name;
+    
     // Obter caminho do arquivo de áudio
     // O mediaUrl retorna a URL completa, mas precisamos do nome do arquivo
     const mediaUrlValue = message.getDataValue("mediaUrl");
@@ -113,7 +116,7 @@ const transcribeAudio = async ({
     const audioBuffer = fs.readFileSync(audioFilePath);
 
     // Chamar provider para transcrever
-    logger.info(`Enviando áudio para transcrição usando ${provider.name} (tamanho: ${(audioBuffer.length / 1024).toFixed(2)}KB)`);
+    logger.info(`Enviando áudio para transcrição usando ${providerName} (tamanho: ${(audioBuffer.length / 1024).toFixed(2)}KB)`);
     
     const transcription = await provider.transcribeAudio(
       audioBuffer,
@@ -124,11 +127,11 @@ const transcribeAudio = async ({
     );
 
     if (!transcription || transcription.trim() === "") {
-      logger.error(`Transcrição vazia retornada pelo ${provider.name}`);
+      logger.error(`Transcrição vazia retornada pelo ${providerName}`);
       throw new AppError("Não foi possível transcrever o áudio. A transcrição retornada está vazia.", 500);
     }
 
-    logger.info(`✅ Transcrição concluída com sucesso usando ${provider.name} (${transcription.length} caracteres)`);
+    logger.info(`✅ Transcrição concluída com sucesso usando ${providerName} (${transcription.length} caracteres)`);
 
     return {
       transcription: transcription.trim(),
@@ -139,7 +142,7 @@ const transcribeAudio = async ({
       throw err;
     }
 
-    logger.error(`Erro ao transcrever áudio com ${provider.name}:`, {
+    logger.error(`Erro ao transcrever áudio com ${providerName}:`, {
       message: err.message,
       messageId,
       companyId

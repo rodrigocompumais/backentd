@@ -1,5 +1,5 @@
-import OpenAI from "openai";
 import { Readable } from "stream";
+import OpenAI from "openai";
 import {
   IAIProvider,
   GenerateTextOptions,
@@ -20,7 +20,7 @@ import AppError from "../../../errors/AppError";
  */
 export class OpenAIProvider implements IAIProvider {
   readonly name = "openai";
-  private client: OpenAI;
+  private client: ReturnType<typeof createOpenAIClient>;
 
   constructor(apiKey: string) {
     this.client = createOpenAIClient(apiKey);

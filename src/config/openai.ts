@@ -59,7 +59,7 @@ export const handleOpenAIError = (err: any): never => {
 };
 
 // Criar cliente OpenAI
-export const createOpenAIClient = (apiKey: string): OpenAI => {
+export const createOpenAIClient = (apiKey: string) => {
   const validatedKey = validateOpenAIApiKey(apiKey);
   return new OpenAI({
     apiKey: validatedKey

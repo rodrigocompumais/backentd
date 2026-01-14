@@ -3453,7 +3453,10 @@ const handleMessage = async (
     });
 
     // Validação de mensagem de conclusão duplicada - adicionado log e verificação mais segura
+    // IMPORTANTE: Não bloquear se houver prompt configurado (bot de IA pode precisar responder)
+    const hasPrompt = !isNil(whatsapp.promptId) || !isNil(ticket?.promptId);
     if (
+      !hasPrompt && // Só bloquear se NÃO houver prompt configurado
       unreadMessages === 0 &&
       whatsapp.complationMessage &&
       lastMessage &&
@@ -3532,8 +3535,11 @@ const handleMessage = async (
       if (!isFromMe && scheduleType) {
         /**
          * Tratamento para envio de mensagem quando a empresa está fora do expediente
+         * IMPORTANTE: Não bloquear se houver prompt configurado (bot de IA pode precisar responder)
          */
+        const hasPrompt = !isNil(whatsapp.promptId) || !isNil(ticket?.promptId);
         if (
+          !hasPrompt && // Só bloquear se NÃO houver prompt configurado
           scheduleType.value === "company" &&
           !isNil(currentSchedule) &&
           (!currentSchedule || currentSchedule.inActivity === false)
@@ -3583,7 +3589,10 @@ const handleMessage = async (
             );
           }
 
+          // IMPORTANTE: Não bloquear se houver prompt configurado (bot de IA pode precisar responder)
+          const hasPrompt = !isNil(whatsapp.promptId) || !isNil(ticket?.promptId) || !isNil(queue?.promptId);
           if (
+            !hasPrompt && // Só bloquear se NÃO houver prompt configurado
             scheduleType.value === "queue" &&
             queue.outOfHoursMessage !== null &&
             queue.outOfHoursMessage !== "" &&

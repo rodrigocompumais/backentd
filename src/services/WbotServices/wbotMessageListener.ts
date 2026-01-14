@@ -3454,9 +3454,9 @@ const handleMessage = async (
 
     // Validação de mensagem de conclusão duplicada - adicionado log e verificação mais segura
     // IMPORTANTE: Não bloquear se houver prompt configurado (bot de IA pode precisar responder)
-    const hasPrompt = !isNil(whatsapp.promptId) || !isNil(ticket?.promptId);
+    const hasPromptInWhatsapp = !isNil(whatsapp.promptId);
     if (
-      !hasPrompt && // Só bloquear se NÃO houver prompt configurado
+      !hasPromptInWhatsapp && // Só bloquear se NÃO houver prompt configurado no WhatsApp
       unreadMessages === 0 &&
       whatsapp.complationMessage &&
       lastMessage &&

@@ -26,7 +26,22 @@ interface PromptData {
 }
 
 const CreatePromptService = async (promptData: PromptData): Promise<Prompt> => {
-    const { name, apiKey, prompt, queueId, maxMessages, companyId, provider = "openai" } = promptData;
+    // Garantir que companyId seja number
+    const companyIdNumber = typeof promptData.companyId === "string" ? parseInt(promptData.companyId, 10) : promptData.companyId;
+    
+    if (isNaN(companyIdNumber)) {
+        throw new AppError("companyId inválido", 400);
+    }
+
+    // Garantir que queueId e maxMessages sejam números
+    const queueIdNumber = queueId ? (typeof queueId === "string" ? parseInt(queueId, 10) : queueId) : undefined;
+    const maxMessagesNumber = maxMessages ? (typeof maxMessages === "string" ? parseInt(maxMessages, 10) : maxMessages) : 10;
+
+    if (!queueIdNumber || isNaN(queueIdNumber)) {
+        throw new AppError("queueId é obrigatório e deve ser um número válido", 400);
+    }
+
+    const { name, prompt, provider = "openai" } = promptData;
 
     // Validação baseada no provider
     const promptSchema = Yup.object().shape({
@@ -40,9 +55,17 @@ const CreatePromptService = async (promptData: PromptData): Promise<Prompt> => {
 
     // Não exigir apiKey no prompt - será buscada das Settings
     try {
-        await promptSchema.validate({ name, prompt, queueId, maxMessages, companyId, provider });
-    } catch (err) {
-        throw new AppError(`${JSON.stringify(err, undefined, 2)}`);
+        await promptSchema.validate({ 
+            name, 
+            prompt, 
+            queueId: queueIdNumber, 
+            maxMessages: maxMessagesNumber, 
+            companyId: companyIdNumber, 
+            provider 
+        });
+    } catch (err: any) {
+        console.error("Erro na validação do prompt:", err);
+        throw new AppError(`Erro de validação: ${err.message || JSON.stringify(err, undefined, 2)}`, 400);
     }
 
     // Validar que a API key está nas Settings (tanto para Gemini quanto OpenAI)
@@ -50,7 +73,7 @@ const CreatePromptService = async (promptData: PromptData): Promise<Prompt> => {
         const geminiSetting = await Setting.findOne({
             where: {
                 key: "geminiApiKey",
-                companyId
+                companyId: companyIdNumber
             }
         });
 
@@ -63,7 +86,7 @@ const CreatePromptService = async (promptData: PromptData): Promise<Prompt> => {
         const openaiSetting = await Setting.findOne({
             where: {
                 key: "openaiApiKey",
-                companyId
+                companyId: companyIdNumber
             }
         });
 
@@ -74,18 +97,53 @@ const CreatePromptService = async (promptData: PromptData): Promise<Prompt> => {
         }
     }
 
-    // Não salvar apiKey no prompt (usará das Settings)
-    promptData.apiKey = "";
-
     // Garantir que provider tenha valor default
     if (!promptData.provider) {
         promptData.provider = "openai";
     }
 
-    let promptTable = await Prompt.create(promptData);
-    promptTable = await ShowPromptService({ promptId: promptTable.id, companyId });
+    // Criar objeto de dados para salvar, sempre com apiKey como string vazia
+    const promptToCreate: any = {
+        name: promptData.name,
+        prompt: promptData.prompt,
+        queueId: queueIdNumber,
+        maxMessages: maxMessagesNumber,
+        maxTokens: promptData.maxTokens || 100,
+        temperature: promptData.temperature || 1,
+        promptTokens: promptData.promptTokens || 0,
+        completionTokens: promptData.completionTokens || 0,
+        totalTokens: promptData.totalTokens || 0,
+        model: promptData.model || (provider === "gemini" ? "gemini-2.5-flash" : "gpt-3.5-turbo-1106"),
+        provider: provider,
+        companyId: companyIdNumber,
+        apiKey: "", // Sempre string vazia - será buscada das Settings
+        canSendInternalMessages: promptData.canSendInternalMessages || false,
+        canTransferToAgent: promptData.canTransferToAgent || false,
+        transferQueueId: promptData.transferQueueId || null
+    };
 
-    return promptTable;
+    try {
+        console.log("Criando prompt com dados:", {
+            name: promptToCreate.name,
+            provider: promptToCreate.provider,
+            companyId: promptToCreate.companyId,
+            queueId: promptToCreate.queueId,
+            apiKey: promptToCreate.apiKey ? "***" : "(vazio)"
+        });
+        
+        let promptTable = await Prompt.create(promptToCreate);
+        console.log("Prompt criado com sucesso, ID:", promptTable.id);
+        
+        promptTable = await ShowPromptService({ promptId: promptTable.id, companyId: companyIdNumber });
+        return promptTable;
+    } catch (err: any) {
+        console.error("Erro ao criar prompt no banco:", {
+            message: err.message,
+            errors: err.errors,
+            stack: err.stack
+        });
+        throw new AppError(`Erro ao criar prompt: ${err.message || "Erro desconhecido"}`, 500);
+    }
 };
 
 export default CreatePromptService;

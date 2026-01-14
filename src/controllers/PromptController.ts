@@ -35,20 +35,45 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
 };
 
 export const store = async (req: Request, res: Response): Promise<Response> => {
-  const authHeader = req.headers.authorization;
-  const [, token] = authHeader.split(" ");
-  const decoded = verify(token, authConfig.secret);
-  const { companyId } = decoded as TokenPayload;
-  const { name, apiKey, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, model, provider, canSendInternalMessages, canTransferToAgent, transferQueueId} = req.body;
-  const promptTable = await CreatePromptService({ name, apiKey, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, companyId, model, provider, canSendInternalMessages, canTransferToAgent, transferQueueId });
+  try {
+    const authHeader = req.headers.authorization;
+    const [, token] = authHeader.split(" ");
+    const decoded = verify(token, authConfig.secret);
+    const { companyId } = decoded as TokenPayload;
+    const { name, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, model, provider, canSendInternalMessages, canTransferToAgent, transferQueueId} = req.body;
+    
+    // Não passar apiKey - será buscada das Settings
+    const promptTable = await CreatePromptService({ 
+      name, 
+      prompt, 
+      maxTokens, 
+      temperature, 
+      promptTokens, 
+      completionTokens, 
+      totalTokens, 
+      queueId, 
+      maxMessages, 
+      companyId, 
+      model, 
+      provider, 
+      canSendInternalMessages, 
+      canTransferToAgent, 
+      transferQueueId 
+    });
 
-  const io = getIO();
-  io.to(`company-${companyId}-mainchannel`).emit("prompt", {
-    action: "update",
-    prompt: promptTable
-  });
+    const io = getIO();
+    io.to(`company-${companyId}-mainchannel`).emit("prompt", {
+      action: "update",
+      prompt: promptTable
+    });
 
-  return res.status(200).json(promptTable);
+    return res.status(200).json(promptTable);
+  } catch (err: any) {
+    console.error("Erro ao criar prompt:", err);
+    return res.status(err.statusCode || 500).json({ 
+      error: err.message || "Erro ao criar prompt" 
+    });
+  }
 };
 
 export const show = async (req: Request, res: Response): Promise<Response> => {

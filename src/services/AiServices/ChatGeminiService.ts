@@ -1,7 +1,5 @@
-import axios from "axios";
 import { Op, fn, col, literal } from "sequelize";
 import AppError from "../../errors/AppError";
-import Setting from "../../models/Setting";
 import Ticket from "../../models/Ticket";
 import Message from "../../models/Message";
 import Contact from "../../models/Contact";
@@ -10,7 +8,8 @@ import User from "../../models/User";
 import Queue from "../../models/Queue";
 import Tag from "../../models/Tag";
 import Whatsapp from "../../models/Whatsapp";
-import { GEMINI_MODEL, GEMINI_BASE_URL, validateGeminiApiKey, interpretGeminiError } from "../../config/gemini";
+import { AIProviderSelector } from "./AIProviderSelector";
+import { ChatMessage } from "./AIProviderInterface";
 
 interface ChatGeminiParams {
   companyId: number;
@@ -464,19 +463,8 @@ const ChatGeminiService = async ({
   message,
   conversationHistory = []
 }: ChatGeminiParams): Promise<ChatGeminiResponse> => {
-  const geminiSetting = await Setting.findOne({
-    where: {
-      key: "geminiApiKey",
-      companyId
-    }
-  });
-
-  let apiKey: string;
-  try {
-    apiKey = validateGeminiApiKey(geminiSetting?.value);
-  } catch (err: any) {
-    throw new AppError(err.message || "GEMINI_KEY_MISSING", 400);
-  }
+  // Selecionar provider usando configuração automática
+  const provider = await AIProviderSelector.getProvider(companyId, "chat");
 
   // Detectar entidades na pergunta do usuário
   const entities = await detectEntitiesInQuestion(message, companyId);
@@ -610,141 +598,78 @@ VOCÊ PODE RESPONDER SOBRE:
 ✅ Status de tickets e conexões
 ✅ Qualquer dado listado acima`;
 
-  // Construir histórico de conversa
-  const contents = [];
+  // Construir histórico de conversa no formato da interface
+  const chatMessages: ChatMessage[] = [];
 
   // Sempre adicionar contexto do sistema na primeira mensagem
   if (conversationHistory.length === 0) {
-    contents.push({
-      role: "user",
-      parts: [{ text: systemContext }]
+    chatMessages.push({
+      role: "system",
+      content: systemContext
     });
-    contents.push({
-      role: "model",
-      parts: [{ text: "Entendido! Tenho acesso completo aos dados do sistema. Posso informar sobre atendimentos, conversas, estatísticas de cada atendente e muito mais. O que você gostaria de saber?" }]
+    chatMessages.push({
+      role: "assistant",
+      content: "Entendido! Tenho acesso completo aos dados do sistema. Posso informar sobre atendimentos, conversas, estatísticas de cada atendente e muito mais. O que você gostaria de saber?"
     });
   } else {
     // Adicionar contexto atualizado mesmo com histórico
-    contents.push({
-      role: "user",
-      parts: [{ text: systemContext }]
+    chatMessages.push({
+      role: "system",
+      content: systemContext
     });
-    contents.push({
-      role: "model",
-      parts: [{ text: "Dados atualizados. Continuando..." }]
+    chatMessages.push({
+      role: "assistant",
+      content: "Dados atualizados. Continuando..."
     });
     
     // Adicionar histórico de conversa existente
     for (const hist of conversationHistory) {
-      contents.push({
-        role: hist.role === "user" ? "user" : "model",
-        parts: [{ text: hist.content }]
+      chatMessages.push({
+        role: hist.role === "user" ? "user" : "assistant",
+        content: hist.content
       });
     }
   }
 
   // Adicionar mensagem atual do usuário
-  contents.push({
+  chatMessages.push({
     role: "user",
-    parts: [{ text: message }]
+    content: message
   });
 
   try {
-    const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent`;
-
-    console.log(`📤 Enviando mensagem para Gemini (${GEMINI_MODEL})...`);
+    console.log(`📤 Enviando mensagem para ${provider.name}...`);
     console.log(`📊 Contexto: ${companyData.stats.total.tickets} tickets, ${companyData.users.length} usuários`);
     if (entities.matchedUsers.length > 0) {
       console.log(`👤 Atendentes detectados: ${entities.matchedUsers.map(u => u.name).join(", ")}`);
     }
 
-    const { data } = await axios.post(
-      `${url}?key=${apiKey}`,
-      {
-        contents: contents,
-        generationConfig: {
-          temperature: 0.3, // Menor temperatura para respostas mais precisas
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 4096
-        },
-        safetySettings: [
-          {
-            category: "HARM_CATEGORY_HARASSMENT",
-            threshold: "BLOCK_ONLY_HIGH"
-          },
-          {
-            category: "HARM_CATEGORY_HATE_SPEECH",
-            threshold: "BLOCK_ONLY_HIGH"
-          },
-          {
-            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-            threshold: "BLOCK_ONLY_HIGH"
-          },
-          {
-            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-            threshold: "BLOCK_ONLY_HIGH"
-          }
-        ]
-      },
-      {
-        timeout: 90000
-      }
-    );
+    // Usar o provider selecionado para realizar o chat
+    const text = await provider.chat(chatMessages, {
+      temperature: 0.3,
+      maxTokens: 4096,
+      topP: 0.95
+    });
 
-    const candidates = data?.candidates || [];
-    
-    if (candidates.length === 0) {
-      console.error("❌ Nenhum candidato retornado pelo Gemini");
-      throw new Error("Conteúdo bloqueado pelos filtros de segurança");
+    if (!text || text.trim() === "") {
+      throw new AppError("Resposta vazia da IA", 500);
     }
 
-    const first = candidates[0];
-    
-    // Verificar finishReason
-    if (first?.finishReason && first.finishReason !== "STOP") {
-      console.warn(`⚠️ finishReason no Chat: ${first.finishReason}`);
-      
-      if (first.finishReason === "SAFETY") {
-        throw new Error("Conteúdo bloqueado pelos filtros de segurança");
-      }
-      
-      if (first.finishReason === "MAX_TOKENS") {
-        console.warn("⚠️ MAX_TOKENS no Chat, resposta pode estar incompleta");
-      }
-    }
-
-    const parts = first?.content?.parts || [];
-    const text = parts.map((p: any) => p.text).join("\n");
-
-    if (!text) {
-      console.error("❌ Resposta vazia do Gemini. finishReason:", first?.finishReason);
-      throw new Error("Resposta vazia do Gemini");
-    }
-
-    console.log(`✅ Resposta recebida do Gemini (${text.length} caracteres)`);
+    console.log(`✅ Resposta recebida do ${provider.name} (${text.length} caracteres)`);
 
     return {
-      response: text
+      response: text.trim()
     };
   } catch (err: any) {
-    const status = err.response?.status;
-    const errorData = err.response?.data;
-    
-    console.error("❌ Erro ao chamar Gemini API (Chat):", {
-      status,
-      data: errorData,
-      message: err.message,
-      model: GEMINI_MODEL,
-      url: err.config?.url
+    console.error(`❌ Erro ao chamar ${provider.name} API (Chat):`, {
+      message: err.message
     });
     
-    if (status) {
-      const userMessage = interpretGeminiError(status, errorData);
-      throw new AppError(userMessage, status === 429 ? 429 : status >= 400 && status < 500 ? 400 : 500);
+    if (err instanceof AppError) {
+      throw err;
     }
     
-    throw new AppError(`Erro no chat: ${err.message || "Erro desconhecido ao comunicar com a API do Gemini"}`, 500);
+    throw new AppError(`Erro no chat: ${err.message || "Erro desconhecido"}`, 500);
   }
 };
 

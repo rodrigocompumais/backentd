@@ -1,10 +1,8 @@
 import fs from "fs";
 import path from "path";
-import axios from "axios";
 import AppError from "../../errors/AppError";
 import Message from "../../models/Message";
-import Setting from "../../models/Setting";
-import { GEMINI_MODEL, GEMINI_BASE_URL, validateGeminiApiKey, interpretGeminiError } from "../../config/gemini";
+import { AIProviderSelector } from "./AIProviderSelector";
 import { logger } from "../../utils/logger";
 
 interface TranscribeAudioParams {
@@ -81,20 +79,8 @@ const transcribeAudio = async ({
       throw new AppError("Mensagem de áudio não encontrada ou não pertence a esta empresa.", 404);
     }
 
-    // Obter chave da API do Gemini
-    const geminiSetting = await Setting.findOne({
-      where: {
-        key: "geminiApiKey",
-        companyId
-      }
-    });
-
-    let apiKey: string;
-    try {
-      apiKey = validateGeminiApiKey(geminiSetting?.value);
-    } catch (err: any) {
-      throw new AppError(err.message || "Chave da API do Gemini não configurada.", 400);
-    }
+    // Selecionar provider usando configuração automática
+    const provider = await AIProviderSelector.getProvider(companyId, "transcription");
 
     // Obter caminho do arquivo de áudio
     // O mediaUrl retorna a URL completa, mas precisamos do nome do arquivo
@@ -119,100 +105,30 @@ const transcribeAudio = async ({
     // Validar tamanho do arquivo
     validateFileSize(audioFilePath);
 
-    // Converter áudio para base64
-    logger.info(`Convertendo áudio para base64: ${audioFilePath}`);
-    const audioBase64 = audioToBase64(audioFilePath);
+    // Obter tipo MIME do áudio
     const mimeType = getAudioMimeType(audioFilePath);
 
-    // Chamar Gemini API para transcrever
-    logger.info(`Enviando áudio para transcrição no Gemini (tamanho: ${(audioBase64.length / 1024).toFixed(2)}KB)`);
+    // Ler arquivo de áudio
+    logger.info(`Lendo arquivo de áudio para transcrição: ${audioFilePath}`);
+    const audioBuffer = fs.readFileSync(audioFilePath);
+
+    // Chamar provider para transcrever
+    logger.info(`Enviando áudio para transcrição usando ${provider.name} (tamanho: ${(audioBuffer.length / 1024).toFixed(2)}KB)`);
     
-    const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-    
-    const response = await axios.post(
-      url,
+    const transcription = await provider.transcribeAudio(
+      audioBuffer,
+      mimeType,
       {
-        contents: [
-          {
-            parts: [
-              {
-                text: "Transcreva este áudio de forma literal e completa. Retorne apenas o texto transcrito, sem comentários adicionais."
-              },
-              {
-                inlineData: {
-                  mimeType: mimeType,
-                  data: audioBase64
-                }
-              }
-            ]
-          }
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 4096
-        },
-        safetySettings: [
-          {
-            category: "HARM_CATEGORY_HARASSMENT",
-            threshold: "BLOCK_ONLY_HIGH"
-          },
-          {
-            category: "HARM_CATEGORY_HATE_SPEECH",
-            threshold: "BLOCK_ONLY_HIGH"
-          },
-          {
-            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-            threshold: "BLOCK_ONLY_HIGH"
-          },
-          {
-            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-            threshold: "BLOCK_ONLY_HIGH"
-          }
-        ]
-      },
-      {
-        timeout: 120000 // 2 minutos para processar áudio
+        prompt: "Transcreva este áudio de forma literal e completa. Retorne apenas o texto transcrito, sem comentários adicionais."
       }
     );
 
-    const candidates = response.data?.candidates || [];
-    
-    if (candidates.length === 0) {
-      logger.error("Nenhum candidato retornado pelo Gemini para transcrição");
-      logger.error("Resposta completa da API:", JSON.stringify(response.data, null, 2));
-      throw new AppError("Não foi possível transcrever o áudio. A API não retornou resultados.", 500);
-    }
-
-    const first = candidates[0];
-    
-    // Verificar finishReason
-    if (first?.finishReason && first.finishReason !== "STOP") {
-      logger.warn(`⚠️ finishReason: ${first.finishReason}`);
-      
-      if (first.finishReason === "SAFETY") {
-        throw new AppError("Conteúdo bloqueado pelos filtros de segurança do Gemini.", 400);
-      }
-      
-      if (first.finishReason === "MAX_TOKENS") {
-        logger.warn("⚠️ MAX_TOKENS atingido, transcrição pode estar incompleta");
-      }
-    }
-
-    const parts = first?.content?.parts || [];
-    const transcription = parts
-      .map((p: any) => p.text || "")
-      .filter((t: string) => t.trim() !== "")
-      .join("\n");
-
     if (!transcription || transcription.trim() === "") {
-      logger.error("Transcrição vazia retornada pelo Gemini");
-      logger.error("Candidato completo:", JSON.stringify(first, null, 2));
+      logger.error(`Transcrição vazia retornada pelo ${provider.name}`);
       throw new AppError("Não foi possível transcrever o áudio. A transcrição retornada está vazia.", 500);
     }
 
-    logger.info(`✅ Transcrição concluída com sucesso (${transcription.length} caracteres)`);
+    logger.info(`✅ Transcrição concluída com sucesso usando ${provider.name} (${transcription.length} caracteres)`);
 
     return {
       transcription: transcription.trim(),
@@ -223,20 +139,14 @@ const transcribeAudio = async ({
       throw err;
     }
 
-    const status = err.response?.status;
-    const errorData = err.response?.data;
-
-    logger.error("Erro ao transcrever áudio com Gemini:", {
-      status,
-      data: errorData,
+    logger.error(`Erro ao transcrever áudio com ${provider.name}:`, {
       message: err.message,
       messageId,
       companyId
     });
 
-    if (status) {
-      const userMessage = interpretGeminiError(status, errorData);
-      throw new AppError(`Erro ao transcrever áudio: ${userMessage}`, status);
+    if (err instanceof AppError) {
+      throw err;
     }
 
     throw new AppError(

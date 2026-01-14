@@ -1,7 +1,5 @@
-import axios from "axios";
 import AppError from "../../errors/AppError";
-import { GEMINI_MODEL, GEMINI_BASE_URL, validateGeminiApiKey, interpretGeminiError } from "../../config/gemini";
-import Setting from "../../models/Setting";
+import { AIProviderSelector } from "./AIProviderSelector";
 
 interface GenerateInitialMessageParams {
   companyId: number;
@@ -30,19 +28,8 @@ export const generateInitialMessage = async ({
   companyId,
   objective
 }: GenerateInitialMessageParams): Promise<MessageResponse> => {
-  const geminiSetting = await Setting.findOne({
-    where: {
-      key: "geminiApiKey",
-      companyId
-    }
-  });
-
-  let apiKey: string;
-  try {
-    apiKey = validateGeminiApiKey(geminiSetting?.value);
-  } catch (err: any) {
-    throw new AppError("GEMINI_KEY_MISSING", 400);
-  }
+  // Selecionar provider usando configuração automática
+  const provider = await AIProviderSelector.getProvider(companyId, "campaigns");
 
   const systemPrompt = `Você é um especialista em marketing e copywriting criativo para WhatsApp Business.
 
@@ -65,116 +52,35 @@ Crie UMA mensagem persuasiva e impactante que atinja esse objetivo.
 Retorne APENAS a mensagem, sem explicações adicionais.`;
 
   try {
-    const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent`;
-
-    console.log(`🎨 Gerando mensagem inicial de campanha...`);
+    console.log(`🎨 Gerando mensagem inicial de campanha usando ${provider.name}...`);
     console.log(`📝 Objetivo: ${objective}`);
 
-    const { data } = await axios.post(
-      `${url}?key=${apiKey}`,
-      {
-        contents: [
-          {
-            parts: [
-              {
-                text: systemPrompt
-              }
-            ]
-          }
-        ],
-        generationConfig: {
-          temperature: 0.85, // Alta criatividade
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 2048, // Aumentado para acomodar thoughts do 2.5-flash
-          candidateCount: 1
-        },
-        safetySettings: [
-          {
-            category: "HARM_CATEGORY_HARASSMENT",
-            threshold: "BLOCK_NONE"
-          },
-          {
-            category: "HARM_CATEGORY_HATE_SPEECH",
-            threshold: "BLOCK_NONE"
-          },
-          {
-            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-            threshold: "BLOCK_NONE"
-          },
-          {
-            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-            threshold: "BLOCK_NONE"
-          }
-        ]
-      },
-      {
-        timeout: 60000
-      }
-    );
+    // Usar o provider selecionado para gerar a mensagem
+    const text = await provider.generateText(systemPrompt, {
+      temperature: 0.85, // Alta criatividade
+      maxTokens: 2048,
+      topP: 0.95
+    });
 
-    console.log("🔍 Resposta completa do Gemini:", JSON.stringify(data, null, 2));
-
-    const candidates = data?.candidates || [];
-    
-    // Verificar se foi bloqueado por safety
-    if (candidates.length === 0) {
-      console.error("❌ Nenhum candidato retornado. Possível bloqueio de segurança.");
-      throw new Error("Conteúdo bloqueado pelos filtros de segurança. Tente reformular o objetivo da campanha.");
+    if (!text || text.trim() === "") {
+      throw new AppError("Resposta vazia. Tente simplificar o objetivo da campanha.", 500);
     }
 
-    const first = candidates[0];
-    
-    // Verificar finishReason
-    if (first?.finishReason && first.finishReason !== "STOP") {
-      console.error(`⚠️ finishReason: ${first.finishReason}`);
-      
-      if (first.finishReason === "SAFETY") {
-        throw new Error("Conteúdo bloqueado pelos filtros de segurança. Evite termos como preços, valores ou ofertas muito agressivas. Tente: 'Promover produto com condições especiais'");
-      }
-      
-      if (first.finishReason === "MAX_TOKENS") {
-        console.error("❌ MAX_TOKENS atingido. thoughtsTokenCount:", data.usageMetadata?.thoughtsTokenCount);
-        // Não lançar erro, tentar extrair o que foi gerado
-        console.warn("⚠️ Resposta pode estar incompleta devido a MAX_TOKENS");
-      }
-    }
-
-    const parts = first?.content?.parts || [];
-    let text = parts.map((p: any) => p.text).join("\n").trim();
-
-    // Se não há texto mas há parts vazio, pode ser problema do modelo 2.5-flash
-    if (!text && first?.finishReason === "MAX_TOKENS") {
-      console.error("❌ MAX_TOKENS sem conteúdo. O modelo gastou todos os tokens pensando.");
-      throw new Error("O modelo gastou muito tempo processando. Tente um objetivo mais simples e direto. Ex: 'Promover relógio de ponto com oferta especial'");
-    }
-
-    if (!text) {
-      console.error("❌ Texto vazio. Candidates:", JSON.stringify(candidates, null, 2));
-      throw new Error("Resposta vazia. Tente simplificar o objetivo da campanha.");
-    }
-
-    console.log(`✅ Mensagem inicial gerada (${text.length} caracteres)`);
+    console.log(`✅ Mensagem inicial gerada usando ${provider.name} (${text.length} caracteres)`);
 
     return {
-      message: text
+      message: text.trim()
     };
   } catch (err: any) {
-    const status = err.response?.status;
-    const errorData = err.response?.data;
-    
-    console.error("❌ Erro ao gerar mensagem inicial:", {
-      status,
-      data: errorData,
+    console.error(`❌ Erro ao gerar mensagem inicial com ${provider.name}:`, {
       message: err.message
     });
     
-    if (status) {
-      const userMessage = interpretGeminiError(status, errorData);
-      throw new AppError(userMessage, status === 429 ? 429 : 400);
+    if (err instanceof AppError) {
+      throw err;
     }
     
-    throw new AppError(`Erro ao gerar mensagem: ${err.message}`, 500);
+    throw new AppError(`Erro ao gerar mensagem: ${err.message || "Erro desconhecido"}`, 500);
   }
 };
 
@@ -187,19 +93,8 @@ export const generateVariations = async ({
   originalMessage,
   objective
 }: GenerateVariationsParams): Promise<VariationsResponse> => {
-  const geminiSetting = await Setting.findOne({
-    where: {
-      key: "geminiApiKey",
-      companyId
-    }
-  });
-
-  let apiKey: string;
-  try {
-    apiKey = validateGeminiApiKey(geminiSetting?.value);
-  } catch (err: any) {
-    throw new AppError("GEMINI_KEY_MISSING", 400);
-  }
+  // Selecionar provider usando configuração automática
+  const provider = await AIProviderSelector.getProvider(companyId, "campaigns");
 
   const systemPrompt = `Você é um especialista em marketing e copywriting criativo para WhatsApp Business.
 
@@ -235,91 +130,18 @@ Exemplo de formato:
 [Variação 4 aqui]`;
 
   try {
-    const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent`;
-
-    console.log(`🎨 Gerando 4 variações criativas...`);
+    console.log(`🎨 Gerando 4 variações criativas usando ${provider.name}...`);
     console.log(`📝 Mensagem original: ${originalMessage.substring(0, 50)}...`);
 
-    const { data } = await axios.post(
-      `${url}?key=${apiKey}`,
-      {
-        contents: [
-          {
-            parts: [
-              {
-                text: systemPrompt
-              }
-            ]
-          }
-        ],
-        generationConfig: {
-          temperature: 0.9, // Máxima criatividade para variações
-          topK: 50,
-          topP: 0.95,
-          maxOutputTokens: 4096, // Maior para acomodar 4 variações + thoughts
-          candidateCount: 1
-        },
-        safetySettings: [
-          {
-            category: "HARM_CATEGORY_HARASSMENT",
-            threshold: "BLOCK_NONE"
-          },
-          {
-            category: "HARM_CATEGORY_HATE_SPEECH",
-            threshold: "BLOCK_NONE"
-          },
-          {
-            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-            threshold: "BLOCK_NONE"
-          },
-          {
-            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-            threshold: "BLOCK_NONE"
-          }
-        ]
-      },
-      {
-        timeout: 90000
-      }
-    );
+    // Usar o provider selecionado para gerar variações
+    const text = await provider.generateText(systemPrompt, {
+      temperature: 0.9, // Máxima criatividade para variações
+      maxTokens: 4096, // Maior para acomodar 4 variações
+      topP: 0.95
+    });
 
-    console.log("🔍 Resposta de variações do Gemini:", JSON.stringify(data, null, 2));
-
-    const candidates = data?.candidates || [];
-    
-    // Verificar se foi bloqueado por safety
-    if (candidates.length === 0) {
-      console.error("❌ Nenhum candidato retornado para variações.");
-      throw new Error("Conteúdo bloqueado pelos filtros de segurança ao gerar variações.");
-    }
-
-    const first = candidates[0];
-    
-    // Verificar finishReason
-    if (first?.finishReason && first.finishReason !== "STOP") {
-      console.error(`⚠️ finishReason para variações: ${first.finishReason}`);
-      
-      if (first.finishReason === "SAFETY") {
-        throw new Error("Variações bloqueadas pelos filtros. A mensagem original pode conter termos sensíveis.");
-      }
-      
-      if (first.finishReason === "MAX_TOKENS") {
-        console.error("❌ MAX_TOKENS nas variações. thoughtsTokenCount:", data.usageMetadata?.thoughtsTokenCount);
-        console.warn("⚠️ Variações podem estar incompletas");
-      }
-    }
-
-    const parts = first?.content?.parts || [];
-    let text = parts.map((p: any) => p.text).join("\n").trim();
-
-    if (!text && first?.finishReason === "MAX_TOKENS") {
-      console.error("❌ MAX_TOKENS sem conteúdo nas variações.");
-      throw new Error("Erro ao gerar variações. A mensagem original pode ser muito complexa.");
-    }
-
-    if (!text) {
-      console.error("❌ Texto de variações vazio. Candidates:", JSON.stringify(candidates, null, 2));
-      throw new Error("Resposta vazia ao gerar variações.");
+    if (!text || text.trim() === "") {
+      throw new AppError("Resposta vazia ao gerar variações.", 500);
     }
 
     // Separar as variações pelo delimitador "---"
@@ -340,27 +162,21 @@ Exemplo de formato:
     // Garantir apenas 4 variações
     const finalVariations = variations.slice(0, 4);
 
-    console.log(`✅ ${finalVariations.length} variações geradas com sucesso`);
+    console.log(`✅ ${finalVariations.length} variações geradas com sucesso usando ${provider.name}`);
 
     return {
       variations: finalVariations
     };
   } catch (err: any) {
-    const status = err.response?.status;
-    const errorData = err.response?.data;
-    
-    console.error("❌ Erro ao gerar variações:", {
-      status,
-      data: errorData,
+    console.error(`❌ Erro ao gerar variações com ${provider.name}:`, {
       message: err.message
     });
     
-    if (status) {
-      const userMessage = interpretGeminiError(status, errorData);
-      throw new AppError(userMessage, status === 429 ? 429 : 400);
+    if (err instanceof AppError) {
+      throw err;
     }
     
-    throw new AppError(`Erro ao gerar variações: ${err.message}`, 500);
+    throw new AppError(`Erro ao gerar variações: ${err.message || "Erro desconhecido"}`, 500);
   }
 };
 

@@ -1,21 +1,19 @@
-import axios from "axios";
 import Message from "../../models/Message";
 import Ticket from "../../models/Ticket";
 import Contact from "../../models/Contact";
 import User from "../../models/User";
 import Queue from "../../models/Queue";
-import Setting from "../../models/Setting";
 import ShowTicketService from "../TicketServices/ShowTicketService";
-import { GEMINI_MODEL, GEMINI_BASE_URL, validateGeminiApiKey } from "../../config/gemini";
 import AppError from "../../errors/AppError";
 import { logger } from "../../utils/logger";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { AIProviderSelector } from "./AIProviderSelector";
 
 interface GenerateContextSummaryParams {
   ticketId: number;
   companyId: number;
-  provider: "gemini" | "openai";
+  provider?: "gemini" | "openai"; // Opcional, se não fornecido usa configuração automática
   maxMessages?: number;
 }
 
@@ -106,114 +104,33 @@ INSTRUÇÕES:
 FORMATO:
 Retorne APENAS o texto do resumo, sem formatação adicional, sem JSON, sem prefixos.`;
 
-    if (provider === "gemini") {
-      // Usar Gemini
-      const geminiSetting = await Setting.findOne({
-        where: {
-          key: "geminiApiKey",
-          companyId
-        }
-      });
-
-      let apiKey: string;
-      try {
-        apiKey = validateGeminiApiKey(geminiSetting?.value);
-      } catch (err: any) {
-        throw new AppError("Chave da API do Gemini não configurada", 400);
+    // Selecionar provider automaticamente usando a configuração da funcionalidade
+    // Se provider foi especificado explicitamente, criar diretamente, senão usar selector
+    let selectedProvider;
+    if (provider) {
+      const AIProviderFactory = require("./AIProviderFactory").AIProviderFactory;
+      if (provider === "gemini") {
+        selectedProvider = await AIProviderFactory.createGeminiProvider(companyId);
+      } else {
+        selectedProvider = await AIProviderFactory.createOpenAIProvider(companyId);
       }
-
-      const response = await axios.post(
-        `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
-        {
-          contents: [
-            {
-              parts: [
-                {
-                  text: systemPrompt
-                }
-              ]
-            }
-          ],
-          generationConfig: {
-            temperature: 0.3,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 1024
-          },
-          safetySettings: [
-            {
-              category: "HARM_CATEGORY_HARASSMENT",
-              threshold: "BLOCK_ONLY_HIGH"
-            },
-            {
-              category: "HARM_CATEGORY_HATE_SPEECH",
-              threshold: "BLOCK_ONLY_HIGH"
-            },
-            {
-              category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-              threshold: "BLOCK_ONLY_HIGH"
-            },
-            {
-              category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-              threshold: "BLOCK_ONLY_HIGH"
-            }
-          ]
-        },
-        {
-          timeout: 60000
-        }
-      );
-
-      const candidates = response.data?.candidates || [];
-      if (candidates.length === 0) {
-        throw new AppError("Nenhuma resposta do Gemini", 500);
-      }
-
-      const first = candidates[0];
-      const parts = first?.content?.parts || [];
-      const summary = parts
-        .map((p: any) => p.text || "")
-        .filter((t: string) => t.trim() !== "")
-        .join("\n")
-        .trim();
-
-      if (!summary) {
-        throw new AppError("Resumo vazio do Gemini", 500);
-      }
-
-      logger.info(`Resumo gerado com sucesso para ticket ${ticketId} (${summary.length} caracteres)`);
-      return summary;
     } else {
-      // Usar OpenAI
-      const openai = require("openai");
-      const openaiClient = new openai.OpenAI({
-        apiKey: process.env.OPENAI_API_KEY
-      });
-
-      if (!process.env.OPENAI_API_KEY) {
-        throw new AppError("Chave da API do OpenAI não configurada", 400);
-      }
-
-      const completion = await openaiClient.chat.completions.create({
-        model: "gpt-3.5-turbo",
-        messages: [
-          {
-            role: "system",
-            content: systemPrompt
-          }
-        ],
-        max_tokens: 500,
-        temperature: 0.3
-      });
-
-      const summary = completion.choices[0]?.message?.content?.trim();
-      if (!summary) {
-        throw new AppError("Resumo vazio do OpenAI", 500);
-      }
-
-      logger.info(`Resumo gerado com sucesso para ticket ${ticketId} (${summary.length} caracteres)`);
-      return summary;
+      selectedProvider = await AIProviderSelector.getProvider(companyId, "summaries");
     }
+
+    // Gerar resumo usando o provider selecionado
+    const summary = await selectedProvider.generateText(systemPrompt, {
+      temperature: 0.3,
+      maxTokens: 1024,
+      topP: 0.95
+    });
+
+    if (!summary || summary.trim() === "") {
+      throw new AppError("Resumo vazio retornado pela IA", 500);
+    }
+
+    logger.info(`Resumo gerado com sucesso para ticket ${ticketId} usando ${selectedProvider.name} (${summary.length} caracteres)`);
+    return summary.trim();
   } catch (error: any) {
     logger.error(`Erro ao gerar resumo do contexto: ${error.message}`);
     throw error;

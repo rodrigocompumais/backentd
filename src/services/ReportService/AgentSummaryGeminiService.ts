@@ -1,12 +1,10 @@
-import axios from "axios";
 import { Op } from "sequelize";
 import AppError from "../../errors/AppError";
-import Setting from "../../models/Setting";
 import Ticket from "../../models/Ticket";
 import Message from "../../models/Message";
 import Contact from "../../models/Contact";
 import User from "../../models/User";
-import { GEMINI_MODEL, GEMINI_BASE_URL, validateGeminiApiKey, interpretGeminiError } from "../../config/gemini";
+import { AIProviderSelector } from "../AiServices/AIProviderSelector";
 
 interface AgentSummaryParams {
   companyId: number;
@@ -35,19 +33,8 @@ const AgentSummaryGeminiService = async ({
   dateEnd,
   maxMessages = 200
 }: AgentSummaryParams): Promise<AgentSummaryResponse> => {
-  const geminiSetting = await Setting.findOne({
-    where: {
-      key: "geminiApiKey",
-      companyId
-    }
-  });
-
-  let apiKey: string;
-  try {
-    apiKey = validateGeminiApiKey(geminiSetting?.value);
-  } catch (err: any) {
-    throw new AppError(err.message || "GEMINI_KEY_MISSING", 400);
-  }
+  // Selecionar provider usando configuração automática
+  const provider = await AIProviderSelector.getProvider(companyId, "summaries");
 
   // Determinar se é resumo de atendente específico ou geral
   const isGeneralSummary = !agentId;
@@ -276,61 +263,35 @@ ${isGeneralSummary ? `## 5. 👥 DESEMPENHO POR ATENDENTE
   const finalPrompt = `${systemPrompt}\n\n${conversationsLabel}:\n\n${finalConversationsText}`;
 
   try {
-    const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent`;
+    console.log(`📤 Enviando requisição para ${provider.name}...`);
 
-    console.log(`📤 Enviando requisição para Gemini (${GEMINI_MODEL})...`);
+    // Usar o provider selecionado para gerar o resumo
+    const text = await provider.generateText(finalPrompt, {
+      temperature: 0.4,
+      maxTokens: 4096,
+      topP: 0.95
+    });
 
-    const { data } = await axios.post(
-      `${url}?key=${apiKey}`,
-      {
-        contents: [
-          {
-            parts: [
-              {
-                text: finalPrompt
-              }
-            ]
-          }
-        ]
-      },
-      {
-        timeout: 60000
-      }
-    );
-
-    const candidates = data?.candidates || [];
-    const first = candidates[0];
-    const parts = first?.content?.parts || [];
-    const text = parts.map((p: any) => p.text).join("\n");
-
-    if (!text) {
-      throw new Error("Resposta vazia do Gemini");
+    if (!text || text.trim() === "") {
+      throw new AppError("Resposta vazia da IA", 500);
     }
 
-    console.log(`✅ Resumo gerado com sucesso (${text.length} caracteres)`);
+    console.log(`✅ Resumo gerado com sucesso usando ${provider.name} (${text.length} caracteres)`);
 
     return {
-      summary: text,
+      summary: text.trim(),
       ticketsCount: tickets.length
     };
   } catch (err: any) {
-    const status = err.response?.status;
-    const errorData = err.response?.data;
-    
-    console.error("❌ Erro ao chamar Gemini API (Resumo):", {
-      status,
-      data: errorData,
-      message: err.message,
-      model: GEMINI_MODEL,
-      url: err.config?.url
+    console.error(`❌ Erro ao gerar resumo com ${provider.name}:`, {
+      message: err.message
     });
     
-    if (status) {
-      const userMessage = interpretGeminiError(status, errorData);
-      throw new AppError(userMessage, status === 429 ? 429 : status >= 400 && status < 500 ? 400 : 500);
+    if (err instanceof AppError) {
+      throw err;
     }
     
-    throw new AppError(`Erro ao gerar resumo: ${err.message || "Erro desconhecido ao comunicar com a API do Gemini"}`, 500);
+    throw new AppError(`Erro ao gerar resumo: ${err.message || "Erro desconhecido"}`, 500);
   }
 };
 

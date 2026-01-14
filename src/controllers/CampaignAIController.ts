@@ -46,10 +46,10 @@ export const generateCampaignInitialMessage = async (
   } catch (err: any) {
     console.error("Erro ao gerar mensagem inicial de campanha:", err);
     
-    if (err.message === "GEMINI_KEY_MISSING") {
+    if (err.message?.includes("API Key") || err.message?.includes("GEMINI_KEY") || err.message?.includes("OPENAI")) {
       return res.status(400).json({ 
-        error: "GEMINI_KEY_MISSING",
-        message: "Configure a API Key do Gemini em Configurações → Integrações"
+        error: "AI_KEY_MISSING",
+        message: err.message || "API Key de IA não configurada. Configure em Configurações → Integrações"
       });
     }
     
@@ -110,10 +110,10 @@ export const generateCampaignVariations = async (
   } catch (err: any) {
     console.error("Erro ao gerar variações de campanha:", err);
     
-    if (err.message === "GEMINI_KEY_MISSING") {
+    if (err.message?.includes("API Key") || err.message?.includes("GEMINI_KEY") || err.message?.includes("OPENAI")) {
       return res.status(400).json({ 
-        error: "GEMINI_KEY_MISSING",
-        message: "Configure a API Key do Gemini em Configurações → Integrações"
+        error: "AI_KEY_MISSING",
+        message: err.message || "API Key de IA não configurada. Configure em Configurações → Integrações"
       });
     }
     

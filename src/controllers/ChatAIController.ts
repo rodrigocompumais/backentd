@@ -26,8 +26,11 @@ export const analyze = async (
   } catch (err: any) {
     console.error("Erro ao analisar chat:", err);
     
-    if (err.message?.includes("GEMINI_KEY")) {
-      return res.status(400).json({ error: "GEMINI_KEY_MISSING" });
+    if (err.message?.includes("API Key") || err.message?.includes("GEMINI_KEY") || err.message?.includes("OPENAI")) {
+      return res.status(400).json({ 
+        error: "AI_KEY_MISSING",
+        message: err.message || "API Key de IA não configurada"
+      });
     }
     
     if (err instanceof AppError) {
@@ -64,8 +67,11 @@ export const audioSummary = async (
   } catch (err: any) {
     console.error("Erro ao resumir áudios:", err);
     
-    if (err.message?.includes("GEMINI_KEY")) {
-      return res.status(400).json({ error: "GEMINI_KEY_MISSING" });
+    if (err.message?.includes("API Key") || err.message?.includes("GEMINI_KEY") || err.message?.includes("OPENAI")) {
+      return res.status(400).json({ 
+        error: "AI_KEY_MISSING",
+        message: err.message || "API Key de IA não configurada"
+      });
     }
     
     if (err instanceof AppError) {
@@ -108,8 +114,11 @@ export const improve = async (
     console.error("[ChatAIController] Erro ao melhorar mensagem:", err);
     console.error("[ChatAIController] Stack trace:", err.stack);
     
-    if (err.message?.includes("GEMINI_KEY")) {
-      return res.status(400).json({ error: "GEMINI_KEY_MISSING" });
+    if (err.message?.includes("API Key") || err.message?.includes("GEMINI_KEY") || err.message?.includes("OPENAI")) {
+      return res.status(400).json({ 
+        error: "AI_KEY_MISSING",
+        message: err.message || "API Key de IA não configurada"
+      });
     }
     
     if (err instanceof AppError) {

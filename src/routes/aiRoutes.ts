@@ -1,28 +1,32 @@
 import express from "express";
 import isAuth from "../middleware/isAuth";
-import validateGeminiApiKey from "../middleware/validateGeminiApiKey";
+import validateAIApiKey from "../middleware/validateAIApiKey";
 import * as AiSummaryController from "../controllers/AiSummaryController";
 import * as ChatAIController from "../controllers/ChatAIController";
 import * as CampaignAIController from "../controllers/CampaignAIController";
 
 const routes = express.Router();
 
-// Rota de teste da API key não precisa de validação (ela mesma valida)
+// Rotas de teste da API key não precisam de validação (elas mesmas validam)
 routes.get("/ai/test-key", isAuth, AiSummaryController.testApiKey);
 
-// Todas as outras rotas de IA precisam validar a API key antes de acessar
-routes.post("/ai/summary/agent", isAuth, validateGeminiApiKey, AiSummaryController.agentSummary);
-routes.post("/ai/chat", isAuth, validateGeminiApiKey, AiSummaryController.chat);
+// Rotas de configuração de providers
+routes.get("/ai/providers/config", isAuth, AiSummaryController.getProviderConfigurations);
+routes.post("/ai/providers/config", isAuth, AiSummaryController.setProviderConfiguration);
+
+// Todas as outras rotas de IA precisam validar a API key antes de acessar (agora genérico - Gemini ou OpenAI)
+routes.post("/ai/summary/agent", isAuth, validateAIApiKey, AiSummaryController.agentSummary);
+routes.post("/ai/chat", isAuth, validateAIApiKey, AiSummaryController.chat);
 
 // Rotas para IA no chat
-routes.post("/chat-ai/analyze", isAuth, validateGeminiApiKey, ChatAIController.analyze);
-routes.post("/chat-ai/audio-summary", isAuth, validateGeminiApiKey, ChatAIController.audioSummary);
-routes.post("/chat-ai/improve", isAuth, validateGeminiApiKey, ChatAIController.improve);
-routes.post("/chat-ai/transcribe/:messageId", isAuth, validateGeminiApiKey, ChatAIController.transcribe);
+routes.post("/chat-ai/analyze", isAuth, validateAIApiKey, ChatAIController.analyze);
+routes.post("/chat-ai/audio-summary", isAuth, validateAIApiKey, ChatAIController.audioSummary);
+routes.post("/chat-ai/improve", isAuth, validateAIApiKey, ChatAIController.improve);
+routes.post("/chat-ai/transcribe/:messageId", isAuth, validateAIApiKey, ChatAIController.transcribe);
 
 // Rotas para IA em campanhas
-routes.post("/ai/campaign/initial", isAuth, validateGeminiApiKey, CampaignAIController.generateCampaignInitialMessage);
-routes.post("/ai/campaign/variations", isAuth, validateGeminiApiKey, CampaignAIController.generateCampaignVariations);
+routes.post("/ai/campaign/initial", isAuth, validateAIApiKey, CampaignAIController.generateCampaignInitialMessage);
+routes.post("/ai/campaign/variations", isAuth, validateAIApiKey, CampaignAIController.generateCampaignVariations);
 
 export default routes;
 

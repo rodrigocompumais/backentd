@@ -1,4 +1,3 @@
-import axios from "axios";
 import { Op } from "sequelize";
 import AppError from "../../errors/AppError";
 import Message from "../../models/Message";
@@ -6,9 +5,8 @@ import Ticket from "../../models/Ticket";
 import Contact from "../../models/Contact";
 import User from "../../models/User";
 import Queue from "../../models/Queue";
-import Setting from "../../models/Setting";
 import ShowTicketService from "../TicketServices/ShowTicketService";
-import { GEMINI_MODEL, GEMINI_BASE_URL, validateGeminiApiKey, interpretGeminiError } from "../../config/gemini";
+import { AIProviderSelector } from "./AIProviderSelector";
 
 interface AnalyzeChatParams {
   ticketId: number;
@@ -61,86 +59,7 @@ const formatDateTime = (date: Date | string): string => {
   });
 };
 
-const callGeminiGenerateContent = async (
-  apiKey: string,
-  prompt: string,
-  { temperature = 0.5, maxOutputTokens = 2048 }: { temperature?: number; maxOutputTokens?: number } = {}
-): Promise<string> => {
-  const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent`;
-
-  const payload = {
-    contents: [
-      {
-        parts: [
-          {
-            text: prompt
-          }
-        ]
-      }
-    ],
-    generationConfig: {
-      temperature,
-      topK: 40,
-      topP: 0.95,
-      maxOutputTokens
-    },
-    safetySettings: [
-      {
-        category: "HARM_CATEGORY_HARASSMENT",
-        threshold: "BLOCK_ONLY_HIGH"
-      },
-      {
-        category: "HARM_CATEGORY_HATE_SPEECH",
-        threshold: "BLOCK_ONLY_HIGH"
-      },
-      {
-        category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-        threshold: "BLOCK_ONLY_HIGH"
-      },
-      {
-        category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-        threshold: "BLOCK_ONLY_HIGH"
-      }
-    ]
-  };
-
-  const { data } = await axios.post(`${url}?key=${apiKey}`, payload, {
-    timeout: 90000
-  });
-
-  const candidates = data?.candidates || [];
-  
-  if (candidates.length === 0) {
-    console.error("❌ Nenhum candidato retornado pelo Gemini");
-    throw new AppError("Conteúdo bloqueado pelos filtros de segurança", 400);
-  }
-
-  const first = candidates[0];
-  
-  // Verificar finishReason
-  if (first?.finishReason && first.finishReason !== "STOP") {
-    console.warn(`⚠️ finishReason: ${first.finishReason}`);
-    
-    if (first.finishReason === "SAFETY") {
-      throw new AppError("Conteúdo bloqueado pelos filtros de segurança", 400);
-    }
-    
-    if (first.finishReason === "MAX_TOKENS") {
-      console.warn("⚠️ MAX_TOKENS atingido, resposta pode estar incompleta");
-      // Continua para tentar extrair o que foi gerado
-    }
-  }
-
-  const parts = first?.content?.parts || [];
-  const text = parts.map((p: any) => p.text).join("\n");
-
-  if (!text || text.trim() === "") {
-    console.error("❌ Resposta vazia do Gemini. finishReason:", first?.finishReason);
-    throw new AppError("A IA não retornou resposta válida", 500);
-  }
-
-  return text.trim();
-};
+// Função removida - agora usamos provider.generateText diretamente
 
 // Buscar últimas 20 mensagens do ticket
 const fetchLastMessages = async (
@@ -180,19 +99,8 @@ export const analyzeChatContext = async ({
   question,
   suggestResponse = false
 }: AnalyzeChatParams): Promise<AnalyzeChatResponse> => {
-  const geminiSetting = await Setting.findOne({
-    where: {
-      key: "geminiApiKey",
-      companyId
-    }
-  });
-
-  let apiKey: string;
-  try {
-    apiKey = validateGeminiApiKey(geminiSetting?.value);
-  } catch (err: any) {
-    throw new AppError(err.message || "GEMINI_KEY_MISSING", 400);
-  }
+  // Selecionar provider usando configuração automática (usa "chat" como tipo)
+  const provider = await AIProviderSelector.getProvider(companyId, "chat");
 
   const ticket = await ShowTicketService(ticketId, companyId);
   if (!ticket) {
@@ -264,56 +172,12 @@ ${suggestResponse
 }`}`;
 
   try {
-    const response = await axios.post(
-      `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
-      {
-        contents: [
-          {
-            parts: [
-              {
-                text: systemPrompt
-              }
-            ]
-          }
-        ],
-        generationConfig: {
-          temperature: 0.3,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 4096
-        },
-        safetySettings: [
-          {
-            category: "HARM_CATEGORY_HARASSMENT",
-            threshold: "BLOCK_ONLY_HIGH"
-          },
-          {
-            category: "HARM_CATEGORY_HATE_SPEECH",
-            threshold: "BLOCK_ONLY_HIGH"
-          },
-          {
-            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-            threshold: "BLOCK_ONLY_HIGH"
-          },
-          {
-            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-            threshold: "BLOCK_ONLY_HIGH"
-          }
-        ]
-      },
-      {
-        timeout: 90000
-      }
-    );
-
-    const candidates = response.data?.candidates || [];
-    const first = candidates[0];
-    
-    if (!first || first.finishReason === "MAX_TOKENS") {
-      console.warn("⚠️ Possível MAX_TOKENS em analyzeChatContext");
-    }
-
-    const responseText = first?.content?.parts[0]?.text || "";
+    // Usar o provider selecionado para gerar a análise
+    const responseText = await provider.generateText(systemPrompt, {
+      temperature: 0.3,
+      maxTokens: 4096,
+      topP: 0.95
+    });
     
     // Tentar extrair JSON da resposta
     let parsedResponse: any = {};
@@ -341,12 +205,10 @@ ${suggestResponse
       keyPoints: parsedResponse.keyPoints || []
     };
   } catch (error: any) {
-    const status = error.response?.status;
-    if (status) {
-      const errorMessage = interpretGeminiError(status, error.response?.data);
-      throw new AppError(errorMessage, status);
+    if (error instanceof AppError) {
+      throw error;
     }
-    throw new AppError("Erro ao processar análise do chat", 500);
+    throw new AppError(`Erro ao processar análise do chat: ${error.message || "Erro desconhecido"}`, 500);
   }
 };
 
@@ -355,19 +217,8 @@ export const summarizeUnreadAudios = async ({
   ticketId,
   companyId
 }: AudioSummaryParams): Promise<AudioSummaryResponse> => {
-  const geminiSetting = await Setting.findOne({
-    where: {
-      key: "geminiApiKey",
-      companyId
-    }
-  });
-
-  let apiKey: string;
-  try {
-    apiKey = validateGeminiApiKey(geminiSetting?.value);
-  } catch (err: any) {
-    throw new AppError(err.message || "GEMINI_KEY_MISSING", 400);
-  }
+  // Selecionar provider usando configuração automática (usa "chat" como tipo, mas poderia ter um específico)
+  const provider = await AIProviderSelector.getProvider(companyId, "chat");
 
   const ticket = await ShowTicketService(ticketId, companyId);
   if (!ticket) {
@@ -444,56 +295,12 @@ Retorne APENAS um JSON válido:
 }`;
 
   try {
-    const response = await axios.post(
-      `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
-      {
-        contents: [
-          {
-            parts: [
-              {
-                text: systemPrompt
-              }
-            ]
-          }
-        ],
-        generationConfig: {
-          temperature: 0.3,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 4096
-        },
-        safetySettings: [
-          {
-            category: "HARM_CATEGORY_HARASSMENT",
-            threshold: "BLOCK_ONLY_HIGH"
-          },
-          {
-            category: "HARM_CATEGORY_HATE_SPEECH",
-            threshold: "BLOCK_ONLY_HIGH"
-          },
-          {
-            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-            threshold: "BLOCK_ONLY_HIGH"
-          },
-          {
-            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-            threshold: "BLOCK_ONLY_HIGH"
-          }
-        ]
-      },
-      {
-        timeout: 90000
-      }
-    );
-
-    const candidates = response.data?.candidates || [];
-    const first = candidates[0];
-    
-    if (!first || first.finishReason === "MAX_TOKENS") {
-      console.warn("⚠️ Possível MAX_TOKENS em summarizeUnreadAudios");
-    }
-
-    const responseText = first?.content?.parts[0]?.text || "";
+    // Usar o provider selecionado para gerar o resumo
+    const responseText = await provider.generateText(systemPrompt, {
+      temperature: 0.3,
+      maxTokens: 4096,
+      topP: 0.95
+    });
     
     // Tentar extrair JSON da resposta
     let parsedResponse: any = {};
@@ -527,12 +334,10 @@ Retorne APENAS um JSON válido:
       transcripts
     };
   } catch (error: any) {
-    const status = error.response?.status;
-    if (status) {
-      const errorMessage = interpretGeminiError(status, error.response?.data);
-      throw new AppError(errorMessage, status);
+    if (error instanceof AppError) {
+      throw error;
     }
-    throw new AppError("Erro ao processar resumo de áudios", 500);
+    throw new AppError(`Erro ao processar resumo de áudios: ${error.message || "Erro desconhecido"}`, 500);
   }
 };
 
@@ -542,19 +347,8 @@ export const improveMessage = async ({
   companyId,
   draftText = ""
 }: ImproveMessageParams): Promise<ImproveMessageResponse> => {
-  const geminiSetting = await Setting.findOne({
-    where: {
-      key: "geminiApiKey",
-      companyId
-    }
-  });
-
-  let apiKey: string;
-  try {
-    apiKey = validateGeminiApiKey(geminiSetting?.value);
-  } catch (err: any) {
-    throw new AppError(err.message || "GEMINI_KEY_MISSING", 400);
-  }
+  // Selecionar provider usando configuração automática
+  const provider = await AIProviderSelector.getProvider(companyId, "messageImprovement");
 
   const ticket = await ShowTicketService(ticketId, companyId);
   if (!ticket) {
@@ -622,13 +416,13 @@ IMPORTANTE: Retorne APENAS o texto melhorado, sem explicações ou comentários 
 IMPORTANTE: Retorne APENAS o texto da resposta sugerida, sem explicações ou comentários adicionais.`}`;
 
   try {
-    console.log(`📤 Enviando requisição para Gemini (${GEMINI_MODEL}) - Melhorar mensagem...`);
-    const textResponse = await callGeminiGenerateContent(apiKey, systemPrompt, {
+    console.log(`📤 Enviando requisição para ${provider.name} - Melhorar mensagem...`);
+    const textResponse = await provider.generateText(systemPrompt, {
       temperature: draftText.trim() ? 0.4 : 0.6,
-      maxOutputTokens: 2048
+      maxTokens: 2048
     });
 
-    console.log(`✅ Texto melhorado gerado com sucesso (${textResponse.length} caracteres)`);
+    console.log(`✅ Texto melhorado gerado com sucesso usando ${provider.name} (${textResponse.length} caracteres)`);
 
     const cleanedText = textResponse
       .replace(/```[\s\S]*?```/g, "")
@@ -641,23 +435,15 @@ IMPORTANTE: Retorne APENAS o texto da resposta sugerida, sem explicações ou co
       originalText: draftText.trim() || undefined
     };
   } catch (err: any) {
-    const status = err.response?.status;
-    const errorData = err.response?.data;
-
-    console.error("❌ Erro ao chamar Gemini API (Melhorar Mensagem):", {
-      status,
-      data: errorData,
-      message: err.message,
-      model: GEMINI_MODEL,
-      url: err.config?.url
+    console.error(`❌ Erro ao melhorar mensagem com ${provider.name}:`, {
+      message: err.message
     });
 
-    if (status) {
-      const userMessage = interpretGeminiError(status, errorData);
-      throw new AppError(userMessage, status === 429 ? 429 : status >= 400 && status < 500 ? 400 : 500);
+    if (err instanceof AppError) {
+      throw err;
     }
 
-    throw new AppError(`Erro ao melhorar mensagem: ${err.message || "Erro desconhecido ao comunicar com a API do Gemini"}`, 500);
+    throw new AppError(`Erro ao melhorar mensagem: ${err.message || "Erro desconhecido"}`, 500);
   }
 };
 

@@ -33,6 +33,9 @@ const CreatePromptService = async (promptData: PromptData): Promise<Prompt> => {
         throw new AppError("companyId inválido", 400);
     }
 
+    // Desestruturar dados do prompt
+    const { name, prompt, queueId, maxMessages, provider = "openai" } = promptData;
+
     // Garantir que queueId e maxMessages sejam números
     const queueIdNumber = queueId ? (typeof queueId === "string" ? parseInt(queueId, 10) : queueId) : undefined;
     const maxMessagesNumber = maxMessages ? (typeof maxMessages === "string" ? parseInt(maxMessages, 10) : maxMessages) : 10;
@@ -40,8 +43,6 @@ const CreatePromptService = async (promptData: PromptData): Promise<Prompt> => {
     if (!queueIdNumber || isNaN(queueIdNumber)) {
         throw new AppError("queueId é obrigatório e deve ser um número válido", 400);
     }
-
-    const { name, prompt, provider = "openai" } = promptData;
 
     // Validação baseada no provider
     const promptSchema = Yup.object().shape({

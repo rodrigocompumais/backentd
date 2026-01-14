@@ -1310,18 +1310,84 @@ const handleOpenAi = async (
 
   const bodyMessage = getBodyMessage(msg);
 
-  if (!bodyMessage) return;
-
-  let { prompt } = await ShowWhatsAppService(wbot.id, ticket.companyId);
-
-  if (openAiSettings)
-    prompt = openAiSettings;
-
-  if (!prompt && !isNil(ticket?.queue?.prompt)) {
-    prompt = ticket.queue.prompt;
+  if (!bodyMessage) {
+    logger.debug(`handleOpenAi: Sem bodyMessage para ticket ${ticket.id}`);
+    return;
   }
 
-  if (!prompt) return;
+  let prompt = null;
+
+  // Primeiro, tentar usar openAiSettings se fornecido
+  if (openAiSettings) {
+    prompt = openAiSettings;
+    logger.info(`handleOpenAi: Usando openAiSettings fornecido`);
+  }
+
+  // Se não, buscar do WhatsApp
+  if (!prompt) {
+    try {
+      const whatsappData = await ShowWhatsAppService(wbot.id, ticket.companyId);
+      prompt = whatsappData.prompt;
+      if (prompt) {
+        logger.info(`handleOpenAi: Prompt encontrado no WhatsApp - ${prompt.name}, Provider: ${prompt.provider}`);
+      }
+    } catch (err: any) {
+      logger.error(`handleOpenAi: Erro ao buscar WhatsApp: ${err.message}`);
+    }
+  }
+
+  // Se não encontrou no WhatsApp, tentar buscar pelo promptId do ticket
+  if (!prompt && ticket.promptId) {
+    try {
+      const ticketPrompt = await ShowPromptService({
+        promptId: ticket.promptId,
+        companyId: ticket.companyId
+      });
+      if (ticketPrompt) {
+        prompt = ticketPrompt;
+        logger.info(`handleOpenAi: Prompt encontrado no ticket - ${prompt.name}, Provider: ${prompt.provider}`);
+      }
+    } catch (err: any) {
+      logger.error(`handleOpenAi: Erro ao buscar prompt do ticket: ${err.message}`);
+    }
+  }
+
+  // Se ainda não encontrou, tentar buscar da fila
+  if (!prompt && !isNil(ticket?.queue?.prompt)) {
+    prompt = ticket.queue.prompt;
+    logger.info(`handleOpenAi: Prompt encontrado na fila - ${prompt.name}, Provider: ${prompt.provider}`);
+  }
+
+  // Se ainda não encontrou, tentar buscar pelo promptId do WhatsApp diretamente
+  if (!prompt && wbot.id) {
+    try {
+      const whatsapp = await ShowWhatsAppService(wbot.id, ticket.companyId);
+      if (whatsapp?.promptId) {
+        const whatsappPrompt = await ShowPromptService({
+          promptId: whatsapp.promptId,
+          companyId: ticket.companyId
+        });
+        if (whatsappPrompt) {
+          prompt = whatsappPrompt;
+          logger.info(`handleOpenAi: Prompt encontrado pelo promptId do WhatsApp - ${prompt.name}, Provider: ${prompt.provider}`);
+        }
+      }
+    } catch (err: any) {
+      logger.error(`handleOpenAi: Erro ao buscar prompt pelo promptId do WhatsApp: ${err.message}`);
+    }
+  }
+
+  if (!prompt) {
+    logger.warn(`⚠️ handleOpenAi: Prompt não encontrado - Ticket: ${ticket.id}, WhatsApp: ${wbot.id}, Empresa: ${ticket.companyId}`);
+    return;
+  }
+
+  // Verificar se o provider é OpenAI (ou não especificado, default para OpenAI)
+  if (prompt.provider && prompt.provider !== "openai" && prompt.provider !== "gemini") {
+    logger.warn(`⚠️ handleOpenAi: Provider desconhecido '${prompt.provider}', usando OpenAI como padrão`);
+  }
+
+  logger.info(`✅ handleOpenAi: Iniciando bot - Ticket: ${ticket.id}, Prompt: ${prompt.name || 'N/A'}, Provider: ${prompt.provider || 'openai'}`);
 
   if (msg.messageStubType) return;
 
@@ -3718,14 +3784,27 @@ const handleMessage = async (
           companyId: ticket.companyId
         });
 
+        logger.info(`🤖 Bot de IA detectado - Ticket: ${ticket.id}, Prompt: ${prompt.name}, Provider: ${prompt.provider}`);
+
         if (prompt.provider === "gemini") {
           await handleGeminiInListener(msg, wbot, ticket, contact, mediaSent);
         } else {
+          // OpenAI ou qualquer outro provider (default para OpenAI)
           await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
         }
-      } catch (err) {
+      } catch (err: any) {
+        logger.error(`Erro ao buscar/iniciar prompt: ${err.message}`, {
+          promptId: whatsapp.promptId,
+          ticketId: ticket.id,
+          companyId: ticket.companyId,
+          error: err
+        });
         // Se não encontrar prompt, tentar OpenAI por compatibilidade
-        await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+        try {
+          await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+        } catch (openAiErr: any) {
+          logger.error(`Erro ao iniciar OpenAI como fallback: ${openAiErr.message}`);
+        }
       }
     }
 

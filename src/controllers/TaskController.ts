@@ -80,10 +80,22 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
   });
 
   const io = getIO();
-  io.to(`company-${companyId}-mainchannel`).emit(`company-${companyId}-task`, {
-    action: "create",
-    task
-  });
+  
+  // Enviar notificação apenas para o usuário atribuído (se houver)
+  if (task.assignedToId) {
+    io.to(`user-${task.assignedToId}`).emit(`company-${companyId}-task`, {
+      action: "create",
+      task
+    });
+  }
+  
+  // Também enviar para o criador se for diferente do atribuído
+  if (task.userId && task.userId !== task.assignedToId) {
+    io.to(`user-${task.userId}`).emit(`company-${companyId}-task`, {
+      action: "create",
+      task
+    });
+  }
 
   return res.status(201).json(task);
 };
@@ -120,6 +132,10 @@ export const update = async (req: Request, res: Response): Promise<Response> => 
     throw new AppError(err.message);
   }
 
+  // Buscar tarefa antes de atualizar para comparar atribuição anterior
+  const oldTask = await ShowTaskService(taskId, companyId);
+  const oldAssignedToId = oldTask.assignedToId;
+
   const task = await UpdateTaskService({
     taskId,
     taskData,
@@ -127,10 +143,39 @@ export const update = async (req: Request, res: Response): Promise<Response> => 
   });
 
   const io = getIO();
-  io.to(`company-${companyId}-mainchannel`).emit(`company-${companyId}-task`, {
-    action: "update",
-    task
-  });
+  
+  // Se a atribuição mudou, notificar o novo usuário atribuído
+  if (taskData.assignedToId !== undefined && taskData.assignedToId !== oldAssignedToId) {
+    if (taskData.assignedToId) {
+      io.to(`user-${taskData.assignedToId}`).emit(`company-${companyId}-task`, {
+        action: "update",
+        task
+      });
+    }
+    // Se havia um usuário atribuído anteriormente e mudou, notificar o antigo também
+    if (oldAssignedToId && oldAssignedToId !== taskData.assignedToId) {
+      io.to(`user-${oldAssignedToId}`).emit(`company-${companyId}-task`, {
+        action: "update",
+        task
+      });
+    }
+  } else {
+    // Se a atribuição não mudou, enviar apenas para o usuário atribuído atual
+    if (task.assignedToId) {
+      io.to(`user-${task.assignedToId}`).emit(`company-${companyId}-task`, {
+        action: "update",
+        task
+      });
+    }
+  }
+  
+  // Também enviar para o criador se for diferente do atribuído
+  if (task.userId && task.userId !== task.assignedToId) {
+    io.to(`user-${task.userId}`).emit(`company-${companyId}-task`, {
+      action: "update",
+      task
+    });
+  }
 
   return res.json(task);
 };
@@ -139,13 +184,28 @@ export const remove = async (req: Request, res: Response): Promise<Response> => 
   const { companyId } = req.user;
   const { taskId } = req.params;
 
+  // Buscar a tarefa antes de deletar para obter informações do usuário atribuído
+  const task = await ShowTaskService(taskId, companyId);
+  
   await DeleteTaskService(taskId, companyId);
 
   const io = getIO();
-  io.to(`company-${companyId}-mainchannel`).emit(`company-${companyId}-task`, {
-    action: "delete",
-    taskId
-  });
+  
+  // Enviar notificação apenas para o usuário atribuído (se houver)
+  if (task.assignedToId) {
+    io.to(`user-${task.assignedToId}`).emit(`company-${companyId}-task`, {
+      action: "delete",
+      taskId
+    });
+  }
+  
+  // Também enviar para o criador se for diferente do atribuído
+  if (task.userId && task.userId !== task.assignedToId) {
+    io.to(`user-${task.userId}`).emit(`company-${companyId}-task`, {
+      action: "delete",
+      taskId
+    });
+  }
 
   return res.status(200).json({ message: "Tarefa excluída com sucesso" });
 };

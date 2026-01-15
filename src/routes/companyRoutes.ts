@@ -16,6 +16,8 @@ companyRoutes.delete("/companies/:id", isAuth, isSuper, CompanyController.remove
 companyRoutes.post("/companies/cadastro", CompanyController.store);
 companyRoutes.post("/companies/create-free-account", CompanyController.createFreeAccount);
 companyRoutes.post("/companies/create-payment-preference", CompanyController.createPaymentPreference);
+companyRoutes.get("/companies/mercado-pago/public-key", CompanyController.getMercadoPagoPublicKey);
+companyRoutes.post("/companies/create-with-transparent-checkout", CompanyController.createCompanyWithTransparentCheckout);
 
 // Rota para listar o plano da empresa
 companyRoutes.get("/companies/listPlan/:id", isAuth, CompanyController.listPlan);

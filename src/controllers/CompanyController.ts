@@ -21,6 +21,7 @@ import { createPaymentIntent } from "../services/PaymentService/MercadoPagoServi
 import Plan from "../models/Plan";
 import { hash } from "bcryptjs";
 import moment from "moment";
+import CreateCompanyWithPaymentService from "../services/CompanyService/CreateCompanyWithPaymentService";
 
 type IndexQuery = {
   searchParam: string;
@@ -381,6 +382,151 @@ export const createPaymentPreference = async (req: Request, res: Response): Prom
     }
     
     const errorMessage = error.message || "Erro ao criar preferência de pagamento. Por favor, tente novamente.";
+    throw new AppError(errorMessage, error.statusCode || 400);
+  }
+};
+
+export const getMercadoPagoPublicKey = async (req: Request, res: Response): Promise<Response> => {
+  try {
+    const publicKey = process.env.MERCADOPAGO_PUBLIC_KEY;
+    
+    if (!publicKey) {
+      throw new AppError("Public key do Mercado Pago não configurada", 500);
+    }
+
+    return res.status(200).json({
+      publicKey,
+    });
+  } catch (error: any) {
+    logger.error("Erro ao obter public key:", error);
+    
+    if (error instanceof AppError) {
+      throw error;
+    }
+    
+    throw new AppError("Erro ao obter chave pública do Mercado Pago", 500);
+  }
+};
+
+export const createCompanyWithTransparentCheckout = async (req: Request, res: Response): Promise<Response> => {
+  logger.info("=== createCompanyWithTransparentCheckout chamado ===");
+  logger.info("Body recebido:", {
+    companyName: req.body.companyData?.name,
+    companyEmail: req.body.companyData?.email,
+    planId: req.body.companyData?.planId,
+  });
+
+  const schema = Yup.object().shape({
+    companyData: Yup.object().shape({
+      name: Yup.string().required("Nome da empresa é obrigatório"),
+      email: Yup.string().email("Email inválido").required("Email é obrigatório"),
+      phone: Yup.string().required("Telefone é obrigatório"),
+      password: Yup.string().required("Senha é obrigatória"),
+      planId: Yup.number().required("Plano é obrigatório"),
+      recurrence: Yup.string().optional(),
+      campaignsEnabled: Yup.boolean().optional(),
+    }),
+    paymentData: Yup.object().shape({
+      token: Yup.string().required("Token do cartão é obrigatório"),
+      paymentMethodId: Yup.string().required("Método de pagamento é obrigatório"),
+      installments: Yup.number().required("Número de parcelas é obrigatório"),
+      transactionAmount: Yup.number().required("Valor da transação é obrigatório"),
+      identificationType: Yup.string().required("Tipo de identificação é obrigatório"),
+      identificationNumber: Yup.string().required("Número de identificação é obrigatório"),
+      payer: Yup.object().shape({
+        email: Yup.string().email("Email inválido").required("Email é obrigatório"),
+        firstName: Yup.string().optional(),
+        lastName: Yup.string().optional(),
+      }),
+      issuerId: Yup.string().optional(),
+    }),
+  });
+
+  try {
+    await schema.validate(req.body, { abortEarly: false });
+    logger.info("✓ Validação do schema passou");
+  } catch (err: any) {
+    logger.error("✗ Erro na validação do schema:", {
+      error: err.message,
+      errors: err.inner,
+    });
+    
+    if (err.inner && err.inner.length > 0) {
+      const errors = err.inner.map((e: any) => `${e.path}: ${e.message}`).join(", ");
+      logger.error("Erros detalhados:", errors);
+      throw new AppError(`Erro de validação: ${errors}`, 400);
+    }
+    
+    throw new AppError(err.message || "Erro de validação", 400);
+  }
+
+  try {
+    // Buscar plano para validar valor
+    const plan = await Plan.findByPk(req.body.companyData.planId);
+    if (!plan) {
+      throw new AppError("Plano não encontrado", 404);
+    }
+
+    // Validar se o valor corresponde ao plano
+    if (req.body.paymentData.transactionAmount !== plan.value) {
+      throw new AppError("Valor do pagamento não corresponde ao valor do plano", 400);
+    }
+
+    // Processar pagamento e criar empresa
+    const result = await CreateCompanyWithPaymentService({
+      companyData: {
+        name: req.body.companyData.name,
+        email: req.body.companyData.email,
+        phone: req.body.companyData.phone,
+        password: req.body.companyData.password,
+        planId: req.body.companyData.planId,
+        recurrence: req.body.companyData.recurrence || "MENSAL",
+        campaignsEnabled: req.body.companyData.campaignsEnabled ?? true,
+      },
+      paymentData: {
+        ...req.body.paymentData,
+        description: `Pagamento plano - ${plan.name}`,
+      },
+    });
+
+    logger.info("✓ Empresa criada com pagamento processado:", {
+      companyId: result.company.id,
+      paymentId: result.payment.id,
+      paymentStatus: result.payment.status,
+    });
+
+    return res.status(200).json({
+      success: true,
+      company: {
+        id: result.company.id,
+        name: result.company.name,
+        email: result.company.email,
+      },
+      payment: {
+        id: result.payment.id,
+        status: result.payment.status,
+        statusDetail: result.payment.statusDetail,
+      },
+      invoice: {
+        id: result.invoice.id,
+        status: result.invoice.status,
+      },
+      message: result.payment.status === "approved" 
+        ? "Conta criada e pagamento aprovado com sucesso!" 
+        : "Conta criada. Aguardando confirmação do pagamento.",
+    });
+  } catch (error: any) {
+    logger.error("✗ Erro ao criar empresa com checkout transparente:", {
+      error: error.message,
+      companyName: req.body?.companyData?.name,
+      companyEmail: req.body?.companyData?.email,
+    });
+    
+    if (error instanceof AppError) {
+      throw error;
+    }
+    
+    const errorMessage = error.message || "Erro ao processar pagamento. Por favor, tente novamente.";
     throw new AppError(errorMessage, error.statusCode || 400);
   }
 };

@@ -115,6 +115,11 @@ export const webhookController = async (
     }
 
     // Novo fluxo: criar empresa apenas quando pagamento for aprovado
+    // Nota: Para assinaturas recorrentes futuras:
+    // - Quando dueDate se aproximar, sistema interno criará nova preferência
+    // - Webhook será chamado novamente com status approved
+    // - Lógica abaixo verificará se empresa existe e atualizará dueDate
+    // - O campo recurrence no metadata define o período (MENSAL, ANUAL, etc.)
     if (webhookData.status === "approved" && companyName && companyEmail) {
       // Verificar se empresa já existe
       const existingCompany = await Company.findOne({
@@ -128,11 +133,25 @@ export const webhookController = async (
 
       if (existingCompany) {
         logger.warn(`Empresa já existe: ${companyEmail}`);
-        // Atualizar empresa existente
-        const newDueDate = moment().add(30, "days").format();
+        // Atualizar empresa existente (renovação de assinatura)
+        // Calcular novo dueDate baseado na recorrência
+        const recurrence = metadata.recurrence || "MENSAL";
+        let daysToAdd = 30; // Padrão MENSAL
+        if (recurrence === "ANUAL") {
+          daysToAdd = 365;
+        } else if (recurrence === "SEMESTRAL") {
+          daysToAdd = 180;
+        } else if (recurrence === "TRIMESTRAL") {
+          daysToAdd = 90;
+        } else if (recurrence === "MENSAL") {
+          daysToAdd = 30;
+        }
+        
+        const newDueDate = moment().add(daysToAdd, "days").format();
         await existingCompany.update({
           status: true,
           dueDate: newDueDate,
+          recurrence: recurrence,
         });
 
         const io = getIO();
@@ -155,6 +174,19 @@ export const webhookController = async (
         planId,
       });
 
+      // Calcular dueDate baseado na recorrência
+      const recurrenceType = recurrence || "MENSAL";
+      let daysToAdd = 30; // Padrão MENSAL
+      if (recurrenceType === "ANUAL") {
+        daysToAdd = 365;
+      } else if (recurrenceType === "SEMESTRAL") {
+        daysToAdd = 180;
+      } else if (recurrenceType === "TRIMESTRAL") {
+        daysToAdd = 90;
+      } else if (recurrenceType === "MENSAL") {
+        daysToAdd = 30;
+      }
+
       // Nota: CreateCompanyService faz hash da senha internamente
       // Mas como já temos o hash no metadata, precisamos passar uma senha temporária
       // e depois atualizar o User com o hash correto
@@ -165,8 +197,8 @@ export const webhookController = async (
         password: "temp_password_will_be_updated", // Será atualizado abaixo
         planId: planId ? parseInt(planId.toString()) : undefined,
         status: true, // Ativar imediatamente
-        dueDate: moment().add(30, "days").format(),
-        recurrence: recurrence || "MENSAL",
+        dueDate: moment().add(daysToAdd, "days").format(),
+        recurrence: recurrenceType,
         campaignsEnabled: campaignsEnabled !== undefined ? campaignsEnabled : true,
       });
 
@@ -176,13 +208,13 @@ export const webhookController = async (
         await user.update({ passwordHash: companyPasswordHash });
       }
 
-      // Criar invoice
+      // Criar invoice com dueDate baseado na recorrência
       const invoice = await CreateInvoiceService({
         companyId: company.id,
-        detail: `Pagamento plano - ${company.name}`,
+        detail: `Pagamento plano - ${company.name} (${recurrenceType})`,
         value: webhookData.transactionAmount || 0,
         status: "paid",
-        dueDate: moment().add(30, "days").format(),
+        dueDate: moment().add(daysToAdd, "days").format(),
       });
 
       logger.info("Empresa criada via webhook:", {

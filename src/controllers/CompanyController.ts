@@ -1,5 +1,6 @@
 import * as Yup from "yup";
 import { Request, Response } from "express";
+import { Op } from "sequelize";
 // import { getIO } from "../libs/socket";
 import AppError from "../errors/AppError";
 import Company from "../models/Company";
@@ -280,12 +281,31 @@ export const createPaymentPreference = async (req: Request, res: Response): Prom
   });
 
   const schema = Yup.object().shape({
-    name: Yup.string().required("Nome da empresa é obrigatório"),
-    email: Yup.string().email("Email inválido").required("Email é obrigatório"),
-    phone: Yup.string().required("Telefone é obrigatório"),
-    password: Yup.string().required("Senha é obrigatória"),
-    planId: Yup.number().required("Plano é obrigatório"),
-    recurrence: Yup.string().optional(),
+    name: Yup.string()
+      .min(2, "Nome da empresa deve ter no mínimo 2 caracteres")
+      .max(100, "Nome da empresa deve ter no máximo 100 caracteres")
+      .required("Nome da empresa é obrigatório"),
+    email: Yup.string()
+      .email("Email inválido")
+      .required("Email é obrigatório")
+      .matches(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "Formato de email inválido"),
+    phone: Yup.string()
+      .required("Telefone é obrigatório")
+      .matches(/^[\d\s\(\)\-\+]+$/, "Formato de telefone inválido")
+      .test("min-length", "Telefone deve ter no mínimo 10 dígitos", (value) => {
+        return value ? value.replace(/\D/g, "").length >= 10 : false;
+      }),
+    password: Yup.string()
+      .min(5, "Senha deve ter no mínimo 5 caracteres")
+      .max(50, "Senha deve ter no máximo 50 caracteres")
+      .required("Senha é obrigatória"),
+    planId: Yup.number()
+      .required("Plano é obrigatório")
+      .integer("ID do plano deve ser um número inteiro")
+      .positive("ID do plano deve ser um número positivo"),
+    recurrence: Yup.string()
+      .optional()
+      .oneOf(["MENSAL", "ANUAL", "TRIMESTRAL", "SEMESTRAL"], "Recorrência inválida"),
   });
 
   try {
@@ -307,15 +327,43 @@ export const createPaymentPreference = async (req: Request, res: Response): Prom
   }
 
   try {
+    // Validar se empresa com mesmo email/nome já existe
+    const existingCompany = await Company.findOne({
+      where: {
+        [Op.or]: [
+          { email: req.body.email },
+          { name: req.body.name }
+        ]
+      }
+    });
+
+    if (existingCompany) {
+      logger.warn("Tentativa de criar empresa com email/nome já existente:", {
+        email: req.body.email,
+        name: req.body.name,
+      });
+      throw new AppError("Já existe uma empresa com este email ou nome. Por favor, use outro email ou nome.", 400);
+    }
+
     // Buscar plano para obter valor
     const plan = await Plan.findByPk(req.body.planId);
     if (!plan) {
-      throw new AppError("Plano não encontrado", 404);
+      throw new AppError("Plano não encontrado. Verifique se o plano existe.", 404);
+    }
+
+    // Verificar se o plano está ativo (se houver campo status)
+    if (plan.status !== undefined && plan.status === false) {
+      throw new AppError("Plano selecionado não está disponível.", 400);
     }
 
     // Verificar se o plano é gratuito - se for, redirecionar para criação gratuita
     if (plan.value === 0 || plan.value === null) {
       throw new AppError("Para planos gratuitos, use o endpoint de criação gratuita.", 400);
+    }
+
+    // Validar valor do plano
+    if (plan.value < 0) {
+      throw new AppError("Valor do plano inválido.", 400);
     }
 
     // Hash da senha antes de salvar no metadata

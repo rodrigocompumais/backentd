@@ -375,6 +375,13 @@ export const createPaymentIntent = async (
       expires: true,
       expiration_date_from: new Date().toISOString(),
       expiration_date_to: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 horas
+      // Nota: Assinaturas recorrentes no Mercado Pago Checkout Pro
+      // O Checkout Pro não cria assinaturas recorrentes automaticamente.
+      // A recorrência será gerenciada via sistema interno que:
+      // 1. Monitora dueDate das empresas
+      // 2. Cria nova preferência quando próximo do vencimento
+      // 3. Envia link de pagamento para renovação via webhook ou processo agendado
+      // O campo recurrence no metadata será usado para definir o período de renovação
     };
 
     // Adicionar payer se fornecido

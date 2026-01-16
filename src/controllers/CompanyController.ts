@@ -351,11 +351,6 @@ export const createPaymentPreference = async (req: Request, res: Response): Prom
       throw new AppError("Plano não encontrado. Verifique se o plano existe.", 404);
     }
 
-    // Verificar se o plano está ativo (se houver campo status)
-    if (plan.status !== undefined && plan.status === false) {
-      throw new AppError("Plano selecionado não está disponível.", 400);
-    }
-
     // Verificar se o plano é gratuito - se for, redirecionar para criação gratuita
     if (plan.value === 0 || plan.value === null) {
       throw new AppError("Para planos gratuitos, use o endpoint de criação gratuita.", 400);

@@ -9,6 +9,7 @@ import {
 } from "../services/PaymentService/MercadoPagoService";
 import { logger } from "../utils/logger";
 import Company from "../models/Company";
+import Plan from "../models/Plan";
 import Invoices from "../models/Invoices";
 import { getIO } from "../libs/socket";
 import moment from "moment";
@@ -57,6 +58,14 @@ export const webhookController = async (
       // if (!validateWebhookSignature(signature, req.body)) {
       //   throw new AppError("Assinatura inválida", 401);
       // }
+    }
+
+    // Verificar tipo de webhook (payment, subscription_authorized_payment, subscription_preapproval, etc)
+    const webhookType = req.body.type || req.body.topic || "payment";
+    
+    // Handler para Preapproval/Subscriptions
+    if (webhookType === "subscription_authorized_payment" || webhookType === "subscription_preapproval") {
+      return await handlePreapprovalWebhook(req, res);
     }
 
     const webhookData = await processWebhook(req.body);
@@ -132,10 +141,13 @@ export const webhookController = async (
       });
 
       if (existingCompany) {
-        logger.warn(`Empresa já existe: ${companyEmail}`);
-        // Atualizar empresa existente (renovação de assinatura)
+        logger.info(`Renovação de assinatura detectada para empresa existente: ${companyEmail}`);
+        
+        // Verificar se é renovação (tem isRenewal no metadata) ou primeiro pagamento
+        const isRenewal = metadata.isRenewal === true;
+        
         // Calcular novo dueDate baseado na recorrência
-        const recurrence = metadata.recurrence || "MENSAL";
+        const recurrence = metadata.recurrence || existingCompany.recurrence || "MENSAL";
         let daysToAdd = 30; // Padrão MENSAL
         if (recurrence === "ANUAL") {
           daysToAdd = 365;
@@ -147,22 +159,50 @@ export const webhookController = async (
           daysToAdd = 30;
         }
         
-        const newDueDate = moment().add(daysToAdd, "days").format();
+        // Se for renovação, adicionar ao dueDate atual, senão usar data atual
+        let newDueDate: string;
+        if (isRenewal && existingCompany.dueDate) {
+          // Renovação: adicionar período ao dueDate atual
+          newDueDate = moment(existingCompany.dueDate).add(daysToAdd, "days").format();
+        } else {
+          // Primeiro pagamento ou renovação sem dueDate: usar data atual + período
+          newDueDate = moment().add(daysToAdd, "days").format();
+        }
+        
         await existingCompany.update({
           status: true,
           dueDate: newDueDate,
           recurrence: recurrence,
+          lastRenewalAttempt: new Date(),
+          renewalAttempts: 0, // Resetar tentativas em caso de sucesso
         });
+
+        // Criar invoice de renovação se for renovação
+        if (isRenewal) {
+          await CreateInvoiceService({
+            companyId: existingCompany.id,
+            detail: `Renovação assinatura - ${existingCompany.plan?.name || "Plano"} (${recurrence})`,
+            value: webhookData.transactionAmount || existingCompany.plan?.value || 0,
+            status: "paid",
+            dueDate: newDueDate,
+          });
+        }
 
         const io = getIO();
         io.to(`company-${existingCompany.id}-mainchannel`).emit(
           `company-${existingCompany.id}-payment`,
           {
-            action: "approved",
+            action: isRenewal ? "renewed" : "approved",
             company: await existingCompany.reload(),
             payment: webhookData,
           }
         );
+
+        logger.info(`Renovação processada para empresa ${existingCompany.id}:`, {
+          isRenewal,
+          newDueDate,
+          recurrence,
+        });
 
         return res.status(200).json({ received: true, data: webhookData });
       }
@@ -221,6 +261,7 @@ export const webhookController = async (
         companyId: company.id,
         invoiceId: invoice.id,
         paymentId: webhookData.id,
+        companyEmail: company.email,
       });
 
       // Emitir evento via Socket.IO
@@ -243,6 +284,138 @@ export const webhookController = async (
     return res.status(200).json({ received: true, data: webhookData });
   } catch (error: any) {
     logger.error("Erro no webhookController:", error);
+    // Retornar 200 mesmo em caso de erro para o MP não reenviar
+    return res.status(200).json({ received: true, error: error.message });
+  }
+};
+
+/**
+ * Handler para webhooks de Preapproval/Subscriptions do Mercado Pago
+ */
+const handlePreapprovalWebhook = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  try {
+    const webhookData = req.body;
+    const webhookType = webhookData.type || webhookData.topic;
+
+    logger.info("Webhook de Preapproval recebido:", {
+      type: webhookType,
+      data_id: webhookData.data?.id,
+      action: webhookData.action,
+    });
+
+    // subscription_authorized_payment - Pagamento autorizado de uma assinatura
+    if (webhookType === "subscription_authorized_payment" || webhookData.action === "payment.created") {
+      const paymentData = webhookData.data;
+      
+      if (!paymentData || !paymentData.id) {
+        logger.warn("Webhook de pagamento autorizado sem dados válidos");
+        return res.status(200).json({ received: true });
+      }
+
+      // Buscar empresa pelo external_reference ou metadata
+      const externalReference = paymentData.external_reference || paymentData.metadata?.external_reference;
+      
+      if (externalReference && externalReference.includes("company_")) {
+        const companyIdMatch = externalReference.match(/company_(\d+)/);
+        if (companyIdMatch) {
+          const companyId = parseInt(companyIdMatch[1]);
+          const company = await Company.findByPk(companyId, {
+            include: [{ model: Plan }],
+          });
+
+          if (company && company.plan) {
+            // Calcular novo dueDate baseado na recorrência
+            const recurrence = company.recurrence || "MENSAL";
+            let daysToAdd = 30;
+            if (recurrence === "ANUAL") {
+              daysToAdd = 365;
+            } else if (recurrence === "SEMESTRAL") {
+              daysToAdd = 180;
+            } else if (recurrence === "TRIMESTRAL") {
+              daysToAdd = 90;
+            } else if (recurrence === "MENSAL") {
+              daysToAdd = 30;
+            }
+
+            const newDueDate = moment().add(daysToAdd, "days").format();
+
+            // Atualizar empresa
+            await company.update({
+              dueDate: newDueDate,
+              status: paymentData.status === "approved",
+              lastRenewalAttempt: new Date(),
+              renewalAttempts: 0,
+            });
+
+            // Criar invoice de renovação
+            await CreateInvoiceService({
+              companyId: company.id,
+              detail: `Renovação assinatura - ${company.plan.name} (${recurrence})`,
+              value: paymentData.transaction_amount || company.plan.value,
+              status: paymentData.status === "approved" ? "paid" : "pending",
+              dueDate: newDueDate,
+            });
+
+            logger.info(`Renovação via Preapproval processada para empresa ${companyId}:`, {
+              paymentId: paymentData.id,
+              status: paymentData.status,
+              newDueDate,
+            });
+
+            // Emitir evento via Socket.IO
+            const io = getIO();
+            io.to(`company-${company.id}-mainchannel`).emit(
+              `company-${company.id}-payment`,
+              {
+                action: "renewed",
+                company: await company.reload(),
+                payment: paymentData,
+              }
+            );
+          }
+        }
+      }
+    }
+
+    // subscription_preapproval - Mudanças no Preapproval (criação, atualização, cancelamento)
+    if (webhookType === "subscription_preapproval") {
+      const preapprovalData = webhookData.data;
+      
+      if (!preapprovalData || !preapprovalData.id) {
+        logger.warn("Webhook de Preapproval sem dados válidos");
+        return res.status(200).json({ received: true });
+      }
+
+      // Buscar empresa pelo preapprovalId
+      const company = await Company.findOne({
+        where: {
+          preapprovalId: preapprovalData.id,
+        },
+        include: [{ model: Plan }],
+      });
+
+      if (company) {
+        // Atualizar status baseado no Preapproval
+        if (preapprovalData.status === "cancelled" || preapprovalData.status === "paused") {
+          await company.update({
+            autoRenew: false,
+          });
+          logger.info(`Preapproval cancelado/pausado para empresa ${company.id}`);
+        } else if (preapprovalData.status === "authorized") {
+          await company.update({
+            autoRenew: true,
+          });
+          logger.info(`Preapproval autorizado para empresa ${company.id}`);
+        }
+      }
+    }
+
+    return res.status(200).json({ received: true, data: webhookData });
+  } catch (error: any) {
+    logger.error("Erro no handlePreapprovalWebhook:", error);
     // Retornar 200 mesmo em caso de erro para o MP não reenviar
     return res.status(200).json({ received: true, error: error.message });
   }

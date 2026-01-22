@@ -23,6 +23,8 @@ import Plan from "../models/Plan";
 import { hash } from "bcryptjs";
 import moment from "moment";
 import CreateCompanyWithPaymentService from "../services/CompanyService/CreateCompanyWithPaymentService";
+import { createPreapproval, getPreapprovalStatus, cancelPreapproval, updatePreapproval } from "../services/PaymentService/MercadoPagoService";
+import User from "../models/User";
 
 type IndexQuery = {
   searchParam: string;
@@ -571,5 +573,265 @@ export const createCompanyWithTransparentCheckout = async (req: Request, res: Re
     
     const errorMessage = error.message || "Erro ao processar pagamento. Por favor, tente novamente.";
     throw new AppError(errorMessage, error.statusCode || 400);
+  }
+};
+
+export const createCompanyPreapproval = async (req: Request, res: Response): Promise<Response> => {
+  logger.info("=== createCompanyPreapproval chamado ===");
+  const { id } = req.params;
+
+  const schema = Yup.object().shape({
+    cardTokenId: Yup.string().required("Token do cartão é obrigatório"),
+  });
+
+  try {
+    await schema.validate(req.body, { abortEarly: false });
+  } catch (err: any) {
+    if (err.inner && err.inner.length > 0) {
+      const errors = err.inner.map((e: any) => `${e.path}: ${e.message}`).join(", ");
+      throw new AppError(`Erro de validação: ${errors}`, 400);
+    }
+    throw new AppError(err.message || "Erro de validação", 400);
+  }
+
+  try {
+    const company = await Company.findByPk(id, {
+      include: [{ model: Plan }],
+    });
+
+    if (!company) {
+      throw new AppError("Empresa não encontrada", 404);
+    }
+
+    if (!company.plan) {
+      throw new AppError("Plano não encontrado para esta empresa", 404);
+    }
+
+    // Verificar se já tem Preapproval ativo
+    if (company.preapprovalId) {
+      const existingPreapproval = await getPreapprovalStatus(company.preapprovalId);
+      if (existingPreapproval && existingPreapproval.status === "authorized") {
+        throw new AppError("Empresa já possui uma assinatura recorrente ativa", 400);
+      }
+    }
+
+    // Buscar usuário admin para obter email
+    const adminUser = await User.findOne({
+      where: {
+        companyId: company.id,
+        profile: "admin",
+      },
+    });
+
+    if (!adminUser) {
+      throw new AppError("Usuário admin não encontrado", 404);
+    }
+
+    // Criar Preapproval
+    const preapprovalResult = await createPreapproval({
+      companyId: company.id,
+      planId: company.planId,
+      cardTokenId: req.body.cardTokenId,
+      payerEmail: company.email || adminUser.email,
+      payerName: company.name,
+      transactionAmount: company.plan.value,
+      recurrence: company.recurrence || "MENSAL",
+    });
+
+    // Atualizar empresa com preapprovalId e cardTokenId
+    await company.update({
+      preapprovalId: preapprovalResult.preapprovalId,
+      cardTokenId: req.body.cardTokenId,
+      autoRenew: true,
+    });
+
+    logger.info("✓ Preapproval criado com sucesso:", {
+      companyId: company.id,
+      preapprovalId: preapprovalResult.preapprovalId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      preapprovalId: preapprovalResult.preapprovalId,
+      initPoint: preapprovalResult.initPoint,
+      message: "Assinatura recorrente criada com sucesso! Os pagamentos serão processados automaticamente.",
+    });
+  } catch (error: any) {
+    logger.error("✗ Erro ao criar Preapproval:", {
+      error: error.message,
+      companyId: id,
+    });
+    
+    if (error instanceof AppError) {
+      throw error;
+    }
+    
+    const errorMessage = error.message || "Erro ao criar assinatura recorrente. Por favor, tente novamente.";
+    throw new AppError(errorMessage, error.statusCode || 400);
+  }
+};
+
+export const getCompanyPreapprovalStatus = async (req: Request, res: Response): Promise<Response> => {
+  const { id } = req.params;
+
+  try {
+    const company = await Company.findByPk(id);
+
+    if (!company) {
+      throw new AppError("Empresa não encontrada", 404);
+    }
+
+    if (!company.preapprovalId) {
+      return res.status(200).json({
+        hasPreapproval: false,
+        message: "Empresa não possui assinatura recorrente configurada",
+      });
+    }
+
+    const preapprovalStatus = await getPreapprovalStatus(company.preapprovalId);
+
+    return res.status(200).json({
+      hasPreapproval: true,
+      preapprovalId: company.preapprovalId,
+      status: preapprovalStatus.status,
+      autoRenew: company.autoRenew,
+      preapproval: preapprovalStatus,
+    });
+  } catch (error: any) {
+    logger.error("Erro ao obter status do Preapproval:", error);
+    
+    if (error instanceof AppError) {
+      throw error;
+    }
+    
+    throw new AppError("Erro ao consultar assinatura recorrente", 400);
+  }
+};
+
+export const cancelCompanyPreapproval = async (req: Request, res: Response): Promise<Response> => {
+  const { id } = req.params;
+
+  try {
+    const company = await Company.findByPk(id);
+
+    if (!company) {
+      throw new AppError("Empresa não encontrada", 404);
+    }
+
+    if (!company.preapprovalId) {
+      throw new AppError("Empresa não possui assinatura recorrente para cancelar", 400);
+    }
+
+    await cancelPreapproval(company.preapprovalId);
+
+    // Atualizar empresa removendo preapprovalId mas mantendo outros dados
+    await company.update({
+      preapprovalId: null,
+      autoRenew: false,
+    });
+
+    logger.info(`Preapproval cancelado para empresa ${id}`);
+
+    return res.status(200).json({
+      success: true,
+      message: "Assinatura recorrente cancelada com sucesso",
+    });
+  } catch (error: any) {
+    logger.error("Erro ao cancelar Preapproval:", error);
+    
+    if (error instanceof AppError) {
+      throw error;
+    }
+    
+    throw new AppError("Erro ao cancelar assinatura recorrente", 400);
+  }
+};
+
+export const updateCompanyAutoRenew = async (req: Request, res: Response): Promise<Response> => {
+  const { id } = req.params;
+
+  const schema = Yup.object().shape({
+    autoRenew: Yup.boolean().required("autoRenew é obrigatório"),
+  });
+
+  try {
+    await schema.validate(req.body, { abortEarly: false });
+  } catch (err: any) {
+    if (err.inner && err.inner.length > 0) {
+      const errors = err.inner.map((e: any) => `${e.path}: ${e.message}`).join(", ");
+      throw new AppError(`Erro de validação: ${errors}`, 400);
+    }
+    throw new AppError(err.message || "Erro de validação", 400);
+  }
+
+  try {
+    const company = await Company.findByPk(id);
+
+    if (!company) {
+      throw new AppError("Empresa não encontrada", 404);
+    }
+
+    await company.update({
+      autoRenew: req.body.autoRenew,
+    });
+
+    logger.info(`AutoRenew atualizado para empresa ${id}: ${req.body.autoRenew}`);
+
+    return res.status(200).json({
+      success: true,
+      autoRenew: company.autoRenew,
+      message: `Renovação automática ${req.body.autoRenew ? "ativada" : "desativada"} com sucesso`,
+    });
+  } catch (error: any) {
+    logger.error("Erro ao atualizar autoRenew:", error);
+    
+    if (error instanceof AppError) {
+      throw error;
+    }
+    
+    throw new AppError("Erro ao atualizar renovação automática", 400);
+  }
+};
+
+export const getCompanyByEmail = async (req: Request, res: Response): Promise<Response> => {
+  const { email } = req.query;
+
+  if (!email || typeof email !== "string") {
+    throw new AppError("Email é obrigatório", 400);
+  }
+
+  try {
+    const company = await Company.findOne({
+      where: {
+        email: email,
+      },
+      attributes: ["id", "name", "email", "status", "dueDate"],
+    });
+
+    if (!company) {
+      return res.status(200).json({
+        exists: false,
+        message: "Empresa não encontrada",
+      });
+    }
+
+    return res.status(200).json({
+      exists: true,
+      company: {
+        id: company.id,
+        name: company.name,
+        email: company.email,
+        status: company.status,
+        dueDate: company.dueDate,
+      },
+    });
+  } catch (error: any) {
+    logger.error("Erro ao buscar empresa por email:", error);
+    
+    if (error instanceof AppError) {
+      throw error;
+    }
+    
+    throw new AppError("Erro ao buscar empresa", 400);
   }
 };

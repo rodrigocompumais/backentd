@@ -1,4 +1,4 @@
-import { MercadoPagoConfig, Payment, Preference } from "mercadopago";
+import { MercadoPagoConfig, Payment, Preference, Preapproval, PreapprovalPlan } from "mercadopago";
 import AppError from "../../errors/AppError";
 import { logger } from "../../utils/logger";
 
@@ -215,9 +215,11 @@ export const translateMercadoPagoError = (error: any): string => {
 let client: MercadoPagoConfig | null = null;
 let payment: Payment | null = null;
 let preference: Preference | null = null;
+let preapproval: Preapproval | null = null;
+let preapprovalPlan: PreapprovalPlan | null = null;
 
 const initializeMercadoPago = (): void => {
-  if (client && payment && preference) {
+  if (client && payment && preference && preapproval && preapprovalPlan) {
     return; // Já inicializado
   }
 
@@ -232,6 +234,8 @@ const initializeMercadoPago = (): void => {
     });
     payment = new Payment(client);
     preference = new Preference(client);
+    preapproval = new Preapproval(client);
+    preapprovalPlan = new PreapprovalPlan(client);
   } catch (error: any) {
     logger.error("Erro ao inicializar Mercado Pago:", error);
     throw error; // Relançar para que o erro seja tratado adequadamente
@@ -1091,3 +1095,259 @@ export const validateCardData = (cardData: any): boolean => {
   return true;
 };
 
+// ==================== PREAPPROVAL / ASSINATURAS RECORRENTES ====================
+
+interface CreatePreapprovalData {
+  companyId: number;
+  planId: number;
+  cardTokenId: string;
+  payerEmail: string;
+  payerName: string;
+  transactionAmount: number;
+  recurrence?: string; // MENSAL, TRIMESTRAL, SEMESTRAL, ANUAL
+}
+
+interface ProcessPreapprovalPaymentData {
+  companyId: number;
+  planId: number;
+  transactionAmount: number;
+}
+
+/**
+ * Cria um Preapproval (assinatura recorrente) no Mercado Pago
+ */
+export const createPreapproval = async (
+  data: CreatePreapprovalData
+): Promise<{ preapprovalId: string; initPoint?: string }> => {
+  try {
+    // Inicializar Mercado Pago se ainda não foi inicializado
+    if (!preapproval) {
+      initializeMercadoPago();
+    }
+
+    if (!preapproval) {
+      throw new AppError("Erro ao inicializar serviço de pagamento. Entre em contato com o suporte.", 500);
+    }
+
+    // Calcular frequência baseado na recorrência
+    const recurrence = data.recurrence || "MENSAL";
+    let frequency = 1;
+    let frequencyType: "days" | "weeks" | "months" = "months";
+    
+    if (recurrence === "ANUAL") {
+      frequency = 12;
+      frequencyType = "months";
+    } else if (recurrence === "SEMESTRAL") {
+      frequency = 6;
+      frequencyType = "months";
+    } else if (recurrence === "TRIMESTRAL") {
+      frequency = 3;
+      frequencyType = "months";
+    } else if (recurrence === "MENSAL") {
+      frequency = 1;
+      frequencyType = "months";
+    }
+
+    const preapprovalData: any = {
+      reason: `Assinatura ${recurrence} - ${data.payerName}`,
+      payer_email: data.payerEmail,
+      card_token_id: data.cardTokenId,
+      status: "authorized",
+      auto_recurring: {
+        frequency: frequency,
+        frequency_type: frequencyType,
+        transaction_amount: data.transactionAmount,
+        currency_id: "BRL",
+        start_date: new Date().toISOString(),
+      },
+      external_reference: `company_${data.companyId}_plan_${data.planId}`,
+      back_url: `${process.env.FRONTEND_URL}/financeiro`,
+      notification_url: `${process.env.BACKEND_URL}/mercadopago/webhook`,
+    };
+
+    logger.info("Criando Preapproval:", {
+      companyId: data.companyId,
+      planId: data.planId,
+      recurrence,
+      frequency,
+      frequencyType,
+    });
+
+    const response = await preapproval.create({ body: preapprovalData });
+    const preapprovalId = response.id;
+
+    logger.info("Preapproval criado com sucesso:", {
+      preapprovalId,
+      companyId: data.companyId,
+    });
+
+    return {
+      preapprovalId: preapprovalId,
+      initPoint: response.init_point,
+    };
+  } catch (error: any) {
+    logger.error("Erro ao criar Preapproval:", error);
+    logErrorDetails(error, {
+      companyId: data.companyId,
+      planId: data.planId,
+    });
+    throw new AppError(
+      error.message || "Erro ao criar assinatura recorrente",
+      400
+    );
+  }
+};
+
+/**
+ * Processa pagamento de uma assinatura recorrente via Preapproval
+ * Nota: O Mercado Pago processa automaticamente, mas podemos forçar uma cobrança
+ */
+export const processPreapprovalPayment = async (
+  preapprovalId: string,
+  metadata: ProcessPreapprovalPaymentData
+): Promise<{ success: boolean; paymentId?: string; error?: string }> => {
+  try {
+    // Inicializar Mercado Pago se ainda não foi inicializado
+    if (!preapproval) {
+      initializeMercadoPago();
+    }
+
+    if (!preapproval) {
+      throw new AppError("Erro ao inicializar serviço de pagamento.", 500);
+    }
+
+    // Buscar informações do Preapproval
+    const preapprovalInfo = await preapproval.get({ id: preapprovalId });
+
+    if (!preapprovalInfo || !preapprovalInfo.status) {
+      throw new AppError("Preapproval não encontrado ou inválido", 404);
+    }
+
+    // Verificar status do Preapproval
+    if (preapprovalInfo.status !== "authorized") {
+      logger.warn(`Preapproval ${preapprovalId} não está autorizado. Status: ${preapprovalInfo.status}`);
+      return {
+        success: false,
+        error: `Preapproval não autorizado. Status: ${preapprovalInfo.status}`,
+      };
+    }
+
+    // O Mercado Pago processa pagamentos automaticamente baseado na configuração do Preapproval
+    // Não há necessidade de processar manualmente, mas podemos verificar o status
+    logger.info(`Preapproval ${preapprovalId} está ativo e processará pagamentos automaticamente`);
+
+    return {
+      success: true,
+      paymentId: preapprovalInfo.id,
+    };
+  } catch (error: any) {
+    logger.error("Erro ao processar pagamento do Preapproval:", error);
+    logErrorDetails(error, {
+      preapprovalId,
+      metadata,
+    });
+    return {
+      success: false,
+      error: error.message || "Erro ao processar pagamento recorrente",
+    };
+  }
+};
+
+/**
+ * Obtém status de um Preapproval
+ */
+export const getPreapprovalStatus = async (preapprovalId: string): Promise<any> => {
+  try {
+    // Inicializar Mercado Pago se ainda não foi inicializado
+    if (!preapproval) {
+      initializeMercadoPago();
+    }
+
+    if (!preapproval) {
+      throw new AppError("Erro ao inicializar serviço de pagamento.", 500);
+    }
+
+    const response = await preapproval.get({ id: preapprovalId });
+    return response;
+  } catch (error: any) {
+    logger.error("Erro ao obter status do Preapproval:", error);
+    throw new AppError(
+      error.message || "Erro ao consultar assinatura",
+      400
+    );
+  }
+};
+
+/**
+ * Cancela um Preapproval (assinatura)
+ */
+export const cancelPreapproval = async (preapprovalId: string): Promise<boolean> => {
+  try {
+    // Inicializar Mercado Pago se ainda não foi inicializado
+    if (!preapproval) {
+      initializeMercadoPago();
+    }
+
+    if (!preapproval) {
+      throw new AppError("Erro ao inicializar serviço de pagamento.", 500);
+    }
+
+    // Atualizar status para cancelled
+    await preapproval.update({
+      id: preapprovalId,
+      body: {
+        status: "cancelled",
+      },
+    });
+
+    logger.info(`Preapproval ${preapprovalId} cancelado com sucesso`);
+    return true;
+  } catch (error: any) {
+    logger.error("Erro ao cancelar Preapproval:", error);
+    throw new AppError(
+      error.message || "Erro ao cancelar assinatura",
+      400
+    );
+  }
+};
+
+/**
+ * Atualiza um Preapproval (ex: mudar valor, frequência, etc)
+ */
+export const updatePreapproval = async (
+  preapprovalId: string,
+  updates: {
+    auto_recurring?: {
+      frequency?: number;
+      frequency_type?: "days" | "weeks" | "months";
+      transaction_amount?: number;
+    };
+    card_token_id?: string;
+    status?: "authorized" | "paused" | "cancelled";
+  }
+): Promise<any> => {
+  try {
+    // Inicializar Mercado Pago se ainda não foi inicializado
+    if (!preapproval) {
+      initializeMercadoPago();
+    }
+
+    if (!preapproval) {
+      throw new AppError("Erro ao inicializar serviço de pagamento.", 500);
+    }
+
+    const response = await preapproval.update({
+      id: preapprovalId,
+      body: updates,
+    });
+
+    logger.info(`Preapproval ${preapprovalId} atualizado com sucesso`);
+    return response;
+  } catch (error: any) {
+    logger.error("Erro ao atualizar Preapproval:", error);
+    throw new AppError(
+      error.message || "Erro ao atualizar assinatura",
+      400
+    );
+  }
+};

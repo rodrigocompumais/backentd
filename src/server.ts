@@ -8,6 +8,7 @@ import { startQueueProcess } from "./queues";
 import { TransferTicketQueue } from "./wbotTransferTicketQueue";
 import cron from "node-cron";
 import TestAllGeminiApiKeysService from "./services/AiServices/TestAllGeminiApiKeysService";
+import RenewSubscriptionService, { findCompaniesNeedingRenewal } from "./services/SubscriptionService/RenewSubscriptionService";
 
 const server = app.listen(process.env.PORT, async () => {
   const companies = await Company.findAll();
@@ -41,6 +42,37 @@ cron.schedule("* * * * *", async () => {
     logger.error(error);
   }
 
+});
+
+// Job para verificar e processar renovações de assinaturas
+// Roda diariamente às 9h da manhã
+cron.schedule("0 9 * * *", async () => {
+  try {
+    logger.info("Iniciando verificação de renovações de assinaturas...");
+    
+    const companiesNeedingRenewal = await findCompaniesNeedingRenewal();
+    
+    logger.info(`Encontradas ${companiesNeedingRenewal.length} empresas que precisam de renovação`);
+    
+    for (const company of companiesNeedingRenewal) {
+      try {
+        const result = await RenewSubscriptionService(company.id);
+        
+        if (result.success) {
+          logger.info(`Renovação processada com sucesso para empresa ${company.id} via ${result.method}`);
+        } else {
+          logger.warn(`Falha ao renovar empresa ${company.id}: ${result.message || result.error}`);
+        }
+      } catch (error: any) {
+        logger.error(`Erro ao processar renovação para empresa ${company.id}:`, error);
+        // Continuar com as próximas empresas mesmo se uma falhar
+      }
+    }
+    
+    logger.info("Verificação de renovações concluída");
+  } catch (error: any) {
+    logger.error("Erro no job de renovação de assinaturas:", error);
+  }
 });
 
 initIO(server);

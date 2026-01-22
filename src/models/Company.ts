@@ -49,6 +49,21 @@ class Company extends Model<Company> {
   recurrence: string;
 
   @Column
+  preapprovalId: string;
+
+  @Column
+  cardTokenId: string;
+
+  @Column
+  autoRenew: boolean;
+
+  @Column
+  lastRenewalAttempt: Date;
+
+  @Column
+  renewalAttempts: number;
+
+  @Column
   language: string;
 
   @Column({

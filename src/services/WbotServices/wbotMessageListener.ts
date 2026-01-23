@@ -72,6 +72,7 @@ import ListQueuesService from "../QueueService/ListQueuesService";
 import Tag from "../../models/Tag";
 import SyncTags from "../TagServices/SyncTagsService";
 import ExecuteAppointmentFunction from "../AppointmentAIService/ExecuteAppointmentFunction";
+import ParseAppointmentCommand from "../AppointmentAIService/ParseAppointmentCommand";
 
 import { IConnections, INodes } from "../WebhookService/DispatchWebHookService";
 import { ActionsWebhookService } from "../WebhookService/ActionsWebhookService";
@@ -1476,74 +1477,48 @@ const handleOpenAi = async (
   // Adicionar instruções sobre agendamentos se habilitado
   if (prompt.permitirCriarAgendamentos) {
     promptSystem += `\n\nGERENCIAMENTO DE AGENDAMENTOS:
-Você pode gerenciar agendamentos usando as funções disponíveis. Use as funções para:
-- Verificar disponibilidade de horários
-- Criar novos agendamentos
-- Atualizar agendamentos existentes
-- Listar horários disponíveis
+Você pode gerenciar agendamentos usando comandos especiais. Use o formato [AGENDAR]...[/AGENDAR] com JSON:
 
-IMPORTANTE: Sempre verifique a disponibilidade antes de criar um agendamento.`;
+Para CRIAR agendamento:
+[AGENDAR]
+{
+  "action": "criar",
+  "profissional": "Nome do Profissional",
+  "data": "2024-01-15",
+  "horarioInicio": "14:00",
+  "horarioFim": "14:30",
+  "titulo": "Consulta",
+  "descricao": "Descrição opcional"
+}
+[/AGENDAR]
+
+Para VERIFICAR disponibilidade:
+[AGENDAR]
+{
+  "action": "verificar",
+  "profissional": "Nome do Profissional",
+  "data": "2024-01-15",
+  "horarioInicio": "14:00",
+  "horarioFim": "14:30"
+}
+[/AGENDAR]
+
+Para LISTAR horários ocupados:
+[AGENDAR]
+{
+  "action": "listar",
+  "profissional": "Nome do Profissional",
+  "data": "2024-01-15"
+}
+[/AGENDAR]
+
+IMPORTANTE: 
+- Sempre verifique a disponibilidade antes de criar um agendamento
+- Use o formato JSON dentro das tags [AGENDAR]...[/AGENDAR]
+- O horarioFim é opcional (padrão: 30 minutos após horarioInicio)
+- Após processar o comando, remova as tags [AGENDAR]...[/AGENDAR] da resposta ao cliente`;
   }
 
-  // Definir funções para function calling se permitirCriarAgendamentos estiver habilitado
-  const functions = prompt.permitirCriarAgendamentos ? [
-    {
-      name: "check_appointment_availability",
-      description: "Verifica disponibilidade de horário para agendamento",
-      parameters: {
-        type: "object",
-        properties: {
-          professionalId: { type: "number", description: "ID do profissional (assignedUserId)" },
-          date: { type: "string", format: "date", description: "Data no formato YYYY-MM-DD" },
-          startTime: { type: "string", format: "time", description: "Horário de início HH:MM" },
-          endTime: { type: "string", format: "time", description: "Horário de fim HH:MM" }
-        },
-        required: ["professionalId", "date", "startTime", "endTime"]
-      }
-    },
-    {
-      name: "create_appointment",
-      description: "Cria um novo agendamento",
-      parameters: {
-        type: "object",
-        properties: {
-          title: { type: "string", description: "Título do agendamento" },
-          professionalId: { type: "number", description: "ID do profissional (assignedUserId)" },
-          date: { type: "string", format: "date", description: "Data no formato YYYY-MM-DD" },
-          startTime: { type: "string", format: "time", description: "Horário de início HH:MM" },
-          endTime: { type: "string", format: "time", description: "Horário de fim HH:MM" },
-          description: { type: "string", description: "Descrição opcional do agendamento" }
-        },
-        required: ["title", "professionalId", "date", "startTime", "endTime"]
-      }
-    },
-    {
-      name: "update_appointment",
-      description: "Atualiza um agendamento existente",
-      parameters: {
-        type: "object",
-        properties: {
-          appointmentId: { type: "number", description: "ID do agendamento" },
-          status: { type: "string", enum: ["pending", "confirmed", "cancelled", "completed"], description: "Novo status do agendamento" },
-          startTime: { type: "string", format: "time", description: "Novo horário de início HH:MM" },
-          endTime: { type: "string", format: "time", description: "Novo horário de fim HH:MM" }
-        },
-        required: ["appointmentId"]
-      }
-    },
-    {
-      name: "list_available_slots",
-      description: "Lista horários disponíveis para um profissional em uma data",
-      parameters: {
-        type: "object",
-        properties: {
-          professionalId: { type: "number", description: "ID do profissional (assignedUserId)" },
-          date: { type: "string", format: "date", description: "Data no formato YYYY-MM-DD" }
-        },
-        required: ["professionalId", "date"]
-      }
-    }
-  ] : undefined;
 
   let messagesOpenAi: ChatCompletionRequestMessage[] = [];
 
@@ -1574,92 +1549,14 @@ IMPORTANTE: Sempre verifique a disponibilidade antes de criar um agendamento.`;
     // Adicionar mensagem atual do usuário
     messagesOpenAi.push({ role: "user", content: bodyMessage! });
 
-    // Fazer chamada inicial com ou sem functions
-    let chat = await openai.createChatCompletion({
+    const chat = await openai.createChatCompletion({
       model: prompt.model,
       messages: messagesOpenAi,
       max_tokens: prompt.maxTokens,
-      temperature: prompt.temperature,
-      ...(functions && { functions, function_call: "auto" })
+      temperature: prompt.temperature
     });
 
     let response = chat.data.choices[0].message?.content;
-    let functionCalls = chat.data.choices[0].message?.function_call;
-
-    // Processar function calls se houver
-    if (functionCalls && prompt.permitirCriarAgendamentos) {
-      const functionResult = await ExecuteAppointmentFunction({
-        functionCall: {
-          name: functionCalls.name || "",
-          arguments: functionCalls.arguments || "{}"
-        },
-        companyId: ticket.companyId,
-        contactId: contact.id,
-        ticketId: ticket.id,
-        allowCreate: prompt.permitirCriarAgendamentos
-      });
-
-      // Adicionar resultado da função ao histórico
-      messagesOpenAi.push({
-        role: "assistant",
-        content: null,
-        function_call: functionCalls
-      } as any);
-
-      messagesOpenAi.push({
-        role: "function",
-        name: functionCalls.name || "",
-        content: JSON.stringify(functionResult)
-      } as any);
-
-      // Fazer segunda chamada com o resultado da função
-      chat = await openai.createChatCompletion({
-        model: prompt.model,
-        messages: messagesOpenAi,
-        max_tokens: prompt.maxTokens,
-        temperature: prompt.temperature,
-        ...(functions && { functions, function_call: "auto" })
-      });
-
-      response = chat.data.choices[0].message?.content;
-      functionCalls = chat.data.choices[0].message?.function_call;
-
-      // Se ainda houver function calls, processar novamente (máximo 2 iterações)
-      if (functionCalls && prompt.permitirCriarAgendamentos) {
-        const secondFunctionResult = await ExecuteAppointmentFunction({
-          functionCall: {
-            name: functionCalls.name || "",
-            arguments: functionCalls.arguments || "{}"
-          },
-          companyId: ticket.companyId,
-          contactId: contact.id,
-          ticketId: ticket.id,
-          allowCreate: prompt.permitirCriarAgendamentos
-        });
-
-        messagesOpenAi.push({
-          role: "assistant",
-          content: null,
-          function_call: functionCalls
-        } as any);
-
-        messagesOpenAi.push({
-          role: "function",
-          name: functionCalls.name || "",
-          content: JSON.stringify(secondFunctionResult)
-        } as any);
-
-        // Terceira chamada final
-        chat = await openai.createChatCompletion({
-          model: prompt.model,
-          messages: messagesOpenAi,
-          max_tokens: prompt.maxTokens,
-          temperature: prompt.temperature
-        });
-
-        response = chat.data.choices[0].message?.content;
-      }
-    }
 
     // Detectar e processar mensagens internas
     const internalMessages: string[] = [];
@@ -1734,6 +1631,59 @@ IMPORTANTE: Sempre verifique a disponibilidade antes de criar um agendamento.`;
       // Log para debug
       if (internalMessages.length > 0) {
         logger.info(`📝 Processadas ${uniqueInternalMessages.length} mensagem(ns) interna(s). Resposta limpa: ${cleanedResponse.substring(0, 100)}...`);
+      }
+    }
+
+    // Processar comandos de agendamento se habilitado
+    if (prompt.permitirCriarAgendamentos && response) {
+      const appointmentCommandRegex = /\[AGENDAR\](.*?)\[\/AGENDAR\]/gs;
+      const appointmentCommands: string[] = [];
+      let match;
+
+      while ((match = appointmentCommandRegex.exec(response)) !== null) {
+        const commandContent = match[1].trim();
+        if (commandContent) {
+          appointmentCommands.push(commandContent);
+        }
+      }
+
+      if (appointmentCommands.length > 0) {
+        for (const command of appointmentCommands) {
+          try {
+            const result = await ParseAppointmentCommand({
+              command: `[AGENDAR]${command}[/AGENDAR]`,
+              companyId: ticket.companyId,
+              contactId: contact.id,
+              ticketId: ticket.id,
+              allowCreate: prompt.permitirCriarAgendamentos
+            });
+
+            if (result.success) {
+              // Adicionar mensagem de sucesso à resposta
+              if (result.message) {
+                cleanedResponse = cleanedResponse.replace(
+                  /\[AGENDAR\].*?\[\/AGENDAR\]/gs,
+                  result.message
+                );
+              }
+              logger.info(`✅ Comando de agendamento processado: ${result.message}`);
+            } else {
+              // Adicionar mensagem de erro à resposta
+              const errorMsg = result.message || result.error || "Erro ao processar agendamento";
+              cleanedResponse = cleanedResponse.replace(
+                /\[AGENDAR\].*?\[\/AGENDAR\]/gs,
+                errorMsg
+              );
+              logger.error(`❌ Erro ao processar comando de agendamento: ${result.error}`);
+            }
+          } catch (err: any) {
+            logger.error(`❌ Erro ao processar comando de agendamento: ${err.message}`);
+            cleanedResponse = cleanedResponse.replace(
+              /\[AGENDAR\].*?\[\/AGENDAR\]/gs,
+              "Erro ao processar comando de agendamento. Tente novamente."
+            );
+          }
+        }
       }
     }
 

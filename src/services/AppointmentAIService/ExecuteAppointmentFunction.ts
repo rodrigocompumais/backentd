@@ -271,7 +271,7 @@ const ExecuteAppointmentFunction = async ({
             assignedUserId: parsedArgs.professionalId,
             companyId,
             startTime: {
-              [Op.between]: [startOfDay, endOfDay]
+              [Op.between]: [+startOfDay, +endOfDay]
             },
             status: {
               [Op.ne]: "cancelled"

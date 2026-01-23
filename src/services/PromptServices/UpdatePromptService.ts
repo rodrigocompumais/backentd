@@ -25,6 +25,9 @@ interface PromptData {
     canTransferToAgent?: boolean;
     canChangeTag?: boolean;
     permitirCriarAgendamentos?: boolean;
+    tipoAgente?: string;
+    isTemplate?: boolean;
+    templateVariables?: string;
     transferQueueId?: number | null;
 }
 
@@ -53,7 +56,7 @@ const UpdatePromptService = async ({
     });
 
     // Não exigir apiKey no prompt - será buscada das Settings
-    const { name, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, model, canSendInternalMessages, canTransferToAgent, canChangeTag, permitirCriarAgendamentos, transferQueueId } = promptData;
+    const { name, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, model, canSendInternalMessages, canTransferToAgent, canChangeTag, permitirCriarAgendamentos, tipoAgente, isTemplate, templateVariables, transferQueueId } = promptData;
 
     try {
         await promptSchema.validate({ name, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, provider });
@@ -109,6 +112,9 @@ const UpdatePromptService = async ({
         canTransferToAgent: canTransferToAgent !== undefined ? canTransferToAgent : false,
         canChangeTag: canChangeTag !== undefined ? canChangeTag : false,
         permitirCriarAgendamentos: permitirCriarAgendamentos !== undefined ? permitirCriarAgendamentos : false,
+        tipoAgente: tipoAgente !== undefined ? tipoAgente : promptTable.tipoAgente || "personalizado",
+        isTemplate: isTemplate !== undefined ? isTemplate : promptTable.isTemplate || false,
+        templateVariables: templateVariables !== undefined ? templateVariables : promptTable.templateVariables,
         transferQueueId: transferQueueId || null,
         // Sempre definir apiKey como string vazia - será buscada das Settings
         apiKey: ""

@@ -24,6 +24,9 @@ interface PromptData {
     canTransferToAgent?: boolean;
     canChangeTag?: boolean;
     permitirCriarAgendamentos?: boolean;
+    tipoAgente?: string;
+    isTemplate?: boolean;
+    templateVariables?: string;
     transferQueueId?: number | null;
 }
 
@@ -123,6 +126,9 @@ const CreatePromptService = async (promptData: PromptData): Promise<Prompt> => {
         canTransferToAgent: promptData.canTransferToAgent || false,
         canChangeTag: promptData.canChangeTag || false,
         permitirCriarAgendamentos: promptData.permitirCriarAgendamentos || false,
+        tipoAgente: promptData.tipoAgente || "personalizado",
+        isTemplate: promptData.isTemplate || false,
+        templateVariables: promptData.templateVariables || null,
         transferQueueId: promptData.transferQueueId || null
     };
 

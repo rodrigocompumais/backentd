@@ -71,6 +71,7 @@ import ShowUserService from "../UserServices/ShowUserService";
 import ListQueuesService from "../QueueService/ListQueuesService";
 import Tag from "../../models/Tag";
 import SyncTags from "../TagServices/SyncTagsService";
+import ExecuteAppointmentFunction from "../AppointmentAIService/ExecuteAppointmentFunction";
 
 import { IConnections, INodes } from "../WebhookService/DispatchWebHookService";
 import { ActionsWebhookService } from "../WebhookService/ActionsWebhookService";
@@ -1203,7 +1204,8 @@ const handleGeminiInListener = async (
     maxMessages: prompt.maxMessages,
     canSendInternalMessages: prompt.canSendInternalMessages || false,
     canTransferToAgent: prompt.canTransferToAgent || false,
-    transferQueueId: prompt.transferQueueId || null
+    transferQueueId: prompt.transferQueueId || null,
+    permitirCriarAgendamentos: prompt.permitirCriarAgendamentos || false
   };
 
   await handleGemini(
@@ -1471,6 +1473,78 @@ const handleOpenAi = async (
 - Se fizer anotação interna, SEMPRE termine com [/INTERNA] antes de continuar a resposta ao cliente`;
   }
 
+  // Adicionar instruções sobre agendamentos se habilitado
+  if (prompt.permitirCriarAgendamentos) {
+    promptSystem += `\n\nGERENCIAMENTO DE AGENDAMENTOS:
+Você pode gerenciar agendamentos usando as funções disponíveis. Use as funções para:
+- Verificar disponibilidade de horários
+- Criar novos agendamentos
+- Atualizar agendamentos existentes
+- Listar horários disponíveis
+
+IMPORTANTE: Sempre verifique a disponibilidade antes de criar um agendamento.`;
+  }
+
+  // Definir funções para function calling se permitirCriarAgendamentos estiver habilitado
+  const functions = prompt.permitirCriarAgendamentos ? [
+    {
+      name: "check_appointment_availability",
+      description: "Verifica disponibilidade de horário para agendamento",
+      parameters: {
+        type: "object",
+        properties: {
+          professionalId: { type: "number", description: "ID do profissional (assignedUserId)" },
+          date: { type: "string", format: "date", description: "Data no formato YYYY-MM-DD" },
+          startTime: { type: "string", format: "time", description: "Horário de início HH:MM" },
+          endTime: { type: "string", format: "time", description: "Horário de fim HH:MM" }
+        },
+        required: ["professionalId", "date", "startTime", "endTime"]
+      }
+    },
+    {
+      name: "create_appointment",
+      description: "Cria um novo agendamento",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Título do agendamento" },
+          professionalId: { type: "number", description: "ID do profissional (assignedUserId)" },
+          date: { type: "string", format: "date", description: "Data no formato YYYY-MM-DD" },
+          startTime: { type: "string", format: "time", description: "Horário de início HH:MM" },
+          endTime: { type: "string", format: "time", description: "Horário de fim HH:MM" },
+          description: { type: "string", description: "Descrição opcional do agendamento" }
+        },
+        required: ["title", "professionalId", "date", "startTime", "endTime"]
+      }
+    },
+    {
+      name: "update_appointment",
+      description: "Atualiza um agendamento existente",
+      parameters: {
+        type: "object",
+        properties: {
+          appointmentId: { type: "number", description: "ID do agendamento" },
+          status: { type: "string", enum: ["pending", "confirmed", "cancelled", "completed"], description: "Novo status do agendamento" },
+          startTime: { type: "string", format: "time", description: "Novo horário de início HH:MM" },
+          endTime: { type: "string", format: "time", description: "Novo horário de fim HH:MM" }
+        },
+        required: ["appointmentId"]
+      }
+    },
+    {
+      name: "list_available_slots",
+      description: "Lista horários disponíveis para um profissional em uma data",
+      parameters: {
+        type: "object",
+        properties: {
+          professionalId: { type: "number", description: "ID do profissional (assignedUserId)" },
+          date: { type: "string", format: "date", description: "Data no formato YYYY-MM-DD" }
+        },
+        required: ["professionalId", "date"]
+      }
+    }
+  ] : undefined;
+
   let messagesOpenAi: ChatCompletionRequestMessage[] = [];
 
   if (msg.message?.conversation || msg.message?.extendedTextMessage?.text) {
@@ -1500,14 +1574,92 @@ const handleOpenAi = async (
     // Adicionar mensagem atual do usuário
     messagesOpenAi.push({ role: "user", content: bodyMessage! });
 
-    const chat = await openai.createChatCompletion({
+    // Fazer chamada inicial com ou sem functions
+    let chat = await openai.createChatCompletion({
       model: prompt.model,
       messages: messagesOpenAi,
       max_tokens: prompt.maxTokens,
-      temperature: prompt.temperature
+      temperature: prompt.temperature,
+      ...(functions && { functions, function_call: "auto" })
     });
 
     let response = chat.data.choices[0].message?.content;
+    let functionCalls = chat.data.choices[0].message?.function_call;
+
+    // Processar function calls se houver
+    if (functionCalls && prompt.permitirCriarAgendamentos) {
+      const functionResult = await ExecuteAppointmentFunction({
+        functionCall: {
+          name: functionCalls.name || "",
+          arguments: functionCalls.arguments || "{}"
+        },
+        companyId: ticket.companyId,
+        contactId: contact.id,
+        ticketId: ticket.id,
+        allowCreate: prompt.permitirCriarAgendamentos
+      });
+
+      // Adicionar resultado da função ao histórico
+      messagesOpenAi.push({
+        role: "assistant",
+        content: null,
+        function_call: functionCalls
+      } as any);
+
+      messagesOpenAi.push({
+        role: "function",
+        name: functionCalls.name || "",
+        content: JSON.stringify(functionResult)
+      } as any);
+
+      // Fazer segunda chamada com o resultado da função
+      chat = await openai.createChatCompletion({
+        model: prompt.model,
+        messages: messagesOpenAi,
+        max_tokens: prompt.maxTokens,
+        temperature: prompt.temperature,
+        ...(functions && { functions, function_call: "auto" })
+      });
+
+      response = chat.data.choices[0].message?.content;
+      functionCalls = chat.data.choices[0].message?.function_call;
+
+      // Se ainda houver function calls, processar novamente (máximo 2 iterações)
+      if (functionCalls && prompt.permitirCriarAgendamentos) {
+        const secondFunctionResult = await ExecuteAppointmentFunction({
+          functionCall: {
+            name: functionCalls.name || "",
+            arguments: functionCalls.arguments || "{}"
+          },
+          companyId: ticket.companyId,
+          contactId: contact.id,
+          ticketId: ticket.id,
+          allowCreate: prompt.permitirCriarAgendamentos
+        });
+
+        messagesOpenAi.push({
+          role: "assistant",
+          content: null,
+          function_call: functionCalls
+        } as any);
+
+        messagesOpenAi.push({
+          role: "function",
+          name: functionCalls.name || "",
+          content: JSON.stringify(secondFunctionResult)
+        } as any);
+
+        // Terceira chamada final
+        chat = await openai.createChatCompletion({
+          model: prompt.model,
+          messages: messagesOpenAi,
+          max_tokens: prompt.maxTokens,
+          temperature: prompt.temperature
+        });
+
+        response = chat.data.choices[0].message?.content;
+      }
+    }
 
     // Detectar e processar mensagens internas
     const internalMessages: string[] = [];

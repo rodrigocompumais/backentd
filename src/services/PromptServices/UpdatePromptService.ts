@@ -24,6 +24,7 @@ interface PromptData {
     canSendInternalMessages?: boolean;
     canTransferToAgent?: boolean;
     canChangeTag?: boolean;
+    permitirCriarAgendamentos?: boolean;
     transferQueueId?: number | null;
 }
 
@@ -52,7 +53,7 @@ const UpdatePromptService = async ({
     });
 
     // Não exigir apiKey no prompt - será buscada das Settings
-    const { name, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, model, canSendInternalMessages, canTransferToAgent, canChangeTag, transferQueueId } = promptData;
+    const { name, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, model, canSendInternalMessages, canTransferToAgent, canChangeTag, permitirCriarAgendamentos, transferQueueId } = promptData;
 
     try {
         await promptSchema.validate({ name, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, provider });
@@ -107,6 +108,7 @@ const UpdatePromptService = async ({
         canSendInternalMessages: canSendInternalMessages !== undefined ? canSendInternalMessages : false,
         canTransferToAgent: canTransferToAgent !== undefined ? canTransferToAgent : false,
         canChangeTag: canChangeTag !== undefined ? canChangeTag : false,
+        permitirCriarAgendamentos: permitirCriarAgendamentos !== undefined ? permitirCriarAgendamentos : false,
         transferQueueId: transferQueueId || null,
         // Sempre definir apiKey como string vazia - será buscada das Settings
         apiKey: ""

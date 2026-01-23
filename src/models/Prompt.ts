@@ -65,6 +65,9 @@ class Prompt extends Model<Prompt> {
   @Column({ defaultValue: false })
   canChangeTag: boolean;
 
+  @Column({ defaultValue: false })
+  permitirCriarAgendamentos: boolean;
+
   @AllowNull
   @ForeignKey(() => Queue)
   @Column

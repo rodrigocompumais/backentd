@@ -23,6 +23,7 @@ interface PromptData {
     canSendInternalMessages?: boolean;
     canTransferToAgent?: boolean;
     canChangeTag?: boolean;
+    permitirCriarAgendamentos?: boolean;
     transferQueueId?: number | null;
 }
 
@@ -121,6 +122,7 @@ const CreatePromptService = async (promptData: PromptData): Promise<Prompt> => {
         canSendInternalMessages: promptData.canSendInternalMessages || false,
         canTransferToAgent: promptData.canTransferToAgent || false,
         canChangeTag: promptData.canChangeTag || false,
+        permitirCriarAgendamentos: promptData.permitirCriarAgendamentos || false,
         transferQueueId: promptData.transferQueueId || null
     };
 

@@ -1339,7 +1339,7 @@ export const updatePreapproval = async (
 
     const response = await preapproval.update({
       id: preapprovalId,
-      body: updates,
+      body: updates as any,
     });
 
     logger.info(`Preapproval ${preapprovalId} atualizado com sucesso`);

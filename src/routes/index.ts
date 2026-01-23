@@ -41,6 +41,7 @@ import gupshupWebhookRoutes from "./gupshupWebhookRoutes";
 import gupshupValidationRoutes from "./gupshupValidationRoutes";
 import formRoutes from "./formRoutes";
 import userQuickButtonRoutes from "./userQuickButtonRoutes";
+import userAppointmentRoutes from "./userAppointmentRoutes";
 const routes = Router();
 
 routes.use(userRoutes);
@@ -86,5 +87,6 @@ routes.use(gupshupWebhookRoutes);
 routes.use(gupshupValidationRoutes);
 routes.use(formRoutes);
 routes.use(userQuickButtonRoutes);
+routes.use(userAppointmentRoutes);
 
 export default routes;

@@ -60,7 +60,7 @@ const RenewSubscriptionService = async (companyId: number): Promise<RenewalResul
     // Verificar se tem Preapproval ativo
     if (company.preapprovalId && company.preapprovalId.trim() !== "") {
       logger.info(`Processando renovação via Preapproval para empresa ${companyId}`);
-      
+
       try {
         // Processar cobrança via Preapproval
         const paymentResult = await processPreapprovalPayment(company.preapprovalId, {
@@ -84,7 +84,7 @@ const RenewSubscriptionService = async (companyId: number): Promise<RenewalResul
           }
 
           const newDueDate = moment().add(daysToAdd, "days").format();
-          
+
           await company.update({
             dueDate: newDueDate,
             lastRenewalAttempt: new Date(),
@@ -92,7 +92,7 @@ const RenewSubscriptionService = async (companyId: number): Promise<RenewalResul
           });
 
           logger.info(`Renovação via Preapproval bem-sucedida para empresa ${companyId}`);
-          
+
           return {
             success: true,
             companyId,
@@ -111,7 +111,7 @@ const RenewSubscriptionService = async (companyId: number): Promise<RenewalResul
           if (attempts >= 3) {
             await company.update({ autoRenew: false });
             logger.warn(`Renovação automática desativada para empresa ${companyId} após ${attempts} tentativas falhas`);
-            
+
             // TODO: Enviar email notificando sobre a desativação
             // await SendRenewalFailureEmailService({ company, attempts });
           }
@@ -131,7 +131,7 @@ const RenewSubscriptionService = async (companyId: number): Promise<RenewalResul
         }
       } catch (error: any) {
         logger.error(`Erro ao processar Preapproval para empresa ${companyId}:`, error);
-        
+
         const attempts = (company.renewalAttempts || 0) + 1;
         await company.update({
           lastRenewalAttempt: new Date(),
@@ -156,7 +156,7 @@ const RenewSubscriptionService = async (companyId: number): Promise<RenewalResul
       stack: error.stack,
       companyId,
     });
-    
+
     // Não lançar erro para não interromper o job cron
     // Retornar resultado de erro
     return {
@@ -260,7 +260,7 @@ const createManualRenewalPreference = async (
       stack: error.stack,
       companyId: company.id,
     });
-    
+
     return {
       success: false,
       companyId: company.id,
@@ -283,8 +283,8 @@ export const findCompaniesNeedingRenewal = async (): Promise<Company[]> => {
       status: true,
       autoRenew: true,
       dueDate: {
-        [Op.between]: [today.format(), fiveDaysFromNow.format()],
-      },
+        [Op.between]: [today.toISOString(), fiveDaysFromNow.toISOString()],
+      } as any,
       // Não renovar se já tentou hoje
       [Op.or]: [
         { lastRenewalAttempt: null },

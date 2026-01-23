@@ -1,11 +1,11 @@
-import { MercadoPagoConfig, Payment, Preference, Preapproval, PreapprovalPlan } from "mercadopago";
+import { MercadoPagoConfig, Payment, Preference, PreApproval, PreApprovalPlan } from "mercadopago";
 import AppError from "../../errors/AppError";
 import { logger } from "../../utils/logger";
 
 // Função auxiliar para logging robusto de erros
 const logErrorDetails = (error: any, context: any = {}): void => {
   const timestamp = new Date().toISOString();
-  
+
   // Capturar informações básicas do erro
   const errorInfo: any = {
     timestamp,
@@ -94,7 +94,7 @@ const logErrorDetails = (error: any, context: any = {}): void => {
 // Validar credenciais do Mercado Pago
 const validateMercadoPagoCredentials = (): void => {
   const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
-  
+
   if (!accessToken || accessToken.trim() === "") {
     logger.error("MERCADOPAGO_ACCESS_TOKEN não configurado");
     throw new AppError("Configuração de pagamento incompleta. Entre em contato com o suporte.", 500);
@@ -151,7 +151,7 @@ const validateCredentialsBeforePayment = (): void => {
       500
     );
   }
-  
+
   // Validar compatibilidade entre credenciais e ambiente
   if (isProduction && isTestToken) {
     throw new AppError(
@@ -161,7 +161,7 @@ const validateCredentialsBeforePayment = (): void => {
       500
     );
   }
-  
+
   if (!isProduction && isProductionToken) {
     logger.warn(
       "Credenciais de PRODUÇÃO detectadas em ambiente de desenvolvimento. " +
@@ -203,7 +203,7 @@ export const translateMercadoPagoError = (error: any): string => {
   if (errorCause) {
     return errorCause;
   }
-  
+
   if (errorMessage) {
     return errorMessage;
   }
@@ -215,8 +215,8 @@ export const translateMercadoPagoError = (error: any): string => {
 let client: MercadoPagoConfig | null = null;
 let payment: Payment | null = null;
 let preference: Preference | null = null;
-let preapproval: Preapproval | null = null;
-let preapprovalPlan: PreapprovalPlan | null = null;
+let preapproval: PreApproval | null = null;
+let preapprovalPlan: PreApprovalPlan | null = null;
 
 const initializeMercadoPago = (): void => {
   if (client && payment && preference && preapproval && preapprovalPlan) {
@@ -234,8 +234,8 @@ const initializeMercadoPago = (): void => {
     });
     payment = new Payment(client);
     preference = new Preference(client);
-    preapproval = new Preapproval(client);
-    preapprovalPlan = new PreapprovalPlan(client);
+    preapproval = new PreApproval(client);
+    preapprovalPlan = new PreApprovalPlan(client);
   } catch (error: any) {
     logger.error("Erro ao inicializar Mercado Pago:", error);
     throw error; // Relançar para que o erro seja tratado adequadamente
@@ -329,7 +329,7 @@ export const createPaymentIntent = async (
     // Criar preferência de pagamento para obter public key e outros dados necessários
     // Usar external_reference para identificar a preferência depois
     const externalReference = `pref_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
+
     const preferenceData: any = {
       items: [
         {
@@ -443,7 +443,7 @@ export const processPayment = async (
     // Log das credenciais sendo usadas (sem expor o token completo)
     const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN || "NÃO CONFIGURADO";
     const tokenType = (accessToken.startsWith("TEST-") || accessToken.startsWith("TEST_")) ? "TESTE" :
-                     (accessToken.startsWith("APP_USR-") || accessToken.startsWith("APP_USR_")) ? "PRODUÇÃO" : "DESCONHECIDO";
+      (accessToken.startsWith("APP_USR-") || accessToken.startsWith("APP_USR_")) ? "PRODUÇÃO" : "DESCONHECIDO";
 
     logger.info("Credenciais do Mercado Pago em uso:", {
       tokenType,
@@ -525,7 +525,7 @@ export const processPayment = async (
         // paymentBody.issuer_id = issuerIdNumber; // Comentado para evitar erros
       }
     }
-    
+
     logger.info("Processando pagamento SEM issuer_id para evitar conflitos com BIN do cartão");
 
     logger.info("Enviando requisição ao Mercado Pago:", {
@@ -568,7 +568,7 @@ export const processPayment = async (
       },
       credentials: {
         tokenType: (process.env.MERCADOPAGO_ACCESS_TOKEN?.startsWith("TEST-") || process.env.MERCADOPAGO_ACCESS_TOKEN?.startsWith("TEST_")) ? "TESTE" :
-                   (process.env.MERCADOPAGO_ACCESS_TOKEN?.startsWith("APP_USR-") || process.env.MERCADOPAGO_ACCESS_TOKEN?.startsWith("APP_USR_")) ? "PRODUÇÃO" : "DESCONHECIDO",
+          (process.env.MERCADOPAGO_ACCESS_TOKEN?.startsWith("APP_USR-") || process.env.MERCADOPAGO_ACCESS_TOKEN?.startsWith("APP_USR_")) ? "PRODUÇÃO" : "DESCONHECIDO",
         nodeEnv: process.env.NODE_ENV,
       },
     });
@@ -622,7 +622,7 @@ export const processPayment = async (
 
     // Capturar todas as propriedades do erro
     errorDetails.allProperties = Object.keys(error);
-    
+
     // Tentar serializar o erro completo (pode falhar se tiver referências circulares)
     try {
       errorDetails.errorString = JSON.stringify(error, Object.getOwnPropertyNames(error), 2);
@@ -661,7 +661,7 @@ export const processPayment = async (
     console.error("\n╔═══════════════════════════════════════════════════════════════╗");
     console.error("║                    FIM DO ERRO                             ║");
     console.error("╚═══════════════════════════════════════════════════════════════╝\n");
-    
+
     // Log usando console.error e stderr para garantir que apareça (logger do pino pode não exibir objetos complexos)
     const errorDetailsJson = JSON.stringify({
       msg: "Erro COMPLETO do Mercado Pago",
@@ -673,14 +673,14 @@ export const processPayment = async (
       cause: errorDetails.cause,
       response: errorDetails.response,
     }, null, 2);
-    
+
     console.error("\n[ERRO DETALHADO DO MERCADO PAGO]", errorDetailsJson);
     try {
       process.stderr.write(`\n[ERRO DETALHADO DO MERCADO PAGO] ${errorDetailsJson}\n`);
     } catch (e) {
       // Se stderr.write falhar, continuar
     }
-    
+
     // Log usando logger também (formato que pino entende melhor)
     logger.error({
       msg: "Erro COMPLETO do Mercado Pago",
@@ -693,15 +693,15 @@ export const processPayment = async (
     // Extrair mensagem de erro mais específica
     let errorMessage = error.message || "Erro ao processar pagamento";
     let errorCode = null;
-    
+
     // Verificar se é erro de credenciais (pode estar em diferentes lugares)
     const errorMessageLower = error.message?.toLowerCase() || "";
     const errorString = JSON.stringify(error).toLowerCase();
-    const isCredentialsError = 
+    const isCredentialsError =
       errorMessageLower.includes("unauthorized use of live credentials") ||
       errorMessageLower.includes("unauthorized") ||
       errorString.includes("unauthorized use of live credentials") ||
-      (Array.isArray(error.cause) && error.cause.some((c: any) => 
+      (Array.isArray(error.cause) && error.cause.some((c: any) =>
         c.description?.toLowerCase().includes("unauthorized use of live credentials") ||
         c.message?.toLowerCase().includes("unauthorized use of live credentials")
       )) ||
@@ -710,7 +710,7 @@ export const processPayment = async (
     if (isCredentialsError) {
       const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN || "NÃO CONFIGURADO";
       const tokenType = (accessToken.startsWith("TEST-") || accessToken.startsWith("TEST_")) ? "TESTE" :
-                       (accessToken.startsWith("APP_USR-") || accessToken.startsWith("APP_USR_")) ? "PRODUÇÃO" : "DESCONHECIDO";
+        (accessToken.startsWith("APP_USR-") || accessToken.startsWith("APP_USR_")) ? "PRODUÇÃO" : "DESCONHECIDO";
 
       // Log direto no console para garantir que apareça
       console.error("\n⚠️⚠️⚠️ ERRO DE CREDENCIAIS DETECTADO ⚠️⚠️⚠️");
@@ -720,8 +720,8 @@ export const processPayment = async (
       console.error("Problema:", tokenType === "PRODUÇÃO"
         ? "Credenciais de PRODUÇÃO detectadas. Use credenciais de TESTE para desenvolvimento."
         : tokenType === "TESTE"
-        ? "Credenciais de TESTE detectadas. Certifique-se de usar cartões de teste válidos."
-        : "Formato de token não reconhecido.");
+          ? "Credenciais de TESTE detectadas. Certifique-se de usar cartões de teste válidos."
+          : "Formato de token não reconhecido.");
       console.error("Solução: Verifique o arquivo MERCADOPAGO_SETUP.md para instruções detalhadas.");
       console.error("⚠️⚠️⚠️ FIM DO ERRO DE CREDENCIAIS ⚠️⚠️⚠️\n");
 
@@ -733,12 +733,12 @@ export const processPayment = async (
         problema: tokenType === "PRODUÇÃO"
           ? "Credenciais de PRODUÇÃO detectadas. Use credenciais de TESTE para desenvolvimento."
           : tokenType === "TESTE"
-          ? "Credenciais de TESTE detectadas. Certifique-se de usar cartões de teste válidos."
-          : "Formato de token não reconhecido.",
+            ? "Credenciais de TESTE detectadas. Certifique-se de usar cartões de teste válidos."
+            : "Formato de token não reconhecido.",
         solucao: "Verifique o arquivo MERCADOPAGO_SETUP.md para instruções detalhadas.",
       });
     }
-    
+
     // Tentar extrair mensagem do cause array
     if (Array.isArray(error.cause) && error.cause.length > 0) {
       const firstCause = error.cause[0];
@@ -757,7 +757,7 @@ export const processPayment = async (
       errorMessage = error.cause.message;
       errorCode = error.cause.code;
     }
-    
+
     // Se for erro "Bin not found", adicionar informações adicionais
     if (errorMessage.toLowerCase().includes("bin not found") || errorCode === "bin_not_found") {
       logger.error("Erro 'Bin not found' - possíveis causas:", {
@@ -767,31 +767,31 @@ export const processPayment = async (
         suggestion: "O token pode estar inválido ou o número do cartão pode estar incorreto. Tente recriar o token.",
       });
     }
-    
+
     // Traduzir erro para mensagem amigável
     const friendlyMessage = translateMercadoPagoError({ message: errorMessage, cause: error.cause });
-    
+
     // Log usando console.error e stderr para garantir que apareça
     const translationLog = {
       original: errorMessage,
       errorCode: errorCode,
       translated: friendlyMessage,
     };
-    
+
     console.error("\n[ERRO TRADUZIDO]", JSON.stringify(translationLog, null, 2));
     try {
       process.stderr.write(`\n[ERRO TRADUZIDO] ${JSON.stringify(translationLog, null, 2)}\n`);
     } catch (e) {
       // Se stderr.write falhar, continuar
     }
-    
+
     logger.error({
       msg: "Erro traduzido",
       original: errorMessage,
       errorCode: errorCode,
       translated: friendlyMessage,
     });
-    
+
     throw new AppError(friendlyMessage, 400);
   }
 };
@@ -848,7 +848,7 @@ export const getPreferenceStatus = async (preferenceId: string): Promise<any> =>
 
     // Primeiro, tentar obter external_reference da preferência
     const externalReference = preferenceData.external_reference;
-    
+
     if (externalReference) {
       try {
         // Buscar pagamentos usando search API por external_reference
@@ -904,7 +904,7 @@ export const processWebhook = async (data: any): Promise<any> => {
     // Mercado Pago envia notificações em diferentes formatos
     // Pode vir como { type: "payment", data: { id: "..." } }
     // Ou diretamente como { action: "payment.updated", data: { id: "..." } }
-    
+
     let paymentId: string | null = null;
 
     if (data.type === "payment" && data.data?.id) {
@@ -948,7 +948,7 @@ export const createCardToken = async (cardData: {
   try {
     // AVISO: Esta implementação viola PCI DSS pois os dados do cartão passam pelo servidor
     // O ideal é usar Secure Fields no frontend
-    
+
     // Validar dados antes de criar token
     const cardNumberClean = cardData.cardNumber.replace(/\s|-/g, "");
     if (cardNumberClean.length < 13 || cardNumberClean.length > 19) {
@@ -1007,13 +1007,13 @@ export const createCardToken = async (cardData: {
         statusText: response.statusText,
         error: errorData,
       });
-      
+
       // Traduzir erro específico
       let errorMessage = errorData.message || "Erro ao criar token do cartão";
       if (errorData.cause && Array.isArray(errorData.cause) && errorData.cause.length > 0) {
         errorMessage = errorData.cause[0].description || errorMessage;
       }
-      
+
       throw new AppError(
         translateMercadoPagoError({ message: errorMessage, cause: errorData.cause }) || errorMessage,
         400
@@ -1021,7 +1021,7 @@ export const createCardToken = async (cardData: {
     }
 
     const token = await response.json();
-    
+
     logger.info("Token criado com sucesso:", {
       tokenId: token.id,
       hasFirstSixDigits: !!token.first_six_digits,
@@ -1034,11 +1034,11 @@ export const createCardToken = async (cardData: {
       error: error.message,
       stack: error.stack?.substring(0, 300),
     });
-    
+
     if (error instanceof AppError) {
       throw error;
     }
-    
+
     throw new AppError(
       error.message || "Erro ao criar token do cartão. Por favor, verifique os dados e tente novamente.",
       400
@@ -1133,7 +1133,7 @@ export const createPreapproval = async (
     const recurrence = data.recurrence || "MENSAL";
     let frequency = 1;
     let frequencyType: "days" | "weeks" | "months" = "months";
-    
+
     if (recurrence === "ANUAL") {
       frequency = 12;
       frequencyType = "months";
@@ -1321,6 +1321,7 @@ export const updatePreapproval = async (
       frequency?: number;
       frequency_type?: "days" | "weeks" | "months";
       transaction_amount?: number;
+      currency_id?: string;
     };
     card_token_id?: string;
     status?: "authorized" | "paused" | "cancelled";

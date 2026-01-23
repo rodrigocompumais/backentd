@@ -24,7 +24,6 @@ import { hash } from "bcryptjs";
 import moment from "moment";
 import CreateCompanyWithPaymentService from "../services/CompanyService/CreateCompanyWithPaymentService";
 import { createPreapproval, getPreapprovalStatus, cancelPreapproval, updatePreapproval } from "../services/PaymentService/MercadoPagoService";
-import User from "../models/User";
 
 type IndexQuery = {
   searchParam: string;
@@ -213,13 +212,13 @@ export const createFreeAccount = async (req: Request, res: Response): Promise<Re
       error: err.message,
       errors: err.inner,
     });
-    
+
     if (err.inner && err.inner.length > 0) {
       const errors = err.inner.map((e: any) => `${e.path}: ${e.message}`).join(", ");
       logger.error("Erros detalhados:", errors);
       throw new AppError(`Erro de validação: ${errors}`, 400);
     }
-    
+
     throw new AppError(err.message || "Erro de validação", 400);
   }
 
@@ -264,11 +263,11 @@ export const createFreeAccount = async (req: Request, res: Response): Promise<Re
       companyName: req.body?.name,
       companyEmail: req.body?.email,
     });
-    
+
     if (error instanceof AppError) {
       throw error;
     }
-    
+
     const errorMessage = error.message || "Erro ao criar conta. Por favor, tente novamente.";
     throw new AppError(errorMessage, error.statusCode || 400);
   }
@@ -318,13 +317,13 @@ export const createPaymentPreference = async (req: Request, res: Response): Prom
       error: err.message,
       errors: err.inner,
     });
-    
+
     if (err.inner && err.inner.length > 0) {
       const errors = err.inner.map((e: any) => `${e.path}: ${e.message}`).join(", ");
       logger.error("Erros detalhados:", errors);
       throw new AppError(`Erro de validação: ${errors}`, 400);
     }
-    
+
     throw new AppError(err.message || "Erro de validação", 400);
   }
 
@@ -421,11 +420,11 @@ export const createPaymentPreference = async (req: Request, res: Response): Prom
       companyName: req.body?.name,
       companyEmail: req.body?.email,
     });
-    
+
     if (error instanceof AppError) {
       throw error;
     }
-    
+
     const errorMessage = error.message || "Erro ao criar preferência de pagamento. Por favor, tente novamente.";
     throw new AppError(errorMessage, error.statusCode || 400);
   }
@@ -434,7 +433,7 @@ export const createPaymentPreference = async (req: Request, res: Response): Prom
 export const getMercadoPagoPublicKey = async (req: Request, res: Response): Promise<Response> => {
   try {
     const publicKey = process.env.MERCADOPAGO_PUBLIC_KEY;
-    
+
     if (!publicKey) {
       throw new AppError("Public key do Mercado Pago não configurada", 500);
     }
@@ -444,11 +443,11 @@ export const getMercadoPagoPublicKey = async (req: Request, res: Response): Prom
     });
   } catch (error: any) {
     logger.error("Erro ao obter public key:", error);
-    
+
     if (error instanceof AppError) {
       throw error;
     }
-    
+
     throw new AppError("Erro ao obter chave pública do Mercado Pago", 500);
   }
 };
@@ -495,13 +494,13 @@ export const createCompanyWithTransparentCheckout = async (req: Request, res: Re
       error: err.message,
       errors: err.inner,
     });
-    
+
     if (err.inner && err.inner.length > 0) {
       const errors = err.inner.map((e: any) => `${e.path}: ${e.message}`).join(", ");
       logger.error("Erros detalhados:", errors);
       throw new AppError(`Erro de validação: ${errors}`, 400);
     }
-    
+
     throw new AppError(err.message || "Erro de validação", 400);
   }
 
@@ -556,8 +555,8 @@ export const createCompanyWithTransparentCheckout = async (req: Request, res: Re
         id: result.invoice.id,
         status: result.invoice.status,
       },
-      message: result.payment.status === "approved" 
-        ? "Conta criada e pagamento aprovado com sucesso!" 
+      message: result.payment.status === "approved"
+        ? "Conta criada e pagamento aprovado com sucesso!"
         : "Conta criada. Aguardando confirmação do pagamento.",
     });
   } catch (error: any) {
@@ -566,11 +565,11 @@ export const createCompanyWithTransparentCheckout = async (req: Request, res: Re
       companyName: req.body?.companyData?.name,
       companyEmail: req.body?.companyData?.email,
     });
-    
+
     if (error instanceof AppError) {
       throw error;
     }
-    
+
     const errorMessage = error.message || "Erro ao processar pagamento. Por favor, tente novamente.";
     throw new AppError(errorMessage, error.statusCode || 400);
   }
@@ -661,11 +660,11 @@ export const createCompanyPreapproval = async (req: Request, res: Response): Pro
       error: error.message,
       companyId: id,
     });
-    
+
     if (error instanceof AppError) {
       throw error;
     }
-    
+
     const errorMessage = error.message || "Erro ao criar assinatura recorrente. Por favor, tente novamente.";
     throw new AppError(errorMessage, error.statusCode || 400);
   }
@@ -699,11 +698,11 @@ export const getCompanyPreapprovalStatus = async (req: Request, res: Response): 
     });
   } catch (error: any) {
     logger.error("Erro ao obter status do Preapproval:", error);
-    
+
     if (error instanceof AppError) {
       throw error;
     }
-    
+
     throw new AppError("Erro ao consultar assinatura recorrente", 400);
   }
 };
@@ -738,11 +737,11 @@ export const cancelCompanyPreapproval = async (req: Request, res: Response): Pro
     });
   } catch (error: any) {
     logger.error("Erro ao cancelar Preapproval:", error);
-    
+
     if (error instanceof AppError) {
       throw error;
     }
-    
+
     throw new AppError("Erro ao cancelar assinatura recorrente", 400);
   }
 };
@@ -784,11 +783,11 @@ export const updateCompanyAutoRenew = async (req: Request, res: Response): Promi
     });
   } catch (error: any) {
     logger.error("Erro ao atualizar autoRenew:", error);
-    
+
     if (error instanceof AppError) {
       throw error;
     }
-    
+
     throw new AppError("Erro ao atualizar renovação automática", 400);
   }
 };
@@ -827,11 +826,11 @@ export const getCompanyByEmail = async (req: Request, res: Response): Promise<Re
     });
   } catch (error: any) {
     logger.error("Erro ao buscar empresa por email:", error);
-    
+
     if (error instanceof AppError) {
       throw error;
     }
-    
+
     throw new AppError("Erro ao buscar empresa", 400);
   }
 };

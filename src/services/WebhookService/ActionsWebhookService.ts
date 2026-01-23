@@ -813,7 +813,7 @@ function removerNaoLetrasNumeros(texto: string) {
 const sendMessageWhats = async (
   whatsId: number,
   msg: any,
-  req: Request<ParamsDictionary, any, any, ParsedQs, Record<string, any>>
+  req: Request
 ) => {
   sendMessageFlow(whatsId, msg, req);
   return Promise.resolve();

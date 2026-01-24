@@ -18,14 +18,19 @@ interface CreateTemplatePromptData {
   maxTokens?: number;
   temperature?: number;
   variables?: TemplateVariables;
+  canSendInternalMessages?: boolean;
+  canTransferToAgent?: boolean;
+  canChangeTag?: boolean;
+  permitirCriarAgendamentos?: boolean;
+  businessHours?: any;
 }
 
 const CreateTemplatePromptService = async (
   promptData: CreateTemplatePromptData
 ): Promise<Prompt> => {
   // Garantir que companyId seja number
-  const companyIdNumber = typeof promptData.companyId === "string" 
-    ? parseInt(promptData.companyId, 10) 
+  const companyIdNumber = typeof promptData.companyId === "string"
+    ? parseInt(promptData.companyId, 10)
     : promptData.companyId;
 
   if (isNaN(companyIdNumber)) {
@@ -103,10 +108,11 @@ const CreateTemplatePromptService = async (
     tipoAgente: promptData.tipoAgente,
     isTemplate: true,
     templateVariables: JSON.stringify(variables),
-    canSendInternalMessages: template.permissoes.canSendInternalMessages,
-    canTransferToAgent: template.permissoes.canTransferToAgent,
-    canChangeTag: template.permissoes.canChangeTag,
-    permitirCriarAgendamentos: template.permissoes.permitirCriarAgendamentos || variables.permitir_criar_agendamentos || false,
+    canSendInternalMessages: promptData.canSendInternalMessages !== undefined ? promptData.canSendInternalMessages : template.permissoes.canSendInternalMessages,
+    canTransferToAgent: promptData.canTransferToAgent !== undefined ? promptData.canTransferToAgent : template.permissoes.canTransferToAgent,
+    canChangeTag: promptData.canChangeTag !== undefined ? promptData.canChangeTag : template.permissoes.canChangeTag,
+    permitirCriarAgendamentos: promptData.permitirCriarAgendamentos !== undefined ? promptData.permitirCriarAgendamentos : (template.permissoes.permitirCriarAgendamentos || false),
+    businessHours: promptData.businessHours || null,
     transferQueueId: null
   };
 

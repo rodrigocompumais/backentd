@@ -43,7 +43,12 @@ export const createFromTemplate = async (req: Request, res: Response): Promise<R
       maxMessages,
       maxTokens,
       temperature,
-      variables
+      variables,
+      canSendInternalMessages,
+      canTransferToAgent,
+      canChangeTag,
+      permitirCriarAgendamentos,
+      businessHours
     } = req.body;
 
     if (!tipoAgente) {
@@ -59,7 +64,12 @@ export const createFromTemplate = async (req: Request, res: Response): Promise<R
       maxMessages,
       maxTokens,
       temperature,
-      variables
+      variables,
+      canSendInternalMessages,
+      canTransferToAgent,
+      canChangeTag,
+      permitirCriarAgendamentos,
+      businessHours
     });
 
     const io = getIO();

@@ -78,6 +78,9 @@ class Prompt extends Model<Prompt> {
   @Column(DataType.TEXT)
   templateVariables: string;
 
+  @Column(DataType.JSON)
+  businessHours: any;
+
   @AllowNull
   @ForeignKey(() => Queue)
   @Column

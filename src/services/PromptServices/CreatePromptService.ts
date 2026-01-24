@@ -28,12 +28,13 @@ interface PromptData {
     isTemplate?: boolean;
     templateVariables?: string;
     transferQueueId?: number | null;
+    businessHours?: any;
 }
 
 const CreatePromptService = async (promptData: PromptData): Promise<Prompt> => {
     // Garantir que companyId seja number
     const companyIdNumber = typeof promptData.companyId === "string" ? parseInt(promptData.companyId, 10) : promptData.companyId;
-    
+
     if (isNaN(companyIdNumber)) {
         throw new AppError("companyId inválido", 400);
     }
@@ -57,13 +58,13 @@ const CreatePromptService = async (promptData: PromptData): Promise<Prompt> => {
 
     // Não exigir apiKey no prompt - será buscada das Settings
     try {
-        await promptSchema.validate({ 
-            name, 
-            prompt, 
-            queueId: queueIdNumber, 
-            maxMessages: maxMessagesNumber, 
-            companyId: companyIdNumber, 
-            provider 
+        await promptSchema.validate({
+            name,
+            prompt,
+            queueId: queueIdNumber,
+            maxMessages: maxMessagesNumber,
+            companyId: companyIdNumber,
+            provider
         });
     } catch (err: any) {
         console.error("Erro na validação do prompt:", err);
@@ -129,7 +130,8 @@ const CreatePromptService = async (promptData: PromptData): Promise<Prompt> => {
         tipoAgente: promptData.tipoAgente || "personalizado",
         isTemplate: promptData.isTemplate || false,
         templateVariables: promptData.templateVariables || null,
-        transferQueueId: promptData.transferQueueId || null
+        transferQueueId: promptData.transferQueueId || null,
+        businessHours: promptData.businessHours || null
     };
 
     try {
@@ -140,10 +142,10 @@ const CreatePromptService = async (promptData: PromptData): Promise<Prompt> => {
             queueId: promptToCreate.queueId,
             apiKey: promptToCreate.apiKey ? "***" : "(vazio)"
         });
-        
+
         let promptTable = await Prompt.create(promptToCreate);
         console.log("Prompt criado com sucesso, ID:", promptTable.id);
-        
+
         promptTable = await ShowPromptService({ promptId: promptTable.id, companyId: companyIdNumber });
         return promptTable;
     } catch (err: any) {

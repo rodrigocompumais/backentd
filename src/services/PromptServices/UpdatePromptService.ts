@@ -29,6 +29,7 @@ interface PromptData {
     isTemplate?: boolean;
     templateVariables?: string;
     transferQueueId?: number | null;
+    businessHours?: any;
 }
 
 interface Request {
@@ -56,7 +57,7 @@ const UpdatePromptService = async ({
     });
 
     // Não exigir apiKey no prompt - será buscada das Settings
-    const { name, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, model, canSendInternalMessages, canTransferToAgent, canChangeTag, permitirCriarAgendamentos, tipoAgente, isTemplate, templateVariables, transferQueueId } = promptData;
+    const { name, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, model, canSendInternalMessages, canTransferToAgent, canChangeTag, permitirCriarAgendamentos, tipoAgente, isTemplate, templateVariables, transferQueueId, businessHours } = promptData;
 
     try {
         await promptSchema.validate({ name, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, provider });
@@ -95,18 +96,18 @@ const UpdatePromptService = async ({
 
     // Garantir que provider tenha valor e modelo tenha valor default se não fornecido
     const finalModel = model || (provider === "gemini" ? "gemini-2.5-flash" : "gpt-4o-mini");
-    
-    const updateData: any = { 
-        name, 
-        prompt, 
-        maxTokens, 
-        temperature, 
-        promptTokens, 
-        completionTokens, 
-        totalTokens, 
-        queueId, 
-        maxMessages, 
-        model: finalModel, 
+
+    const updateData: any = {
+        name,
+        prompt,
+        maxTokens,
+        temperature,
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        queueId,
+        maxMessages,
+        model: finalModel,
         provider,
         canSendInternalMessages: canSendInternalMessages !== undefined ? canSendInternalMessages : false,
         canTransferToAgent: canTransferToAgent !== undefined ? canTransferToAgent : false,
@@ -116,6 +117,7 @@ const UpdatePromptService = async ({
         isTemplate: isTemplate !== undefined ? isTemplate : promptTable.isTemplate || false,
         templateVariables: templateVariables !== undefined ? templateVariables : promptTable.templateVariables,
         transferQueueId: transferQueueId || null,
+        businessHours: businessHours !== undefined ? businessHours : promptTable.businessHours,
         // Sempre definir apiKey como string vazia - será buscada das Settings
         apiKey: ""
     };

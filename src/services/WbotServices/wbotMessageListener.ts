@@ -152,7 +152,7 @@ export const extractChatId = (msg: proto.IWebMessageInfo): string => {
  */
 export const extractSenderId = (msg: proto.IWebMessageInfo): string => {
   const key = msg.key as any;
-  
+
   // LOG DETALHADO - CAPTURA TODOS OS CAMPOS PARA DIAGNÓSTICO
   logger.info('🔍 === EXTRAÇÃO DE SENDER ID ===', {
     messageId: msg.key.id,
@@ -170,11 +170,11 @@ export const extractSenderId = (msg: proto.IWebMessageInfo): string => {
     participantAltNumber: key.participantAlt?.replace(/@.*$/, "").replace(/\D/g, ""),
     remoteJidAltNumber: key.remoteJidAlt?.replace(/@.*$/, "").replace(/\D/g, "")
   });
-  
+
   // NOVA LÓGICA: Priorizar campos que NÃO sejam LIDs
   // LIDs têm formato: numero@lid (ex: 52171554951275@lid)
   // Phone Numbers têm formato: numero@s.whatsapp.net
-  
+
   const candidates = [
     { field: "participantAlt", value: key.participantAlt },
     { field: "participant", value: key.participant },
@@ -182,10 +182,10 @@ export const extractSenderId = (msg: proto.IWebMessageInfo): string => {
     { field: "remoteJid", value: msg.key.remoteJid },
     { field: "remoteJidAlt", value: key.remoteJidAlt }
   ];
-  
+
   let selectedField = "";
   let selectedValue = "";
-  
+
   // PRIMEIRA PASSAGEM: Buscar campos que NÃO sejam LIDs
   for (const candidate of candidates) {
     if (candidate.value) {
@@ -193,9 +193,9 @@ export const extractSenderId = (msg: proto.IWebMessageInfo): string => {
       const isLid = normalized.includes("@lid");
       const number = normalized.replace(/@.*$/, "").replace(/\D/g, "");
       const isValidNumber = isValidPhoneNumber(number);
-      
+
       logger.debug(`Avaliando ${candidate.field}: ${normalized} | isLid: ${isLid} | isValid: ${isValidNumber}`);
-      
+
       // Priorizar campos que não sejam LID E tenham número válido
       if (!isLid && isValidNumber) {
         selectedField = candidate.field;
@@ -205,7 +205,7 @@ export const extractSenderId = (msg: proto.IWebMessageInfo): string => {
       }
     }
   }
-  
+
   // SEGUNDA PASSAGEM: Se não encontrou campo válido, usar o primeiro disponível (incluindo LID)
   if (!selectedValue) {
     logger.warn("⚠️ Nenhum campo com número válido encontrado, usando primeiro disponível");
@@ -218,11 +218,11 @@ export const extractSenderId = (msg: proto.IWebMessageInfo): string => {
       }
     }
   }
-  
+
   const extractedNumber = selectedValue.replace(/@.*$/, "").replace(/\D/g, "");
-  
+
   logger.info(`✅ Sender ID FINAL selecionado de: ${selectedField} = ${selectedValue} (número: ${extractedNumber})`);
-  
+
   return selectedValue;
 };
 
@@ -250,7 +250,7 @@ export const extractMessageContext = (msg: proto.IWebMessageInfo) => {
   const isGroup = isGroupMessage(msg);
   const isBroadcast = isBroadcastMessage(msg);
   const isFromMe = msg.key.fromMe || false;
-  
+
   return {
     chatId,           // Onde responder
     senderId,         // Quem enviou
@@ -273,8 +273,8 @@ export const extractMessageContext = (msg: proto.IWebMessageInfo) => {
  * @param ticket - O ticket para o qual enviar a mensagem
  * @returns O JID formatado para envio
  */
-export const getChatJid = (ticket: { 
-  contact: { number: string }; 
+export const getChatJid = (ticket: {
+  contact: { number: string };
   isGroup: boolean;
   groupContact?: { number: string } | null;
 }): string => {
@@ -296,13 +296,13 @@ export const isNumeric = (value: string) => /^-?\d+$/.test(value);
  */
 export const isValidPhoneNumber = (number: string): boolean => {
   const cleanNumber = number.replace(/\D/g, "");
-  
+
   // Telefone válido tem entre 10-15 dígitos
   if (cleanNumber.length < 10 || cleanNumber.length > 15) {
     logger.warn(`❌ Número inválido (comprimento: ${cleanNumber.length}): ${cleanNumber}`);
     return false;
   }
-  
+
   // Lista de códigos de país conhecidos (1-3 dígitos)
   const knownCountryCodes = [
     "1",    // EUA/Canadá
@@ -345,17 +345,17 @@ export const isValidPhoneNumber = (number: string): boolean => {
     "95",   // Myanmar
     "98"    // Irã
   ];
-  
+
   // Verificar se começa com algum código de país conhecido
-  const hasValidCountryCode = knownCountryCodes.some(code => 
+  const hasValidCountryCode = knownCountryCodes.some(code =>
     cleanNumber.startsWith(code)
   );
-  
+
   if (!hasValidCountryCode) {
     logger.warn(`❌ Número com código de país não reconhecido: ${cleanNumber}`);
     return false;
   }
-  
+
   logger.debug(`✅ Número válido: ${cleanNumber}`);
   return true;
 };
@@ -512,7 +512,7 @@ export const sendMessageImage = async (
   // CORREÇÃO: Usar getChatJid para obter o destino correto do chat
   // Em grupos, contact é o remetente, mas devemos enviar para o grupo (ticket.contact)
   const chatJid = getChatJid(ticket);
-  
+
   try {
     sentMessage = await wbot.sendMessage(
       chatJid,
@@ -549,7 +549,7 @@ export const sendMessageLink = async (
   let sentMessage;
   // CORREÇÃO: Usar getChatJid para obter o destino correto do chat
   const chatJid = getChatJid(ticket);
-  
+
   try {
     sentMessage = await wbot.sendMessage(
       chatJid,
@@ -862,7 +862,7 @@ const verifyContact = async (
   const normalizedContactId = msgContact.id.includes("g.us")
     ? msgContact.id
     : jidNormalizedUser(msgContact.id);
-  
+
   logger.info('🔄 JID Normalizado:', {
     original: msgContact.id,
     normalized: normalizedContactId,
@@ -893,7 +893,7 @@ const verifyContact = async (
   // Tentar resolver LID para PN (Phone Number)
   if (!isGroup && normalizedContactId.includes("@lid")) {
     logger.info('🔄 Tentando resolver LID para PN...');
-    
+
     // ESTRATÉGIA 1: Usar lidMapping.getPNForLID
     const lidMappingStore = (wbot as any)?.signalRepository?.lidMapping;
     const getPNForLID = lidMappingStore?.getPNForLID;
@@ -918,7 +918,7 @@ const verifyContact = async (
     } else {
       logger.warn('⚠️ Função getPNForLID não disponível no wbot');
     }
-    
+
     // ESTRATÉGIA 2: Se ainda inválido, tentar onWhatsApp
     if (!isValidPhoneNumber(contactNumber)) {
       logger.info('🔄 Estratégia 2: Tentando wbot.onWhatsApp...');
@@ -941,7 +941,7 @@ const verifyContact = async (
         Sentry.captureException(e);
       }
     }
-    
+
     // ESTRATÉGIA 3: Se o JID original for diferente, tentar usar ele
     if (!isValidPhoneNumber(contactNumber) && msgContact.id !== normalizedContactId) {
       logger.info('🔄 Estratégia 3: Tentando JID original...');
@@ -959,7 +959,7 @@ const verifyContact = async (
   // VALIDAÇÃO DO NÚMERO EXTRAÍDO
   if (!isGroup) {
     const isValid = isValidPhoneNumber(contactNumber);
-    
+
     logger.info('🔍 Validação do número:', {
       contactNumber,
       isValid,
@@ -975,7 +975,7 @@ const verifyContact = async (
         jidNormalizado: normalizedContactId,
         empresa: companyId
       });
-      
+
       Sentry.setExtra("Número Inválido Detectado", {
         número: contactNumber,
         comprimento: contactNumber.length,
@@ -984,7 +984,7 @@ const verifyContact = async (
         empresa: companyId
       });
       Sentry.captureMessage("CRÍTICO: Número de telefone inválido detectado no verifyContact");
-      
+
       // IMPORTANTE: Não salvar número inválido - isso causará problemas de envio
       throw new Error(`Número de telefone inválido: ${contactNumber} (${contactNumber.length} dígitos) - JID: ${normalizedContactId}`);
     }
@@ -1435,7 +1435,7 @@ const handleOpenAi = async (
   // Limitar histórico para não consumir todos os tokens
   // Pegar apenas as últimas mensagens relevantes (máximo 20 para não consumir muitos tokens)
   const maxHistoryMessages = Math.min(prompt.maxMessages, 20);
-  
+
   const messages = await Message.findAll({
     where: { ticketId: ticket.id },
     order: [["createdAt", "DESC"]],
@@ -1525,7 +1525,7 @@ IMPORTANTE:
   if (msg.message?.conversation || msg.message?.extendedTextMessage?.text) {
     messagesOpenAi = [];
     messagesOpenAi.push({ role: "system", content: promptSystem });
-    
+
     // Adicionar histórico de mensagens (inverter ordem para ter do mais antigo ao mais recente)
     const sortedMessages = [...messages].reverse();
     for (
@@ -1545,7 +1545,7 @@ IMPORTANTE:
         }
       }
     }
-    
+
     // Adicionar mensagem atual do usuário
     messagesOpenAi.push({ role: "user", content: bodyMessage! });
 
@@ -1693,12 +1693,12 @@ IMPORTANTE:
       const tagMatch = response.match(/\[Tag:\s*([^\]]+)\]/i);
       if (tagMatch && tagMatch[1]) {
         const specifiedTagName = tagMatch[1].trim();
-        
+
         // Buscar tag pelo nome (case-insensitive)
         const matchedTag = availableTags.find(
           t => t.name.toLowerCase() === specifiedTagName.toLowerCase()
         );
-        
+
         if (matchedTag) {
           try {
             // Sincronizar tag do ticket
@@ -1726,19 +1726,19 @@ IMPORTANTE:
         const company = await Company.findByPk(ticket.companyId);
         const language = company?.language || "pt";
         const wbot = await GetTicketWbot(ticket);
-        
+
         const waitMessage = {
           pt: "Aguarde que algum de nossos atendentes já irá lhe atender.",
           en: "Please wait, one of our attendants will assist you shortly.",
           es: "Por favor espere, uno de nuestros atendentes le atenderá en breve."
         };
-        
+
         const messageText = waitMessage[language as keyof typeof waitMessage] || waitMessage.pt;
         const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
           text: messageText
         });
         await verifyMessage(sentMessage!, ticket, contact);
-        
+
         cleanedResponse = cleanedResponse
           .replace(/Ação: Transferir para o setor de atendimento\s*\[Fila:[^\]]+\]/gi, "")
           .replace("Ação: Transferir para o setor de atendimento", "")
@@ -1752,12 +1752,12 @@ IMPORTANTE:
         const queueMatch = response.match(/\[Fila:\s*([^\]]+)\]/i);
         if (queueMatch && queueMatch[1]) {
           const specifiedQueueName = queueMatch[1].trim();
-          
+
           // Buscar fila pelo nome (case-insensitive)
           const matchedQueue = availableQueues.find(
             q => q.name.toLowerCase() === specifiedQueueName.toLowerCase()
           );
-          
+
           if (matchedQueue) {
             targetQueueId = matchedQueue.id;
             targetQueueName = matchedQueue.name;
@@ -1853,7 +1853,7 @@ IMPORTANTE:
 
     messagesOpenAi = [];
     messagesOpenAi.push({ role: "system", content: promptSystem });
-    
+
     // Adicionar histórico de mensagens (inverter ordem para ter do mais antigo ao mais recente)
     const sortedAudioMessages = [...messages].reverse();
     for (let i = 0; i < Math.min(maxHistoryMessages, sortedAudioMessages.length); i++) {
@@ -1870,10 +1870,10 @@ IMPORTANTE:
       }
     }
     messagesOpenAi.push({ role: "user", content: transcription.data.text });
-    
+
     // Garantir que há tokens suficientes para a resposta
     const maxTokensToUse = Math.max(prompt.maxTokens, 1024);
-    
+
     const chat = await openai.createChatCompletion({
       model: prompt.model || "gpt-4o-mini", // Fallback se modelo não estiver definido
       messages: messagesOpenAi,
@@ -1956,12 +1956,12 @@ IMPORTANTE:
       const tagMatch = response.match(/\[Tag:\s*([^\]]+)\]/i);
       if (tagMatch && tagMatch[1]) {
         const specifiedTagName = tagMatch[1].trim();
-        
+
         // Buscar tag pelo nome (case-insensitive)
         const matchedTag = availableTags.find(
           t => t.name.toLowerCase() === specifiedTagName.toLowerCase()
         );
-        
+
         if (matchedTag) {
           try {
             // Sincronizar tag do ticket
@@ -1988,19 +1988,19 @@ IMPORTANTE:
         const company = await Company.findByPk(ticket.companyId);
         const language = company?.language || "pt";
         const wbot = await GetTicketWbot(ticket);
-        
+
         const waitMessage = {
           pt: "Aguarde que algum de nossos atendentes já irá lhe atender.",
           en: "Please wait, one of our attendants will assist you shortly.",
           es: "Por favor espere, uno de nuestros atendentes le atenderá en breve."
         };
-        
+
         const messageText = waitMessage[language as keyof typeof waitMessage] || waitMessage.pt;
         const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
           text: messageText
         });
         await verifyMessage(sentMessage!, ticket, contact);
-        
+
         cleanedAudioResponse = cleanedAudioResponse
           .replace(/Ação: Transferir para o setor de atendimento\s*\[Fila:[^\]]+\]/gi, "")
           .replace("Ação: Transferir para o setor de atendimento", "")
@@ -2014,12 +2014,12 @@ IMPORTANTE:
         const queueMatch = response.match(/\[Fila:\s*([^\]]+)\]/i);
         if (queueMatch && queueMatch[1]) {
           const specifiedQueueName = queueMatch[1].trim();
-          
+
           // Buscar fila pelo nome (case-insensitive)
           const matchedQueue = availableQueues.find(
             q => q.name.toLowerCase() === specifiedQueueName.toLowerCase()
           );
-          
+
           if (matchedQueue) {
             targetQueueId = matchedQueue.id;
             targetQueueName = matchedQueue.name;
@@ -3668,7 +3668,7 @@ const handleMessage = async (
     // chatId: ONDE a conversa está (grupo, privado, broadcast)
     // senderId: QUEM enviou a mensagem (participant em grupos, remoteJid em privado)
     // ========================================================================
-    const { 
+    const {
       chatId,      // Onde responder (remoteJid)
       senderId,    // Quem enviou (participant ?? remoteJid)
       isGroup,     // É grupo?
@@ -3741,7 +3741,7 @@ const handleMessage = async (
     }
 
     const whatsapp = await ShowWhatsAppService(wbot.id!, companyId);
-    
+
     // contact = contato do REMETENTE (quem enviou a mensagem)
     // Em grupos: é o membro que enviou
     // Em privado: é o contato da conversa
@@ -4482,7 +4482,7 @@ const handleMsgAck = async (
     // BUSCA 2: Se não encontrou por ID, tentar por remoteJid/participant
     if (!messageToUpdate) {
       logger.warn(`⚠️ Mensagem não encontrada por ID: ${msg.key.id}, tentando busca alternativa...`);
-      
+
       const where: any = {
         id: msg.key.id
       };
@@ -4520,7 +4520,7 @@ const handleMsgAck = async (
 
     const oldAck = messageToUpdate.ack;
     await messageToUpdate.update({ ack: chat });
-    
+
     logger.info('✅ ACK ATUALIZADO', {
       messageId: messageToUpdate.id,
       ticketId: messageToUpdate.ticketId,
@@ -4630,11 +4630,11 @@ const wbotMessageListener = async (
 
     wbot.ev.on("messages.update", (messageUpdate: WAMessageUpdate[]) => {
       if (messageUpdate.length === 0) return;
-      
+
       logger.info(`📬 Recebidos ${messageUpdate.length} eventos de atualização de mensagem`, {
         count: messageUpdate.length
       });
-      
+
       messageUpdate.forEach(async (message: WAMessageUpdate) => {
         logger.debug('📬 Evento messages.update:', {
           messageId: message.key.id,

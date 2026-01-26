@@ -8,7 +8,8 @@ import {
   Model,
   PrimaryKey,
   Table,
-  UpdatedAt
+  UpdatedAt,
+  DataType
 } from "sequelize-typescript";
 import Queue from "./Queue";
 import Company from "./Company";
@@ -64,6 +65,21 @@ class Prompt extends Model<Prompt> {
 
   @Column({ defaultValue: false })
   canChangeTag: boolean;
+
+  @Column({ defaultValue: false })
+  permitirCriarAgendamentos: boolean;
+
+  @Column({ defaultValue: null })
+  tipoAgente: string;
+
+  @Column({ defaultValue: false })
+  isTemplate: boolean;
+
+  @Column(DataType.TEXT)
+  templateVariables: string;
+
+  @Column(DataType.JSON)
+  businessHours: any;
 
   @AllowNull
   @ForeignKey(() => Queue)

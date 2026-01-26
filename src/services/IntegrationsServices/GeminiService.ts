@@ -32,6 +32,7 @@ import ListSettingsServiceOne from "../SettingServices/ListSettingsServiceOne";
 import ListQueuesService from "../QueueService/ListQueuesService";
 import Tag from "../../models/Tag";
 import SyncTags from "../TagServices/SyncTagsService";
+import ParseAppointmentCommand from "../AppointmentAIService/ParseAppointmentCommand";
 
 type Session = WASocket & {
   id?: number;
@@ -50,6 +51,7 @@ interface IGemini {
   canSendInternalMessages?: boolean;
   canTransferToAgent?: boolean;
   canChangeTag?: boolean;
+  permitirCriarAgendamentos?: boolean;
   transferQueueId?: number | null;
 }
 
@@ -225,6 +227,51 @@ export const handleGemini = async (
 - Exemplo CORRETO: "Entendo seu problema. Vou verificar. [INTERNA]Cliente relatou erro técnico, precisa de suporte especializado[/INTERNA] Em breve retorno com a solução."
 - Exemplo ERRADO: "Entendo [INTERNA]anotação[/INTERNA] seu problema."
 - Se fizer anotação interna, SEMPRE termine com [/INTERNA] antes de continuar a resposta ao cliente`;
+  }
+
+  // Adicionar instruções sobre agendamentos se habilitado
+  if (geminiSettings.permitirCriarAgendamentos) {
+    promptSystem += `\n\nGERENCIAMENTO DE AGENDAMENTOS:
+Você pode gerenciar agendamentos usando comandos especiais. Use o formato [AGENDAR]...[/AGENDAR] com JSON:
+
+Para CRIAR agendamento:
+[AGENDAR]
+{
+  "action": "criar",
+  "profissional": "Nome do Profissional",
+  "data": "2024-01-15",
+  "horarioInicio": "14:00",
+  "horarioFim": "14:30",
+  "titulo": "Consulta",
+  "descricao": "Descrição opcional"
+}
+[/AGENDAR]
+
+Para VERIFICAR disponibilidade:
+[AGENDAR]
+{
+  "action": "verificar",
+  "profissional": "Nome do Profissional",
+  "data": "2024-01-15",
+  "horarioInicio": "14:00",
+  "horarioFim": "14:30"
+}
+[/AGENDAR]
+
+Para LISTAR horários ocupados:
+[AGENDAR]
+{
+  "action": "listar",
+  "profissional": "Nome do Profissional",
+  "data": "2024-01-15"
+}
+[/AGENDAR]
+
+IMPORTANTE: 
+- Sempre verifique a disponibilidade antes de criar um agendamento
+- Use o formato JSON dentro das tags [AGENDAR]...[/AGENDAR]
+- O horarioFim é opcional (padrão: 30 minutos após horarioInicio)
+- Após processar o comando, remova as tags [AGENDAR]...[/AGENDAR] da resposta ao cliente`;
   }
 
   if (msg.message?.conversation || msg.message?.extendedTextMessage?.text) {
@@ -425,6 +472,59 @@ export const handleGemini = async (
         // Log para debug
         if (internalMessages.length > 0) {
           logger.info(`📝 Processadas ${uniqueInternalMessages.length} mensagem(ns) interna(s). Resposta limpa: ${cleanedResponse.substring(0, 100)}...`);
+        }
+      }
+
+      // Processar comandos de agendamento se habilitado
+      if (geminiSettings.permitirCriarAgendamentos && response) {
+        const appointmentCommandRegex = /\[AGENDAR\](.*?)\[\/AGENDAR\]/gs;
+        const appointmentCommands: string[] = [];
+        let match;
+
+        while ((match = appointmentCommandRegex.exec(response)) !== null) {
+          const commandContent = match[1].trim();
+          if (commandContent) {
+            appointmentCommands.push(commandContent);
+          }
+        }
+
+        if (appointmentCommands.length > 0) {
+          for (const command of appointmentCommands) {
+            try {
+              const result = await ParseAppointmentCommand({
+                command: `[AGENDAR]${command}[/AGENDAR]`,
+                companyId: ticket.companyId,
+                contactId: contact.id,
+                ticketId: ticket.id,
+                allowCreate: geminiSettings.permitirCriarAgendamentos || false
+              });
+
+              if (result.success) {
+                // Adicionar mensagem de sucesso à resposta
+                if (result.message) {
+                  cleanedResponse = cleanedResponse.replace(
+                    /\[AGENDAR\].*?\[\/AGENDAR\]/gs,
+                    result.message
+                  );
+                }
+                logger.info(`✅ Comando de agendamento processado: ${result.message}`);
+              } else {
+                // Adicionar mensagem de erro à resposta
+                const errorMsg = result.message || result.error || "Erro ao processar agendamento";
+                cleanedResponse = cleanedResponse.replace(
+                  /\[AGENDAR\].*?\[\/AGENDAR\]/gs,
+                  errorMsg
+                );
+                logger.error(`❌ Erro ao processar comando de agendamento: ${result.error}`);
+              }
+            } catch (err: any) {
+              logger.error(`❌ Erro ao processar comando de agendamento: ${err.message}`);
+              cleanedResponse = cleanedResponse.replace(
+                /\[AGENDAR\].*?\[\/AGENDAR\]/gs,
+                "Erro ao processar comando de agendamento. Tente novamente."
+              );
+            }
+          }
         }
       }
 

@@ -40,26 +40,31 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
     const [, token] = authHeader.split(" ");
     const decoded = verify(token, authConfig.secret);
     const { companyId } = decoded as TokenPayload;
-    const { name, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, model, provider, canSendInternalMessages, canTransferToAgent, canChangeTag, transferQueueId} = req.body;
-    
+    const { name, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, model, provider, canSendInternalMessages, canTransferToAgent, canChangeTag, permitirCriarAgendamentos, tipoAgente, isTemplate, templateVariables, transferQueueId, businessHours } = req.body;
+
     // Não passar apiKey - será buscada das Settings
-    const promptTable = await CreatePromptService({ 
-      name, 
-      prompt, 
-      maxTokens, 
-      temperature, 
-      promptTokens, 
-      completionTokens, 
-      totalTokens, 
-      queueId, 
-      maxMessages, 
-      companyId, 
-      model, 
-      provider, 
-      canSendInternalMessages, 
-      canTransferToAgent, 
+    const promptTable = await CreatePromptService({
+      name,
+      prompt,
+      maxTokens,
+      temperature,
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      queueId,
+      maxMessages,
+      companyId,
+      model,
+      provider,
+      canSendInternalMessages,
+      canTransferToAgent,
       canChangeTag,
-      transferQueueId 
+      permitirCriarAgendamentos,
+      tipoAgente,
+      isTemplate,
+      templateVariables,
+      transferQueueId,
+      businessHours
     });
 
     const io = getIO();
@@ -71,8 +76,8 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
     return res.status(200).json(promptTable);
   } catch (err: any) {
     console.error("Erro ao criar prompt:", err);
-    return res.status(err.statusCode || 500).json({ 
-      error: err.message || "Erro ao criar prompt" 
+    return res.status(err.statusCode || 500).json({
+      error: err.message || "Erro ao criar prompt"
     });
   }
 };

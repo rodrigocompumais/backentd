@@ -24,7 +24,12 @@ interface PromptData {
     canSendInternalMessages?: boolean;
     canTransferToAgent?: boolean;
     canChangeTag?: boolean;
+    permitirCriarAgendamentos?: boolean;
+    tipoAgente?: string;
+    isTemplate?: boolean;
+    templateVariables?: string;
     transferQueueId?: number | null;
+    businessHours?: any;
 }
 
 interface Request {
@@ -52,7 +57,7 @@ const UpdatePromptService = async ({
     });
 
     // Não exigir apiKey no prompt - será buscada das Settings
-    const { name, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, model, canSendInternalMessages, canTransferToAgent, canChangeTag, transferQueueId } = promptData;
+    const { name, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, model, canSendInternalMessages, canTransferToAgent, canChangeTag, permitirCriarAgendamentos, tipoAgente, isTemplate, templateVariables, transferQueueId, businessHours } = promptData;
 
     try {
         await promptSchema.validate({ name, prompt, maxTokens, temperature, promptTokens, completionTokens, totalTokens, queueId, maxMessages, provider });
@@ -91,23 +96,28 @@ const UpdatePromptService = async ({
 
     // Garantir que provider tenha valor e modelo tenha valor default se não fornecido
     const finalModel = model || (provider === "gemini" ? "gemini-2.5-flash" : "gpt-4o-mini");
-    
-    const updateData: any = { 
-        name, 
-        prompt, 
-        maxTokens, 
-        temperature, 
-        promptTokens, 
-        completionTokens, 
-        totalTokens, 
-        queueId, 
-        maxMessages, 
-        model: finalModel, 
+
+    const updateData: any = {
+        name,
+        prompt,
+        maxTokens,
+        temperature,
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        queueId,
+        maxMessages,
+        model: finalModel,
         provider,
         canSendInternalMessages: canSendInternalMessages !== undefined ? canSendInternalMessages : false,
         canTransferToAgent: canTransferToAgent !== undefined ? canTransferToAgent : false,
         canChangeTag: canChangeTag !== undefined ? canChangeTag : false,
+        permitirCriarAgendamentos: permitirCriarAgendamentos !== undefined ? permitirCriarAgendamentos : false,
+        tipoAgente: tipoAgente !== undefined ? tipoAgente : promptTable.tipoAgente || "personalizado",
+        isTemplate: isTemplate !== undefined ? isTemplate : promptTable.isTemplate || false,
+        templateVariables: templateVariables !== undefined ? templateVariables : promptTable.templateVariables,
         transferQueueId: transferQueueId || null,
+        businessHours: businessHours !== undefined ? businessHours : promptTable.businessHours,
         // Sempre definir apiKey como string vazia - será buscada das Settings
         apiKey: ""
     };

@@ -41,6 +41,69 @@ const formatDateTime = (date: Date | string): string => {
   });
 };
 
+// Função para retornar o manual de utilização do sistema
+const getSystemManual = (): string => {
+  return `═══════════════════════════════════════════════════════════════════
+📚 MANUAL DE UTILIZAÇÃO DO SISTEMA - BANCO DE CONHECIMENTO
+═══════════════════════════════════════════════════════════════════
+
+Você tem acesso completo ao manual de utilização do sistema Compuchat.
+Use este conhecimento para responder perguntas sobre funcionalidades,
+como usar o sistema, configurações e dúvidas dos usuários.
+
+PRINCIPAIS FUNCIONALIDADES DO SISTEMA:
+• Atendimento de conversas do WhatsApp (Tickets)
+• Dashboard com métricas e estatísticas em tempo real
+• Automação com Flow Builder
+• Campanhas de envio em massa
+• Integração com IA (OpenAI, Gemini)
+• Formulários personalizados
+• Gestão de contatos e filas
+• Sistema de tags e classificação
+• Mensagens rápidas e templates
+• Análise de conversas com IA
+
+ÁREAS PRINCIPAIS:
+1. ATENDIMENTOS (TICKETS): Gerenciar conversas, aceitar, transferir, finalizar
+2. DASHBOARD: Visualizar métricas, estatísticas e performance
+3. CONEXÕES WHATSAPP: Conectar números e gerenciar conexões
+4. CONTATOS: Gerenciar base de contatos e importar em massa
+5. FILAS: Organizar atendimento por departamento/setor
+6. USUÁRIOS: Gerenciar equipe e permissões
+7. MENSAGENS RÁPIDAS: Criar templates de resposta
+8. TAGS: Classificar e organizar tickets
+9. CAMPANHAS: Enviar mensagens em massa
+10. FLOW BUILDER: Criar automações de conversa
+11. FORMULÁRIOS: Coletar informações de clientes
+12. INTELIGÊNCIA ARTIFICIAL: Configurar e usar IA para respostas
+
+PERGUNTAS COMUNS QUE VOCÊ PODE RESPONDER:
+• Como aceitar/transferir/finalizar tickets?
+• Como criar mensagens rápidas?
+• Como conectar WhatsApp?
+• Como criar filas e atribuir atendentes?
+• Como usar tags e classificar tickets?
+• Como criar campanhas?
+• Como configurar IA (OpenAI/Gemini)?
+• Como criar formulários?
+• Como usar Flow Builder?
+• Como ver métricas no dashboard?
+• Como buscar tickets?
+• Como importar contatos?
+• Como criar usuários?
+• O que são mensagens internas?
+• Como diferenciar mensagens em grupos?
+• E muito mais...
+
+IMPORTANTE:
+- Sempre consulte este manual ao responder perguntas sobre o sistema
+- Seja específico e forneça passos detalhados quando solicitado
+- Use exemplos práticos quando apropriado
+- Se não souber algo específico, seja honesto mas ofereça alternativas
+
+═══════════════════════════════════════════════════════════════════`;
+};
+
 // Função para detectar entidades na pergunta do usuário
 const detectEntitiesInQuestion = async (
   question: string,
@@ -528,7 +591,12 @@ Total: ${contactTickets.length} tickets
     `#${t.id} | ${t.status} | ${t.contact.name} | Atendente: ${t.attendant.name} | ${formatDateTime(t.updatedAt)} | Msgs: ${t.messagesCount}`
   ).join('\n');
 
+  // Carregar manual de utilização do sistema
+  const systemManual = getSystemManual();
+
   const systemContext = `Você é um ASSISTENTE DE IA ESPECIALIZADO para a empresa "${companyData.company}". Você tem ACESSO TOTAL E COMPLETO aos dados do sistema de atendimento ao cliente via WhatsApp.
+
+${systemManual}
 
 ═══════════════════════════════════════════════════════════════════
 📊 ESTATÍSTICAS GERAIS (TEMPO REAL)
@@ -596,7 +664,21 @@ VOCÊ PODE RESPONDER SOBRE:
 ✅ Conteúdo das mensagens trocadas
 ✅ Estatísticas por atendente, fila, período
 ✅ Status de tickets e conexões
-✅ Qualquer dado listado acima`;
+✅ Qualquer dado listado acima
+
+═══════════════════════════════════════════════════════════════════
+📚 USO DO MANUAL DE CONHECIMENTO
+═══════════════════════════════════════════════════════════════════
+
+Além dos dados acima, você tem acesso ao manual completo do sistema.
+Quando usuários perguntarem sobre:
+- Como fazer algo no sistema (ex: "como aceitar ticket?")
+- Funcionalidades e recursos (ex: "o que são mensagens rápidas?")
+- Configurações e setup (ex: "como conectar WhatsApp?")
+- Dúvidas sobre uso geral do sistema
+
+Consulte o manual de conhecimento que foi fornecido no início deste contexto
+e forneça respostas detalhadas e precisas baseadas nele.`;
 
   // Construir histórico de conversa no formato da interface
   const chatMessages: ChatMessage[] = [];
@@ -609,7 +691,7 @@ VOCÊ PODE RESPONDER SOBRE:
     });
     chatMessages.push({
       role: "assistant",
-      content: "Entendido! Tenho acesso completo aos dados do sistema. Posso informar sobre atendimentos, conversas, estatísticas de cada atendente e muito mais. O que você gostaria de saber?"
+      content: "Olá! Sou o Compuchat, seu assistente inteligente. Tenho acesso completo aos dados do sistema e ao manual de utilização.\n\nPosso ajudar você com:\n✅ Dúvidas sobre como usar o sistema\n✅ Informações sobre atendimentos e conversas\n✅ Estatísticas e métricas em tempo real\n✅ Explicações sobre funcionalidades\n✅ Orientações sobre tickets, filas, contatos, campanhas e muito mais\n\nO que você gostaria de saber?"
     });
   } else {
     // Adicionar contexto atualizado mesmo com histórico

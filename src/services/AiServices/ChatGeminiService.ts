@@ -1,4 +1,6 @@
 import { Op, fn, col, literal } from "sequelize";
+import fs from "fs";
+import path from "path";
 import AppError from "../../errors/AppError";
 import Ticket from "../../models/Ticket";
 import Message from "../../models/Message";
@@ -43,11 +45,51 @@ const formatDateTime = (date: Date | string): string => {
 
 // Função para retornar o manual de utilização do sistema
 const getSystemManual = (): string => {
-  return `═══════════════════════════════════════════════════════════════════
+  try {
+    // Caminho do arquivo de manual - usando path.resolve relativo ao diretório do serviço
+    // O arquivo está no mesmo diretório deste serviço (AiServices)
+    const manualPath = path.resolve(
+      __dirname,
+      "MANUAL_UTILIZACAO_SISTEMA.txt"
+    );
+    
+    // Verificar se o arquivo existe
+    if (!fs.existsSync(manualPath)) {
+      console.warn(`Manual não encontrado em: ${manualPath}`);
+      throw new Error("Manual file not found");
+    }
+    
+    // Ler o arquivo do sistema de arquivos
+    const manualContent = fs.readFileSync(manualPath, "utf-8");
+    
+    // Adicionar cabeçalho explicativo
+    return `═══════════════════════════════════════════════════════════════════
 📚 MANUAL DE UTILIZAÇÃO DO SISTEMA - BANCO DE CONHECIMENTO
 ═══════════════════════════════════════════════════════════════════
 
 Você tem acesso completo ao manual de utilização do sistema Compuchat.
+Use este conhecimento para responder perguntas sobre funcionalidades,
+como usar o sistema, configurações e dúvidas dos usuários.
+
+IMPORTANTE:
+- Sempre consulte este manual ao responder perguntas sobre o sistema
+- Seja específico e forneça passos detalhados quando solicitado
+- Use exemplos práticos quando apropriado
+- Se não souber algo específico, seja honesto mas ofereça alternativas
+
+═══════════════════════════════════════════════════════════════════
+
+${manualContent}
+
+═══════════════════════════════════════════════════════════════════`;
+  } catch (error) {
+    console.error("Erro ao ler manual de utilização:", error);
+    // Retornar versão resumida em caso de erro
+    return `═══════════════════════════════════════════════════════════════════
+📚 MANUAL DE UTILIZAÇÃO DO SISTEMA - BANCO DE CONHECIMENTO
+═══════════════════════════════════════════════════════════════════
+
+Você tem acesso ao manual de utilização do sistema Compuchat.
 Use este conhecimento para responder perguntas sobre funcionalidades,
 como usar o sistema, configurações e dúvidas dos usuários.
 
@@ -63,45 +105,13 @@ PRINCIPAIS FUNCIONALIDADES DO SISTEMA:
 • Mensagens rápidas e templates
 • Análise de conversas com IA
 
-ÁREAS PRINCIPAIS:
-1. ATENDIMENTOS (TICKETS): Gerenciar conversas, aceitar, transferir, finalizar
-2. DASHBOARD: Visualizar métricas, estatísticas e performance
-3. CONEXÕES WHATSAPP: Conectar números e gerenciar conexões
-4. CONTATOS: Gerenciar base de contatos e importar em massa
-5. FILAS: Organizar atendimento por departamento/setor
-6. USUÁRIOS: Gerenciar equipe e permissões
-7. MENSAGENS RÁPIDAS: Criar templates de resposta
-8. TAGS: Classificar e organizar tickets
-9. CAMPANHAS: Enviar mensagens em massa
-10. FLOW BUILDER: Criar automações de conversa
-11. FORMULÁRIOS: Coletar informações de clientes
-12. INTELIGÊNCIA ARTIFICIAL: Configurar e usar IA para respostas
-
-PERGUNTAS COMUNS QUE VOCÊ PODE RESPONDER:
-• Como aceitar/transferir/finalizar tickets?
-• Como criar mensagens rápidas?
-• Como conectar WhatsApp?
-• Como criar filas e atribuir atendentes?
-• Como usar tags e classificar tickets?
-• Como criar campanhas?
-• Como configurar IA (OpenAI/Gemini)?
-• Como criar formulários?
-• Como usar Flow Builder?
-• Como ver métricas no dashboard?
-• Como buscar tickets?
-• Como importar contatos?
-• Como criar usuários?
-• O que são mensagens internas?
-• Como diferenciar mensagens em grupos?
-• E muito mais...
-
 IMPORTANTE:
 - Sempre consulte este manual ao responder perguntas sobre o sistema
 - Seja específico e forneça passos detalhados quando solicitado
 - Use exemplos práticos quando apropriado
-- Se não souber algo específico, seja honesto mas ofereça alternativas
 
 ═══════════════════════════════════════════════════════════════════`;
+  }
 };
 
 // Função para detectar entidades na pergunta do usuário

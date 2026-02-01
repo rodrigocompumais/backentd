@@ -72,7 +72,7 @@ const FindOrCreateTicketService = async (
 
     if (ticket) {
       await ticket.update({
-        status: "pending",
+        status: "open", // Grupos vão direto para "open"
         userId: null,
         unreadMessages,
         queueId: null,
@@ -125,9 +125,10 @@ const FindOrCreateTicketService = async (
   if (!ticket) {
     // Criar ticket herdando configurações do WhatsApp
     // useIntegration inicia como FALSE para permitir que o FlowBuilder execute
+    // Grupos vão direto para "open", conversas individuais para "pending"
     ticket = await Ticket.create({
       contactId: groupContact ? groupContact.id : contact.id,
-      status: "pending",
+      status: groupContact ? "open" : "pending",
       isGroup: !!groupContact,
       unreadMessages,
       whatsappId,
@@ -143,6 +144,8 @@ const FindOrCreateTicketService = async (
       ticketId: ticket.id,
       contactId: ticket.contactId,
       whatsappId: ticket.whatsappId,
+      status: ticket.status,
+      isGroup: ticket.isGroup,
       integrationId: ticket.integrationId,
       promptId: ticket.promptId,
       useIntegration: ticket.useIntegration,

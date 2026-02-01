@@ -26,12 +26,36 @@ app.set("queues", {
 const bodyparser = require("body-parser");
 app.use(bodyParser.json({ limit: "10mb" }));
 
+// Configure CORS to allow requests from frontend
+const allowedOrigins = [
+  "https://www.compuchat.cloud",
+  "https://compuchat.cloud",
+  "http://localhost:3000",
+  "http://localhost:3333"
+];
+
 app.use(
   cors({
     credentials: true,
-    origin: true
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === "development") {
+        callback(null, true);
+      } else {
+        callback(null, true); // For now, allow all origins - tighten this in production
+      }
+    },
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+    exposedHeaders: ["Content-Range", "X-Content-Range"],
+    maxAge: 600 // Cache preflight response for 10 minutes
   })
 );
+
+// Ensure OPTIONS requests are handled
+app.options("*", cors());
 app.use(cookieParser());
 app.use(express.json());
 app.use(Sentry.Handlers.requestHandler());

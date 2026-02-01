@@ -13,6 +13,7 @@ import {
   interpretOpenAIError
 } from "../../../config/openai";
 import AppError from "../../../errors/AppError";
+import { logger } from "../../../utils/logger";
 
 /**
  * Provider OpenAI implementando a interface IAIProvider
@@ -135,21 +136,66 @@ export class OpenAIProvider implements IAIProvider {
         file = audioInput;
       }
 
+      // Configurar parâmetros da transcrição
+      // Whisper API (v3.3.0): createTranscription(file, model, prompt, responseFormat, temperature, language)
+      // IMPORTANTE: Prompt deve ser MUITO curto (máx 244 caracteres) e apenas para contexto
+      // Prompt complexo ou longo pode fazer o modelo gastar tokens desnecessariamente e retornar vazio
+      // Para transcrição simples, é melhor NÃO usar prompt ou usar apenas termos técnicos esperados
+      
+      // Usar prompt apenas se fornecido, curto e relevante (não instruções complexas)
+      const promptToUse = options.prompt && options.prompt.length <= 200 
+        ? options.prompt 
+        : undefined; // Não usar prompt se for muito longo ou complexo
+
+      // Chamar API Whisper com parâmetros na ordem correta para SDK 3.3.0
+      // createTranscription(file, model, prompt, responseFormat, temperature, language)
       const response = await this.client.createTranscription(
-        file as any, // FileStream ou Buffer
-        OPENAI_TRANSCRIPTION_MODEL,
-        options.prompt,
-        "text", // responseFormat
-        undefined, // temperature
-        options.language
+        file as any, // file
+        OPENAI_TRANSCRIPTION_MODEL, // model
+        promptToUse, // prompt (undefined se não fornecido ou muito longo)
+        "text", // responseFormat - "text" retorna string direta, não JSON
+        undefined, // temperature (não usado no Whisper, mas necessário na ordem)
+        options.language || undefined // language (opcional)
       );
 
-      // Na API antiga, createTranscription retorna uma string diretamente ou um objeto
-      const text = typeof response === "string" ? response : (response as any).text || (response as any).data?.text || "";
-      if (!text || text.trim() === "") {
-        throw new AppError("A transcrição retornada está vazia", 500);
+      // Extrair texto da resposta
+      // Na API 3.3.0, createTranscription com responseFormat="text" retorna string diretamente
+      // Mas pode retornar objeto em alguns casos
+      let text = "";
+      
+      if (typeof response === "string") {
+        // Resposta direta como string
+        text = response;
+      } else if (response && typeof response === "object") {
+        // Resposta como objeto - tentar extrair de várias propriedades possíveis
+        text = (response as any).text || 
+               (response as any).data?.text || 
+               (response as any).data || 
+               (response as any).transcription ||
+               "";
+        
+        // Se ainda for objeto, tentar stringify e extrair
+        if (typeof text === "object" && text !== null) {
+          text = JSON.stringify(text);
+        }
       }
 
+      // Verificar se a transcrição está vazia
+      if (!text || typeof text !== "string" || text.trim() === "") {
+        logger.error("Transcrição vazia retornada pela API Whisper", {
+          responseType: typeof response,
+          responseValue: response,
+          responseKeys: response && typeof response === "object" ? Object.keys(response) : [],
+          promptUsed: promptToUse ? "Sim" : "Não",
+          promptLength: promptToUse?.length || 0
+        });
+        throw new AppError(
+          "A transcrição retornada está vazia. Possíveis causas: áudio sem fala, áudio muito baixo, ou prompt muito complexo. Tente novamente sem prompt ou com prompt mais curto.",
+          500
+        );
+      }
+
+      logger.info(`✅ Transcrição OpenAI concluída (${text.length} caracteres)`);
       return text.trim();
     } catch (err: any) {
       const userMessage = interpretOpenAIError(err);

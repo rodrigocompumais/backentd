@@ -118,11 +118,15 @@ const transcribeAudio = async ({
     // Chamar provider para transcrever
     logger.info(`Enviando áudio para transcrição usando ${providerName} (tamanho: ${(audioBuffer.length / 1024).toFixed(2)}KB)`);
     
+    // Prompt simplificado e direto para evitar que o modelo gaste tokens desnecessariamente
+    // O prompt do Whisper deve ser curto e direto - apenas contexto sobre o que esperar no áudio
     const transcription = await provider.transcribeAudio(
       audioBuffer,
       mimeType,
       {
-        prompt: "Transcreva este áudio de forma literal e completa. Retorne apenas o texto transcrito, sem comentários adicionais."
+        // Prompt mínimo - apenas para contexto, não para instruções complexas
+        // Whisper funciona melhor com prompts curtos que descrevem o contexto do áudio
+        prompt: undefined // Remover prompt para evitar problemas - Whisper funciona melhor sem prompt complexo
       }
     );
 

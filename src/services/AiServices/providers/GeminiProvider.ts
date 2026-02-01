@@ -13,6 +13,7 @@ import {
   interpretGeminiError
 } from "../../../config/gemini";
 import AppError from "../../../errors/AppError";
+import { logger } from "../../../utils/logger";
 
 /**
  * Provider Gemini implementando a interface IAIProvider
@@ -260,7 +261,9 @@ export class GeminiProvider implements IAIProvider {
           {
             parts: [
               {
-                text: options.prompt || "Transcreva este áudio de forma literal e completa. Retorne apenas o texto transcrito, sem comentários adicionais."
+                // Prompt simplificado e direto para evitar que o modelo gaste tokens no processo de raciocínio
+                // Gemini pode "pensar" demais se o prompt for muito complexo, deixando poucos tokens para a resposta
+                text: options.prompt || "Transcreva o áudio. Apenas o texto transcrito."
               },
               {
                 inlineData: {
@@ -272,10 +275,11 @@ export class GeminiProvider implements IAIProvider {
           }
         ],
         generationConfig: {
-          temperature: 0.1,
+          temperature: 0.1, // Baixa temperatura para transcrição mais precisa
           topK: 40,
           topP: 0.95,
-          maxOutputTokens: 4096
+          maxOutputTokens: 4096, // Limite alto para garantir que há tokens suficientes para a resposta
+          // Não usar stopSequences para transcrição - pode cortar a resposta
         },
         safetySettings: [
           {
@@ -315,7 +319,9 @@ export class GeminiProvider implements IAIProvider {
           throw new AppError("Conteúdo bloqueado pelos filtros de segurança do Gemini.", 400);
         }
         if (first.finishReason === "MAX_TOKENS") {
-          // Continua para tentar extrair o que foi gerado
+          // Modelo atingiu limite de tokens - pode indicar que gastou muitos tokens "pensando"
+          // Ainda assim, tentar extrair o que foi gerado
+          logger.warn("Gemini atingiu MAX_TOKENS na transcrição - pode indicar prompt muito complexo ou áudio muito longo");
         }
       }
 
@@ -326,6 +332,13 @@ export class GeminiProvider implements IAIProvider {
         .join("\n");
 
       if (!transcription || transcription.trim() === "") {
+        // Verificar se finishReason foi MAX_TOKENS - indica que modelo gastou todos os tokens
+        if (first?.finishReason === "MAX_TOKENS") {
+          throw new AppError(
+            "Transcrição vazia: o modelo atingiu o limite de tokens. Isso pode ocorrer se o prompt for muito complexo ou o áudio muito longo. Tente simplificar o prompt ou dividir o áudio.",
+            500
+          );
+        }
         throw new AppError("Não foi possível transcrever o áudio. A transcrição retornada está vazia.", 500);
       }
 

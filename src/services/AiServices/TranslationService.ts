@@ -1,0 +1,274 @@
+import { AIProviderSelector } from "./AIProviderSelector";
+import AppError from "../../errors/AppError";
+import Setting from "../../models/Setting";
+import { logger } from "../../utils/logger";
+import crypto from "crypto";
+
+/**
+ * Cache em memória para traduções
+ * Estrutura: Map<cacheKey, { translation: string, timestamp: number }>
+ */
+const translationCache = new Map<string, { translation: string; timestamp: number }>();
+const CACHE_DURATION = 3600000; // 1 hora em ms
+
+interface TranslateParams {
+  text: string;
+  sourceLanguage?: string;
+  targetLanguage: string;
+  companyId: number;
+}
+
+export interface TranslationResult {
+  originalText: string;
+  translatedText: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+  translationNeeded: boolean;
+  cached: boolean;
+}
+
+export class TranslationService {
+  /**
+   * Gera chave de cache para tradução
+   */
+  private static generateCacheKey(text: string, sourceLang: string, targetLang: string): string {
+    const hash = crypto.createHash('md5').update(`${text}-${sourceLang}-${targetLang}`).digest('hex');
+    return hash;
+  }
+
+  /**
+   * Limpa cache expirado
+   */
+  private static cleanExpiredCache(): void {
+    const now = Date.now();
+    for (const [key, value] of translationCache.entries()) {
+      if (now - value.timestamp > CACHE_DURATION) {
+        translationCache.delete(key);
+      }
+    }
+  }
+
+  /**
+   * Detecta o idioma de um texto usando IA
+   */
+  static async detectLanguage(text: string, companyId: number): Promise<string> {
+    try {
+      // Validações básicas
+      if (!text || text.trim().length < 10) {
+        return "unknown";
+      }
+
+      // Ignorar se for apenas emojis, números ou caracteres especiais
+      const textWithoutEmojis = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
+      const onlyNumbersOrSpecial = /^[0-9\s\W]+$/.test(textWithoutEmojis);
+      if (onlyNumbersOrSpecial) {
+        return "unknown";
+      }
+
+      // Obter provider de IA
+      const provider = await AIProviderSelector.getProvider(companyId, "chat");
+
+      // Prompt otimizado para detecção rápida de idioma
+      const prompt = `Detect the language of this text and respond ONLY with the ISO 639-1 two-letter language code (pt, en, es, fr, de, it, etc.). No explanation, just the code.
+
+Text: "${text.slice(0, 500)}"
+
+Language code:`;
+
+      const response = await provider.generateText(prompt, {
+        temperature: 0.1,
+        maxTokens: 10
+      });
+
+      // Extrair código de idioma (primeiros 2 caracteres alfanuméricos)
+      const languageCode = response.trim().toLowerCase().match(/[a-z]{2}/)?.[0] || "unknown";
+      
+      logger.info(`Idioma detectado: ${languageCode} para texto: "${text.slice(0, 50)}..."`);
+      return languageCode;
+
+    } catch (err: any) {
+      logger.error("Erro ao detectar idioma:", err);
+      return "unknown";
+    }
+  }
+
+  /**
+   * Traduz um texto de um idioma para outro
+   */
+  static async translateText(params: TranslateParams): Promise<TranslationResult> {
+    const { text, sourceLanguage, targetLanguage, companyId } = params;
+
+    try {
+      // Validações
+      if (!text || text.trim().length === 0) {
+        throw new AppError("Texto vazio não pode ser traduzido", 400);
+      }
+
+      if (!targetLanguage) {
+        throw new AppError("Idioma de destino não especificado", 400);
+      }
+
+      // Detectar idioma de origem se não foi fornecido
+      let detectedSourceLang = sourceLanguage;
+      if (!detectedSourceLang) {
+        detectedSourceLang = await this.detectLanguage(text, companyId);
+      }
+
+      // Normalizar códigos de idioma
+      const normalizedSource = detectedSourceLang.toLowerCase();
+      const normalizedTarget = targetLanguage.toLowerCase();
+
+      // Se os idiomas são iguais, não precisa traduzir
+      if (normalizedSource === normalizedTarget) {
+        return {
+          originalText: text,
+          translatedText: text,
+          sourceLanguage: normalizedSource,
+          targetLanguage: normalizedTarget,
+          translationNeeded: false,
+          cached: false
+        };
+      }
+
+      // Se idioma de origem é desconhecido, não traduzir
+      if (normalizedSource === "unknown") {
+        return {
+          originalText: text,
+          translatedText: text,
+          sourceLanguage: normalizedSource,
+          targetLanguage: normalizedTarget,
+          translationNeeded: false,
+          cached: false
+        };
+      }
+
+      // Verificar cache
+      const cacheKey = this.generateCacheKey(text, normalizedSource, normalizedTarget);
+      const cached = translationCache.get(cacheKey);
+      
+      if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
+        logger.info(`Tradução encontrada em cache: ${cacheKey}`);
+        return {
+          originalText: text,
+          translatedText: cached.translation,
+          sourceLanguage: normalizedSource,
+          targetLanguage: normalizedTarget,
+          translationNeeded: true,
+          cached: true
+        };
+      }
+
+      // Obter provider de IA
+      const provider = await AIProviderSelector.getProvider(companyId, "chat");
+
+      // Mapear códigos de idioma para nomes completos
+      const languageNames: Record<string, string> = {
+        pt: "Portuguese",
+        en: "English",
+        es: "Spanish",
+        fr: "French",
+        de: "German",
+        it: "Italian",
+        ja: "Japanese",
+        zh: "Chinese",
+        ru: "Russian",
+        ar: "Arabic"
+      };
+
+      const sourceLangName = languageNames[normalizedSource] || normalizedSource;
+      const targetLangName = languageNames[normalizedTarget] || normalizedTarget;
+
+      // Prompt para tradução
+      const prompt = `Translate the following text from ${sourceLangName} to ${targetLangName}. 
+Preserve all formatting, emojis, and line breaks. 
+Respond ONLY with the translated text, no explanations or additional comments.
+
+Text to translate:
+${text}
+
+Translation:`;
+
+      const translatedText = await provider.generateText(prompt, {
+        temperature: 0.3,
+        maxTokens: Math.max(text.length * 2, 500)
+      });
+
+      // Armazenar em cache
+      translationCache.set(cacheKey, {
+        translation: translatedText.trim(),
+        timestamp: Date.now()
+      });
+
+      // Limpar cache expirado periodicamente
+      if (translationCache.size > 1000) {
+        this.cleanExpiredCache();
+      }
+
+      logger.info(`Texto traduzido: ${normalizedSource} → ${normalizedTarget}`);
+
+      return {
+        originalText: text,
+        translatedText: translatedText.trim(),
+        sourceLanguage: normalizedSource,
+        targetLanguage: normalizedTarget,
+        translationNeeded: true,
+        cached: false
+      };
+
+    } catch (err: any) {
+      if (err instanceof AppError) {
+        throw err;
+      }
+      logger.error("Erro ao traduzir texto:", err);
+      throw new AppError(`Erro ao traduzir texto: ${err.message || "Erro desconhecido"}`, 500);
+    }
+  }
+
+  /**
+   * Obtém o idioma configurado da empresa
+   */
+  static async getCompanyLanguage(companyId: number): Promise<string> {
+    try {
+      const setting = await Setting.findOne({
+        where: {
+          key: "companyLanguage",
+          companyId
+        }
+      });
+
+      return setting?.value || "pt"; // Padrão: português
+    } catch (err: any) {
+      logger.error("Erro ao buscar idioma da empresa:", err);
+      return "pt";
+    }
+  }
+
+  /**
+   * Limpa todo o cache de traduções
+   */
+  static clearCache(): void {
+    translationCache.clear();
+    logger.info("Cache de traduções limpo");
+  }
+
+  /**
+   * Obtém estatísticas do cache
+   */
+  static getCacheStats(): { size: number; oldestEntry: number | null } {
+    const now = Date.now();
+    let oldestTimestamp: number | null = null;
+
+    for (const value of translationCache.values()) {
+      if (oldestTimestamp === null || value.timestamp < oldestTimestamp) {
+        oldestTimestamp = value.timestamp;
+      }
+    }
+
+    return {
+      size: translationCache.size,
+      oldestEntry: oldestTimestamp ? Math.floor((now - oldestTimestamp) / 1000) : null
+    };
+  }
+}
+
+export default TranslationService;

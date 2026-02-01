@@ -347,16 +347,19 @@ Total de atendimentos: ${tickets.length}
    Atualizado: ${formatDateTime(ticket.updatedAt)}
    Total de mensagens: ${ticket.messagesCount}\n`;
 
-    if (ticket.messages.length > 0) {
-      output += `   --- CONVERSAS ---\n`;
-      for (const msg of ticket.messages.slice(0, 20)) {
+    if (ticket.messages && ticket.messages.length > 0) {
+      output += `   --- CONVERSAS COMPLETAS ---\n`;
+      // Mostrar mais mensagens quando é um atendente específico (até 30 mensagens)
+      for (const msg of ticket.messages.slice(0, 30)) {
         const sender = msg.fromMe ? "🧑‍💼 ATENDENTE" : "👤 CLIENTE";
         const time = formatDateTime(msg.createdAt);
-        const body = msg.body.replace(/\n/g, " ").slice(0, 200);
-        output += `   [${time}] ${sender}: ${body}\n`;
+        const body = (msg.body || "").replace(/\n/g, " ").slice(0, 300);
+        if (body.trim()) {
+          output += `   [${time}] ${sender}: ${body}\n`;
+        }
       }
-      if (ticket.messages.length > 20) {
-        output += `   ... +${ticket.messages.length - 20} mensagens adicionais\n`;
+      if (ticket.messages.length > 30) {
+        output += `   ... +${ticket.messages.length - 30} mensagens adicionais\n`;
       }
     }
     output += `   ─────────────────────────────────────\n`;
@@ -494,7 +497,7 @@ const fetchCompanyData = async (companyId: number, period: DetectedEntities["per
     raw: true
   });
 
-  // Buscar tickets da semana com detalhes básicos
+  // Buscar tickets da semana com detalhes básicos e mensagens
   const weekTickets = await fetchTicketsWithMessages(companyId, "week", undefined, undefined, 100);
 
   return {
@@ -582,13 +585,19 @@ Total: ${contactTickets.length} tickets
    Criado: ${formatDateTime(ticket.createdAt)}
    Mensagens: ${ticket.messagesCount}\n`;
           
-          if (ticket.messages.length > 0) {
-            specificData += `   --- CONVERSAS ---\n`;
-            for (const msg of ticket.messages.slice(0, 15)) {
+          if (ticket.messages && ticket.messages.length > 0) {
+            specificData += `   --- CONVERSAS COMPLETAS ---\n`;
+            // Mostrar mais mensagens quando é um contato específico (até 25 mensagens)
+            for (const msg of ticket.messages.slice(0, 25)) {
               const sender = msg.fromMe ? "🧑‍💼 ATENDENTE" : "👤 CLIENTE";
               const time = formatDateTime(msg.createdAt);
-              const body = msg.body.replace(/\n/g, " ").slice(0, 200);
-              specificData += `   [${time}] ${sender}: ${body}\n`;
+              const body = (msg.body || "").replace(/\n/g, " ").slice(0, 300);
+              if (body.trim()) {
+                specificData += `   [${time}] ${sender}: ${body}\n`;
+              }
+            }
+            if (ticket.messages.length > 25) {
+              specificData += `   ... +${ticket.messages.length - 25} mensagens adicionais\n`;
             }
           }
         }
@@ -600,6 +609,35 @@ Total: ${contactTickets.length} tickets
   const weekTicketsList = companyData.weekTickets.slice(0, 50).map((t: any) => 
     `#${t.id} | ${t.status} | ${t.contact.name} | Atendente: ${t.attendant.name} | ${formatDateTime(t.updatedAt)} | Msgs: ${t.messagesCount}`
   ).join('\n');
+
+  // Gerar seção com mensagens dos tickets mais recentes
+  const recentTicketsWithMessages = companyData.weekTickets
+    .filter((t: any) => t.messages && Array.isArray(t.messages) && t.messages.length > 0)
+    .slice(0, 15) // Limitar a 15 tickets mais recentes com mensagens para não exceder limite de tokens
+    .map((ticket: any) => {
+      let ticketMessages = `\n▶ TICKET #${ticket.id} | ${ticket.status.toUpperCase()} | Cliente: ${ticket.contact?.name || "Desconhecido"} | Atendente: ${ticket.attendant?.name || "Sem atendente"}\n`;
+      ticketMessages += `   Criado: ${formatDateTime(ticket.createdAt)} | Atualizado: ${formatDateTime(ticket.updatedAt)}\n`;
+      ticketMessages += `   Fila: ${ticket.queue || "Sem fila"}\n`;
+      ticketMessages += `   --- MENSAGENS (${ticket.messages.length} total) ---\n`;
+      
+      // Incluir até 8 mensagens mais recentes de cada ticket (últimas mensagens da conversa)
+      const messagesToShow = ticket.messages.slice(-8);
+      for (const msg of messagesToShow) {
+        const sender = msg.fromMe ? "🧑‍💼 ATENDENTE" : "👤 CLIENTE";
+        const time = formatDateTime(msg.createdAt);
+        const body = (msg.body || "").replace(/\n/g, " ").slice(0, 250);
+        if (body.trim()) {
+          ticketMessages += `   [${time}] ${sender}: ${body}\n`;
+        }
+      }
+      
+      if (ticket.messages.length > 8) {
+        ticketMessages += `   ... +${ticket.messages.length - 8} mensagens anteriores\n`;
+      }
+      
+      return ticketMessages;
+    })
+    .join('\n');
 
   // Carregar manual de utilização do sistema
   const systemManual = getSystemManual();
@@ -653,28 +691,43 @@ ${companyData.whatsapps.map((w: any) =>
 ═══════════════════════════════════════════════════════════════════
 ${weekTicketsList || '• Nenhum ticket no período'}
 
+═══════════════════════════════════════════════════════════════════
+💬 MENSAGENS DOS TICKETS RECENTES (Últimos 15 tickets com mensagens)
+═══════════════════════════════════════════════════════════════════
+Esta seção contém as últimas mensagens dos tickets mais recentes da semana.
+Use estas informações para responder perguntas sobre:
+- Conteúdo específico das conversas
+- Contexto dos atendimentos
+- Análise de interações entre clientes e atendentes
+- Detalhes das mensagens trocadas
+
+${recentTicketsWithMessages || '• Nenhuma mensagem recente'}
+
 ${specificData}
 
 ═══════════════════════════════════════════════════════════════════
 ⚠️ INSTRUÇÕES IMPORTANTES - LEIA COM ATENÇÃO
 ═══════════════════════════════════════════════════════════════════
 
-1. VOCÊ TEM ACESSO COMPLETO aos dados acima. USE-OS para responder.
+1. VOCÊ TEM ACESSO COMPLETO aos dados acima, incluindo MENSAGENS COMPLETAS dos tickets. USE-OS para responder.
 2. Quando perguntarem sobre um ATENDENTE específico, verifique a seção "ATENDIMENTOS DETALHADOS DE [NOME]" acima.
 3. Quando perguntarem sobre um CONTATO/CLIENTE, verifique a seção "ATENDIMENTOS DO CONTATO" acima.
-4. Quando perguntarem "com quem conversou", liste TODOS os contatos/clientes dos tickets do atendente.
-5. Responda SEMPRE com DADOS CONCRETOS - nomes, números de ticket, datas, horários.
-6. NUNCA diga "não tenho acesso" se os dados estiverem listados acima.
-7. Se um atendente não teve atendimentos no período, informe isso claramente.
-8. Responda em português brasileiro, de forma clara e direta.
+4. Quando perguntarem sobre CONTEÚDO DE MENSAGENS ou CONVERSAS, consulte a seção "MENSAGENS DOS TICKETS RECENTES" acima.
+5. Quando perguntarem "com quem conversou", liste TODOS os contatos/clientes dos tickets do atendente.
+6. Responda SEMPRE com DADOS CONCRETOS - nomes, números de ticket, datas, horários, conteúdo das mensagens.
+7. NUNCA diga "não tenho acesso" se os dados estiverem listados acima.
+8. Se um atendente não teve atendimentos no período, informe isso claramente.
+9. Use as mensagens completas para fornecer contexto detalhado sobre conversas e atendimentos.
+10. Responda em português brasileiro, de forma clara e direta.
 
 VOCÊ PODE RESPONDER SOBRE:
 ✅ Quem cada atendente atendeu (hoje, semana, etc)
 ✅ Conversas completas de cada atendimento
-✅ Conteúdo das mensagens trocadas
+✅ Conteúdo das mensagens trocadas (veja seção "MENSAGENS DOS TICKETS RECENTES" acima)
+✅ Análise de conversas e contexto das mensagens
 ✅ Estatísticas por atendente, fila, período
 ✅ Status de tickets e conexões
-✅ Qualquer dado listado acima
+✅ Qualquer dado listado acima, incluindo mensagens completas dos tickets
 
 ═══════════════════════════════════════════════════════════════════
 📚 USO DO MANUAL DE CONHECIMENTO

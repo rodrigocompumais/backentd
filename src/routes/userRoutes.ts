@@ -18,6 +18,8 @@ userRoutes.put("/users/:userId", isAuth, UserController.update);
 
 userRoutes.get("/users/:userId", isAuth, UserController.show);
 
+userRoutes.get("/users/:userId/contacts", isAuth, UserController.getContacts);
+
 userRoutes.delete("/users/:userId", isAuth, UserController.remove);
 
 userRoutes.post("/users/set-language/:newLanguage", isAuth, UserController.setLanguage);

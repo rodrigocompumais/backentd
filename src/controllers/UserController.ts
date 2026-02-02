@@ -10,6 +10,7 @@ import UpdateUserService from "../services/UserServices/UpdateUserService";
 import ShowUserService from "../services/UserServices/ShowUserService";
 import DeleteUserService from "../services/UserServices/DeleteUserService";
 import SimpleListService from "../services/UserServices/SimpleListService";
+import ListContactsByUserService from "../services/ContactServices/ListContactsByUserService";
 import User from "../models/User";
 import SetLanguageCompanyService from "../services/UserServices/SetLanguageCompanyService";
 
@@ -156,6 +157,18 @@ export const list = async (req: Request, res: Response): Promise<Response> => {
   });
 
   return res.status(200).json(users);
+};
+
+export const getContacts = async (req: Request, res: Response): Promise<Response> => {
+  const { userId } = req.params;
+  const { companyId } = req.user;
+
+  const { contacts, count } = await ListContactsByUserService({
+    userId: +userId,
+    companyId
+  });
+
+  return res.status(200).json({ contacts, count });
 };
 
 export const setLanguage = async (req: Request, res: Response): Promise<Response> => {

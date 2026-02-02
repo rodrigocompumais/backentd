@@ -16,6 +16,7 @@ import Company from "./Company";
 import User from "./User";
 import Contact from "./Contact";
 import Ticket from "./Ticket";
+import UserAppointment from "./UserAppointment";
 
 @Table({ tableName: "Tasks" })
 class Task extends Model<Task> {
@@ -93,6 +94,19 @@ class Task extends Model<Task> {
 
   @BelongsTo(() => Ticket)
   ticket: Ticket;
+
+  @ForeignKey(() => UserAppointment)
+  @AllowNull(true)
+  @Column
+  appointmentId: number;
+
+  @BelongsTo(() => UserAppointment, "appointmentId")
+  appointment: UserAppointment;
+
+  @AllowNull(false)
+  @Default(false)
+  @Column
+  notificationSent: boolean;
 
   @CreatedAt
   createdAt: Date;

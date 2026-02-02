@@ -1,5 +1,7 @@
 import AppError from "../../errors/AppError";
 import UserAppointment from "../../models/UserAppointment";
+import UpdateTaskService from "../TaskServices/UpdateTaskService";
+import { logger } from "../../utils/logger";
 
 interface Request {
     appointmentId: string | number;
@@ -10,6 +12,7 @@ interface Request {
     assignedUserId?: number;
     status?: string;
     reminderMinutes?: number;
+    skipTaskSync?: boolean; // Flag para evitar loop infinito
 }
 
 const UpdateService = async ({
@@ -21,6 +24,7 @@ const UpdateService = async ({
     assignedUserId,
     status,
     reminderMinutes,
+    skipTaskSync = false,
 }: Request): Promise<UserAppointment> => {
     const appointment = await UserAppointment.findByPk(appointmentId);
 
@@ -36,6 +40,18 @@ const UpdateService = async ({
         throw new AppError("End time must be after start time", 400);
     }
 
+    // Verificar se precisa sincronizar com tarefa vinculada
+    const shouldSyncStatus = !skipTaskSync && 
+                             appointment.taskId && 
+                             status && 
+                             (status === "completed" || status === "cancelled") &&
+                             appointment.status !== status;
+
+    const shouldSyncStartTime = !skipTaskSync && 
+                                appointment.taskId && 
+                                startTime && 
+                                appointment.startTime.getTime() !== new Date(startTime).getTime();
+
     await appointment.update({
         title: title !== undefined ? title : appointment.title,
         description: description !== undefined ? description : appointment.description,
@@ -46,10 +62,42 @@ const UpdateService = async ({
         reminderMinutes: reminderMinutes !== undefined ? reminderMinutes : appointment.reminderMinutes,
     });
 
+    // Sincronizar com tarefa se necessário
+    if (shouldSyncStatus || shouldSyncStartTime) {
+        try {
+            const taskUpdate: any = {};
+
+            // Sincronizar status
+            if (shouldSyncStatus) {
+                taskUpdate.status = status;
+                logger.info(`Sincronizando status do agendamento ${appointment.id} para tarefa ${appointment.taskId}: ${status}`);
+            }
+
+            // Sincronizar dueDate
+            if (shouldSyncStartTime && startTime) {
+                taskUpdate.dueDate = startTime;
+                logger.info(`Sincronizando startTime do agendamento ${appointment.id} para tarefa ${appointment.taskId}`);
+            }
+
+            await UpdateTaskService({
+                taskId: appointment.taskId.toString(),
+                taskData: {
+                    ...taskUpdate,
+                    skipAppointmentSync: true // Evitar loop infinito
+                },
+                companyId: appointment.companyId
+            });
+        } catch (error: any) {
+            logger.error(`Erro ao sincronizar tarefa ${appointment.taskId} do agendamento ${appointment.id}:`, error);
+            // Não falhar a atualização do agendamento se a sincronização falhar
+        }
+    }
+
     await appointment.reload({
         include: [
             { association: "user", attributes: ["id", "name", "email"] },
             { association: "assignedUser", attributes: ["id", "name", "email"] },
+            { association: "task" },
         ],
     });
 

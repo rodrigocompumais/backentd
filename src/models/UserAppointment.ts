@@ -14,6 +14,7 @@ import {
 } from "sequelize-typescript";
 import Company from "./Company";
 import User from "./User";
+import Task from "./Task";
 
 @Table({ tableName: "UserAppointments" })
 class UserAppointment extends Model<UserAppointment> {
@@ -76,6 +77,14 @@ class UserAppointment extends Model<UserAppointment> {
     @Default(false)
     @Column
     notificationSent: boolean;
+
+    @ForeignKey(() => Task)
+    @AllowNull(true)
+    @Column
+    taskId: number;
+
+    @BelongsTo(() => Task, "taskId")
+    task: Task;
 
     @CreatedAt
     createdAt: Date;

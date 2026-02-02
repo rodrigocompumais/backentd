@@ -1,5 +1,4 @@
-import { Op, Sequelize } from "sequelize";
-import sequelize from "../../database";
+import { Op } from "sequelize";
 import UserAppointment from "../../models/UserAppointment";
 import Task from "../../models/Task";
 import { logger } from "../../utils/logger";
@@ -7,31 +6,18 @@ import SendReminderService from "./SendReminderService";
 
 const CheckRemindersService = async (): Promise<void> => {
   try {
+    const now = new Date();
+
     // 1. Buscar agendamentos que precisam de lembrete
-    // Usa a fórmula: startTime <= NOW() + (reminderMinutes * interval '1 minute')
-    const appointments = await UserAppointment.findAll({
+    // Buscar todos os agendamentos pendentes não notificados
+    const allAppointments = await UserAppointment.findAll({
       where: {
         notificationSent: false,
         status: {
           [Op.notIn]: ["cancelled", "completed"]
         },
         startTime: {
-          [Op.and]: [
-            // startTime deve estar no futuro
-            { [Op.gt]: new Date() },
-            // startTime deve estar dentro da janela de lembrete
-            Sequelize.where(
-              Sequelize.fn(
-                "DATE_PART",
-                "epoch",
-                Sequelize.col("startTime")
-              ),
-              Op.lte,
-              Sequelize.literal(
-                `DATE_PART('epoch', NOW()) + ("reminderMinutes" * 60)`
-              )
-            )
-          ]
+          [Op.gt]: now // Apenas agendamentos futuros
         }
       },
       include: [
@@ -44,6 +30,18 @@ const CheckRemindersService = async (): Promise<void> => {
           attributes: ["id", "name", "email"]
         }
       ]
+    });
+
+    // Filtrar agendamentos que estão dentro da janela de lembrete
+    const appointments = allAppointments.filter((appointment) => {
+      const startTime = new Date(appointment.startTime);
+      const reminderTime = new Date(startTime);
+      reminderTime.setMinutes(
+        reminderTime.getMinutes() - appointment.reminderMinutes
+      );
+
+      // Verificar se já passou o tempo de lembrete (estamos dentro da janela)
+      return now >= reminderTime && now < startTime;
     });
 
     // 2. Buscar tarefas que precisam de lembrete (15 minutos antes do vencimento)

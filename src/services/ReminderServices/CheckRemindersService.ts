@@ -1,4 +1,4 @@
-import { Op } from "sequelize";
+import { Op, Sequelize } from "sequelize";
 import sequelize from "../../database";
 import UserAppointment from "../../models/UserAppointment";
 import Task from "../../models/Task";
@@ -20,14 +20,14 @@ const CheckRemindersService = async (): Promise<void> => {
             // startTime deve estar no futuro
             { [Op.gt]: new Date() },
             // startTime deve estar dentro da janela de lembrete
-            sequelize.where(
-              sequelize.fn(
+            Sequelize.where(
+              Sequelize.fn(
                 "DATE_PART",
                 "epoch",
-                sequelize.col("startTime")
+                Sequelize.col("startTime")
               ),
               Op.lte,
-              sequelize.literal(
+              Sequelize.literal(
                 `DATE_PART('epoch', NOW()) + ("reminderMinutes" * 60)`
               )
             )

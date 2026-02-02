@@ -1,7 +1,7 @@
 import User from "../../models/User";
 import Chat from "../../models/Chat";
 import ChatUser from "../../models/ChatUser";
-import CreateChatService from "../ChatService/CreateChatService";
+import CreateService from "../ChatService/CreateService";
 import CreateMessageService from "../ChatService/CreateMessageService";
 import { getIO } from "../../libs/socket";
 import { logger } from "../../utils/logger";
@@ -17,25 +17,46 @@ const SendInternalReminderService = async (
     let reminderChat = await Chat.findOne({
       where: {
         title: `Lembretes - ${targetUser.name}`,
-        ownerId: targetUser.id
+        ownerId: targetUser.id,
+        companyId
       },
       include: [
         {
           model: ChatUser,
-          as: "users",
-          where: { userId: targetUser.id }
+          as: "users"
+        },
+        {
+          model: User,
+          as: "owner"
         }
       ]
     });
 
     // Se não existir, criar o chat
     if (!reminderChat) {
-      reminderChat = await CreateChatService({
+      // Primeiro criar o chat
+      reminderChat = await Chat.create({
         ownerId: targetUser.id,
         title: `Lembretes - ${targetUser.name}`,
-        userIds: [targetUser.id],
+        isGroup: false,
         companyId
       });
+
+      // Depois adicionar o usuário ao chat
+      await ChatUser.create({
+        chatId: reminderChat.id,
+        userId: targetUser.id,
+        unreads: 0
+      });
+
+      // Recarregar com associações
+      await reminderChat.reload({
+        include: [
+          { model: ChatUser, as: "users", include: [{ model: User, as: "user" }] },
+          { model: User, as: "owner" }
+        ]
+      });
+
       logger.info(`Chat de lembretes criado para usuário ${targetUser.id}`);
     }
 

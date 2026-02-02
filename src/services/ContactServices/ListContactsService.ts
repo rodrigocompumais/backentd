@@ -1,5 +1,6 @@
 import { Sequelize, Op } from "sequelize";
 import Contact from "../../models/Contact";
+import User from "../../models/User";
 
 interface Request {
   searchParam?: string;
@@ -41,7 +42,14 @@ const ListContactsService = async ({
     limit,
     offset,
     order: [["name", "ASC"]],
-    include: ["user"]
+    include: [
+      {
+        model: User,
+        as: "user",
+        required: false, // LEFT JOIN para incluir contatos sem usuário vinculado
+        attributes: ["id", "name", "email"]
+      }
+    ]
   });
 
   const hasMore = count > offset + contacts.length;

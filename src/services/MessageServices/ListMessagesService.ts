@@ -5,6 +5,7 @@ import Message from "../../models/Message";
 import Ticket from "../../models/Ticket";
 import ShowTicketService from "../TicketServices/ShowTicketService";
 import Queue from "../../models/Queue";
+import Contact from "../../models/Contact";
 
 interface Request {
   ticketId: string;
@@ -56,15 +57,25 @@ const ListMessagesService = async ({
     ...options,
     limit,
     include: [
-      "contact",
+      {
+        model: Contact,
+        as: "contact",
+        required: false // LEFT JOIN para incluir mensagens sem contactId (mensagens do bot)
+      },
       {
         model: Message,
         as: "quotedMsg",
-        include: ["contact"]
+        required: false,
+        include: [{
+          model: Contact,
+          as: "contact",
+          required: false
+        }]
       },
       {
         model: Queue,
-        as: "queue"
+        as: "queue",
+        required: false
       }
     ],
     offset,

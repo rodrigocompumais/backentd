@@ -2,6 +2,7 @@ import { getIO } from "../../libs/socket";
 import Message from "../../models/Message";
 import Ticket from "../../models/Ticket";
 import Whatsapp from "../../models/Whatsapp";
+import Contact from "../../models/Contact";
 
 export interface MessageData {
   id: string;
@@ -29,7 +30,11 @@ const CreateMessageService = async ({
 
   const message = await Message.findByPk(messageData.id, {
     include: [
-      "contact",
+      {
+        model: Contact,
+        as: "contact",
+        required: false // LEFT JOIN para incluir mensagens sem contactId (mensagens do bot)
+      },
       {
         model: Ticket,
         as: "ticket",
@@ -46,7 +51,12 @@ const CreateMessageService = async ({
       {
         model: Message,
         as: "quotedMsg",
-        include: ["contact"]
+        required: false,
+        include: [{
+          model: Contact,
+          as: "contact",
+          required: false
+        }]
       }
     ]
   });

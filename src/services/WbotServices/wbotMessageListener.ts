@@ -4167,19 +4167,58 @@ const handleMessage = async (
       return;
     }
 
-    //openai/gemini na fila
+    //openai/gemini na fila ou conexão
+    // HIERARQUIA: 1. Fila, 2. Conexão/WhatsApp
+    // Garantir que a fila está carregada
+    let queueWithPrompt = ticket.queue;
+    if (!queueWithPrompt && ticket.queueId) {
+      const queue = await Queue.findByPk(ticket.queueId, {
+        include: [{ model: Prompt, as: "prompt" }]
+      });
+      queueWithPrompt = queue;
+    }
+    
+    // Buscar prompt da conexão/WhatsApp
+    let whatsappPromptId = null;
+    try {
+      const whatsappData = await ShowWhatsAppService(wbot.id, ticket.companyId);
+      whatsappPromptId = whatsappData.promptId;
+    } catch (err) {
+      // Ignorar erro
+    }
+    
+    // Prioridade: 1. Fila (se ticket tem fila), 2. Ticket, 3. Conexão
+    // Se o ticket tem uma fila com prompt, usar o prompt da fila (prioridade)
+    const promptIdToUse = (ticket.queueId && queueWithPrompt?.promptId) 
+      ? queueWithPrompt.promptId 
+      : (ticket.promptId || whatsappPromptId);
+    
     if (
       !isGroup &&
       !isFromMe &&
       !ticket.userId &&
-      !isNil(ticket.promptId) &&
-      ticket.useIntegration &&
-      ticket.queueId
+      !isNil(promptIdToUse) &&
+      (ticket.queueId || whatsappPromptId) // Pode ter prompt mesmo sem fila (prompt da conexão)
     ) {
+      // Se o ticket não tem promptId mas a fila ou conexão tem, atualizar o ticket
+      // OU se a fila tem um prompt diferente do ticket, atualizar o ticket
+      if (
+        (!ticket.promptId && (queueWithPrompt?.promptId || whatsappPromptId)) ||
+        (ticket.queueId && queueWithPrompt?.promptId && ticket.promptId !== queueWithPrompt.promptId)
+      ) {
+        const promptIdToAssign = queueWithPrompt?.promptId || whatsappPromptId;
+        await ticket.update({
+          promptId: promptIdToAssign,
+          useIntegration: true
+        });
+        const source = queueWithPrompt?.promptId ? `fila ${ticket.queueId}` : "conexão WhatsApp";
+        logger.info(`Prompt da ${source} aplicado ao ticket ${ticket.id}`);
+      }
+
       // Buscar prompt para verificar provider
       try {
         const prompt = await ShowPromptService({
-          promptId: ticket.promptId,
+          promptId: promptIdToUse,
           companyId: ticket.companyId
         });
 

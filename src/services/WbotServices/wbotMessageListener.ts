@@ -1522,18 +1522,29 @@ OU use "buscar_horarios" (mesma funcionalidade):
 [/AGENDAR]
 
 REGRAS CRÍTICAS DE EXECUÇÃO AUTOMÁTICA:
-1. SEMPRE execute verificações automaticamente na mesma resposta - NUNCA diga "vou verificar" sem executar
-2. Quando o cliente pergunta sobre disponibilidade ou horários, use imediatamente o comando "listar" ou "verificar"
-3. Quando o cliente solicita um agendamento, SEMPRE verifique disponibilidade ANTES de criar usando "verificar"
+1. NUNCA diga "vou verificar", "um momento", "aguarde" ou "por favor" - EXECUTE IMEDIATAMENTE
+2. Quando o cliente pergunta sobre disponibilidade, use o comando "listar" ou "verificar" DIRETAMENTE na resposta
+3. Quando o cliente solicita um agendamento, use "verificar" ANTES de "criar" na mesma resposta
 4. Se o horário não estiver disponível, use "listar" para buscar alternativas e sugira horários disponíveis
 5. NUNCA peça ao cliente para aguardar ou enviar outra mensagem - execute tudo na mesma resposta
+
+EXEMPLOS DO QUE NÃO FAZER (ERRADO):
+❌ "Vou verificar a disponibilidade. Um momento, por favor."
+❌ "Aguarde que vou checar os horários."
+❌ "Desculpe pela confusão, vou verificar agora."
+
+EXEMPLOS DO QUE FAZER (CORRETO):
+✅ Use diretamente o comando [AGENDAR] sem texto desnecessário antes
+✅ "Horário disponível para Dr. João em 15/01 às 14h" (após executar verificar)
+✅ "Esse horário não está disponível. Horários disponíveis: 10h, 11h, 15h" (após executar listar)
 
 IMPORTANTE: 
 - Sempre verifique a disponibilidade antes de criar um agendamento
 - Use o formato JSON dentro das tags [AGENDAR]...[/AGENDAR]
 - O horarioFim é opcional (padrão: 30 minutos após horarioInicio)
 - Após processar o comando, remova as tags [AGENDAR]...[/AGENDAR] da resposta ao cliente
-- Execute TODAS as verificações necessárias na mesma resposta - não deixe para depois`;
+- Execute TODAS as verificações necessárias na mesma resposta - não deixe para depois
+- NÃO adicione texto antes dos comandos [AGENDAR] - execute diretamente`;
   }
 
 
@@ -1665,6 +1676,22 @@ IMPORTANTE:
       }
 
       if (appointmentCommands.length > 0) {
+        // Remover frases que indicam que vai verificar depois (já que vamos executar agora)
+        const phrasesToRemove = [
+          /vou verificar[^.]*/gi,
+          /vou checar[^.]*/gi,
+          /um momento[^.]*/gi,
+          /aguarde[^.]*/gi,
+          /por favor[^.]*/gi,
+          /desculpe pela (demora|confusão)[^.]*/gi,
+          /desculpe[^.]*/gi
+        ];
+        
+        for (const phraseRegex of phrasesToRemove) {
+          cleanedResponse = cleanedResponse.replace(phraseRegex, "").trim();
+        }
+        
+        // Processar todos os comandos
         for (const command of appointmentCommands) {
           try {
             const result = await ParseAppointmentCommand({
@@ -1701,6 +1728,12 @@ IMPORTANTE:
             );
           }
         }
+        
+        // Limpar múltiplas quebras de linha e espaços extras
+        cleanedResponse = cleanedResponse
+          .replace(/\n\s*\n\s*\n/g, "\n\n")
+          .replace(/^\s+|\s+$/g, "")
+          .trim();
       }
     }
 

@@ -1856,11 +1856,9 @@ IMPORTANTE:
           }
 
           // Transferir para a fila
+          // NOTA: UpdateTicketService já envia a mensagem automática de transferência, não precisa chamar sendTransferMessage novamente
           await transferQueue(targetQueueId, ticket, contact);
           logger.info(`Ticket ${ticket.id} transferido para fila ${targetQueueId} (${targetQueueName})`);
-
-          // Enviar mensagem automática de transferência
-          await sendTransferMessage(ticket, contact, targetQueueId, null);
         } else {
           logger.error(`Nenhuma fila disponível para transferência do ticket ${ticket.id}`);
         }
@@ -2116,11 +2114,9 @@ IMPORTANTE:
           }
 
           // Transferir para a fila
+          // NOTA: UpdateTicketService já envia a mensagem automática de transferência, não precisa chamar sendTransferMessage novamente
           await transferQueue(targetQueueId, ticket, contact);
           logger.info(`Ticket ${ticket.id} transferido para fila ${targetQueueId} (${targetQueueName}) (áudio)`);
-
-          // Enviar mensagem automática de transferência
-          await sendTransferMessage(ticket, contact, targetQueueId, null);
         } else {
           logger.error(`Nenhuma fila disponível para transferência do ticket ${ticket.id} (áudio)`);
         }

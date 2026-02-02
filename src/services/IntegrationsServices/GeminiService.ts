@@ -697,8 +697,7 @@ IMPORTANTE:
           await transferQueue(targetQueueId, ticket, contact);
           logger.info(`Ticket ${ticket.id} transferido para fila ${targetQueueId} (${targetQueueName})`);
           
-          // Enviar mensagem automática de transferência
-          await sendTransferMessage(ticket, contact, targetQueueId, null);
+          // NOTA: UpdateTicketService já envia a mensagem automática de transferência, não precisa chamar sendTransferMessage novamente
         } else {
           logger.error(`Nenhuma fila disponível para transferência do ticket ${ticket.id}`);
         }

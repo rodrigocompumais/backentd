@@ -18,6 +18,7 @@ interface Request {
   companyId: number;
   extraInfo?: ExtraInfo[];
   whatsappId?: number;
+  userId?: number;
 }
 
 const CreateOrUpdateContactService = async ({
@@ -28,7 +29,8 @@ const CreateOrUpdateContactService = async ({
   email = "",
   companyId,
   extraInfo = [],
-  whatsappId
+  whatsappId,
+  userId
 }: Request): Promise<Contact> => {
   const number = isGroup ? rawNumber : rawNumber.replace(/[^0-9]/g, "");
 
@@ -75,7 +77,8 @@ const CreateOrUpdateContactService = async ({
       isGroup,
       extraInfo,
       companyId,
-      whatsappId
+      whatsappId,
+      userId: userId || null
     }
   });
 
@@ -95,6 +98,11 @@ const CreateOrUpdateContactService = async ({
     // Atualizar whatsappId apenas se não estiver definido
     if (isNil(contact.whatsappId) && whatsappId) {
       updateData.whatsappId = whatsappId;
+    }
+
+    // Atualizar userId se fornecido
+    if (userId !== undefined) {
+      updateData.userId = userId;
     }
 
     await contact.update(updateData);

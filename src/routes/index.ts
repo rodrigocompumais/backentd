@@ -43,6 +43,7 @@ import formRoutes from "./formRoutes";
 import userQuickButtonRoutes from "./userQuickButtonRoutes";
 import userAppointmentRoutes from "./userAppointmentRoutes";
 import translationRoutes from "./translationRoutes";
+import customProposalRoutes from "./customProposalRoutes";
 const routes = Router();
 
 routes.use(userRoutes);
@@ -90,5 +91,6 @@ routes.use(formRoutes);
 routes.use(userQuickButtonRoutes);
 routes.use(userAppointmentRoutes);
 routes.use(translationRoutes);
+routes.use(customProposalRoutes);
 
 export default routes;

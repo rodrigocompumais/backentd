@@ -40,7 +40,8 @@ const ListContactsService = async ({
     where: whereCondition,
     limit,
     offset,
-    order: [["name", "ASC"]]
+    order: [["name", "ASC"]],
+    include: ["user"]
   });
 
   const hasMore = count > offset + contacts.length;

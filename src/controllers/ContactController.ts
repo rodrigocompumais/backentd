@@ -39,6 +39,7 @@ interface ContactData {
   number: string;
   email?: string;
   extraInfo?: ExtraInfo[];
+  userId?: number;
 }
 
 export const index = async (req: Request, res: Response): Promise<Response> => {

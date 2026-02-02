@@ -18,6 +18,7 @@ import Ticket from "./Ticket";
 import Company from "./Company";
 import Schedule from "./Schedule";
 import Whatsapp from "./Whatsapp";
+import User from "./User";
 
 @Table
 class Contact extends Model<Contact> {
@@ -83,6 +84,13 @@ class Contact extends Model<Contact> {
 
   @BelongsTo(() => Whatsapp)
   whatsapp: Whatsapp;
+
+  @ForeignKey(() => User)
+  @Column
+  userId: number;
+
+  @BelongsTo(() => User)
+  user: User;
 }
 
 export default Contact;

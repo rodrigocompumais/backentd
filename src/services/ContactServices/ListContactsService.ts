@@ -37,28 +37,44 @@ const ListContactsService = async ({
   const limit = 30;
   const offset = limit * (+pageNumber - 1);
 
-  const { count, rows: contacts } = await Contact.findAndCountAll({
-    where: whereCondition,
-    limit,
-    offset,
-    order: [["name", "ASC"]],
-    include: [
-      {
-        model: User,
-        as: "user",
-        required: false, // LEFT JOIN para incluir contatos sem usuário vinculado
-        attributes: ["id", "name", "email"]
-      }
-    ]
-  });
+  try {
+    const { count, rows: contacts } = await Contact.findAndCountAll({
+      where: whereCondition,
+      limit,
+      offset,
+      order: [["name", "ASC"]],
+      include: [
+        {
+          model: User,
+          as: "user",
+          required: false, // LEFT JOIN para incluir contatos sem usuário vinculado
+          attributes: ["id", "name", "email"]
+        }
+      ]
+    });
 
-  const hasMore = count > offset + contacts.length;
+    return {
+      contacts,
+      count,
+      hasMore: count > offset + contacts.length
+    };
+  } catch (error: any) {
+    // Se houver erro com o include (coluna userId pode não existir ainda), tentar sem o include
+    console.error("Erro ao listar contatos com include de user:", error.message);
+    const { count, rows: contacts } = await Contact.findAndCountAll({
+      where: whereCondition,
+      limit,
+      offset,
+      order: [["name", "ASC"]]
+    });
 
-  return {
-    contacts,
-    count,
-    hasMore
-  };
+    return {
+      contacts,
+      count,
+      hasMore: count > offset + contacts.length
+    };
+  }
+
 };
 
 export default ListContactsService;

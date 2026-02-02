@@ -2,6 +2,7 @@ import { Op } from "sequelize";
 import AppError from "../../errors/AppError";
 import UserAppointment from "../../models/UserAppointment";
 import User from "../../models/User";
+import { logger } from "../../utils/logger";
 
 interface CheckAvailabilityRequest {
   professionalId: number;
@@ -49,8 +50,21 @@ const CheckAvailabilityService = async ({
   }
 
   // Construir objetos Date para comparação
-  const requestedStart = new Date(`${date}T${startTime}:00`);
-  const requestedEnd = new Date(`${date}T${endTime}:00`);
+  // Usar timezone local explicitamente para evitar problemas de UTC
+  const [year, month, day] = date.split("-").map(Number);
+  const [startHour, startMinute] = startTime.split(":").map(Number);
+  const [endHour, endMinute] = endTime.split(":").map(Number);
+
+  // Criar datas no timezone local
+  const requestedStart = new Date(year, month - 1, day, startHour, startMinute, 0);
+  const requestedEnd = new Date(year, month - 1, day, endHour, endMinute, 0);
+
+  // Log para debug
+  logger.debug(`CheckAvailability: Verificando ${date} ${startTime}-${endTime}`, {
+    requestedStart: requestedStart.toISOString(),
+    requestedEnd: requestedEnd.toISOString(),
+    professionalId
+  });
 
   // Validar que o horário de fim é após o de início
   if (requestedEnd <= requestedStart) {
@@ -61,11 +75,21 @@ const CheckAvailabilityService = async ({
   }
 
   // Validar que não é no passado
+  // Adicionar margem de segurança de 5 minutos para evitar rejeitar horários muito próximos
   const now = new Date();
-  if (requestedStart < now) {
+  const marginMinutes = 5;
+  const minAllowedTime = new Date(now.getTime() + marginMinutes * 60 * 1000);
+
+  if (requestedStart < minAllowedTime) {
+    logger.warn(`CheckAvailability: Horário rejeitado por estar no passado ou muito próximo`, {
+      requestedStart: requestedStart.toISOString(),
+      now: now.toISOString(),
+      minAllowedTime: minAllowedTime.toISOString(),
+      differenceMinutes: Math.round((minAllowedTime.getTime() - requestedStart.getTime()) / 60000)
+    });
     return {
       available: false,
-      reason: "Não é possível agendar no passado"
+      reason: "Não é possível agendar no passado ou em horários muito próximos (mínimo 5 minutos de antecedência)"
     };
   }
 
@@ -74,8 +98,9 @@ const CheckAvailabilityService = async ({
   // 1. Está no mesmo dia
   // 2. O horário solicitado se sobrepõe com algum agendamento existente
   // 3. O status não é "cancelled"
-  const startOfDay = new Date(`${date}T00:00:00`);
-  const endOfDay = new Date(`${date}T23:59:59`);
+  // Usar timezone local para startOfDay e endOfDay
+  const startOfDay = new Date(year, month - 1, day, 0, 0, 0);
+  const endOfDay = new Date(year, month - 1, day, 23, 59, 59);
 
   const conflictingAppointments = await UserAppointment.findAll({
     where: {

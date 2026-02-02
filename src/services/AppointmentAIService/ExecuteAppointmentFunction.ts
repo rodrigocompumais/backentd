@@ -111,9 +111,12 @@ const ExecuteAppointmentFunction = async ({
           };
         }
 
-        // Construir objetos Date
-        const startDateTime = new Date(`${parsedArgs.date}T${parsedArgs.startTime}:00`);
-        const endDateTime = new Date(`${parsedArgs.date}T${parsedArgs.endTime}:00`);
+        // Construir objetos Date usando timezone local
+        const [year, month, day] = parsedArgs.date.split("-").map(Number);
+        const [startHour, startMinute] = parsedArgs.startTime.split(":").map(Number);
+        const [endHour, endMinute] = parsedArgs.endTime.split(":").map(Number);
+        const startDateTime = new Date(year, month - 1, day, startHour, startMinute, 0);
+        const endDateTime = new Date(year, month - 1, day, endHour, endMinute, 0);
 
         // Buscar um usuário padrão da empresa para usar como userId
         // Se não houver usuário, usar o próprio profissional como userId
@@ -262,10 +265,15 @@ const ExecuteAppointmentFunction = async ({
           };
         }
 
-        // Buscar todos os agendamentos do profissional no dia
-        const startOfDay = new Date(`${parsedArgs.date}T00:00:00`);
-        const endOfDay = new Date(`${parsedArgs.date}T23:59:59`);
+        // Construir datas no timezone local
+        const [year, month, day] = parsedArgs.date.split("-").map(Number);
+        const startOfDay = new Date(year, month - 1, day, 0, 0, 0);
+        const endOfDay = new Date(year, month - 1, day, 23, 59, 59);
+        const now = new Date();
+        const marginMinutes = 5;
+        const minAllowedTime = new Date(now.getTime() + marginMinutes * 60 * 1000);
 
+        // Buscar todos os agendamentos do profissional no dia
         const appointments = await UserAppointment.findAll({
           where: {
             assignedUserId: parsedArgs.professionalId,
@@ -293,10 +301,16 @@ const ExecuteAppointmentFunction = async ({
             const slotEndHour = slotEndMinute >= 60 ? hour + 1 : hour;
             const slotEnd = `${slotEndHour.toString().padStart(2, "0")}:${(slotEndMinute % 60).toString().padStart(2, "0")}`;
 
-            // Verificar se há conflito
-            const slotStartDate = new Date(`${parsedArgs.date}T${slotStart}:00`);
-            const slotEndDate = new Date(`${parsedArgs.date}T${slotEnd}:00`);
+            // Criar datas no timezone local para verificação
+            const slotStartDate = new Date(year, month - 1, day, hour, minute, 0);
+            const slotEndDate = new Date(year, month - 1, day, slotEndHour, slotEndMinute % 60, 0);
 
+            // Verificar se o slot está no passado
+            if (slotStartDate < minAllowedTime) {
+              continue; // Pular slots no passado
+            }
+
+            // Verificar se há conflito
             const hasConflict = appointments.some(apt => {
               const aptStart = new Date(apt.startTime);
               const aptEnd = new Date(apt.endTime);
@@ -316,6 +330,7 @@ const ExecuteAppointmentFunction = async ({
         }
 
         const availableSlots = slots.filter(s => s.available);
+        const formattedSlots = availableSlots.slice(0, 20).map(s => `${s.startTime}-${s.endTime}`);
 
         return {
           success: true,
@@ -323,7 +338,11 @@ const ExecuteAppointmentFunction = async ({
             date: parsedArgs.date,
             totalSlots: slots.length,
             availableSlots: availableSlots.length,
-            slots: availableSlots.slice(0, 10) // Limitar a 10 slots para não sobrecarregar
+            slots: availableSlots.slice(0, 20), // Aumentar para 20 slots
+            formattedSlots: formattedSlots, // Adicionar formato legível
+            slotsText: formattedSlots.length > 0 
+              ? `Horários disponíveis: ${formattedSlots.join(", ")}`
+              : "Nenhum horário disponível neste dia"
           }
         };
       }

@@ -1492,7 +1492,7 @@ Para CRIAR agendamento:
 }
 [/AGENDAR]
 
-Para VERIFICAR disponibilidade:
+Para VERIFICAR disponibilidade de um horário específico:
 [AGENDAR]
 {
   "action": "verificar",
@@ -1503,7 +1503,7 @@ Para VERIFICAR disponibilidade:
 }
 [/AGENDAR]
 
-Para LISTAR horários ocupados:
+Para LISTAR/BUSCAR horários disponíveis de um dia (quando o cliente pergunta sobre horários livres):
 [AGENDAR]
 {
   "action": "listar",
@@ -1512,11 +1512,28 @@ Para LISTAR horários ocupados:
 }
 [/AGENDAR]
 
+OU use "buscar_horarios" (mesma funcionalidade):
+[AGENDAR]
+{
+  "action": "buscar_horarios",
+  "profissional": "Nome do Profissional",
+  "data": "2024-01-15"
+}
+[/AGENDAR]
+
+REGRAS CRÍTICAS DE EXECUÇÃO AUTOMÁTICA:
+1. SEMPRE execute verificações automaticamente na mesma resposta - NUNCA diga "vou verificar" sem executar
+2. Quando o cliente pergunta sobre disponibilidade ou horários, use imediatamente o comando "listar" ou "verificar"
+3. Quando o cliente solicita um agendamento, SEMPRE verifique disponibilidade ANTES de criar usando "verificar"
+4. Se o horário não estiver disponível, use "listar" para buscar alternativas e sugira horários disponíveis
+5. NUNCA peça ao cliente para aguardar ou enviar outra mensagem - execute tudo na mesma resposta
+
 IMPORTANTE: 
 - Sempre verifique a disponibilidade antes de criar um agendamento
 - Use o formato JSON dentro das tags [AGENDAR]...[/AGENDAR]
 - O horarioFim é opcional (padrão: 30 minutos após horarioInicio)
-- Após processar o comando, remova as tags [AGENDAR]...[/AGENDAR] da resposta ao cliente`;
+- Após processar o comando, remova as tags [AGENDAR]...[/AGENDAR] da resposta ao cliente
+- Execute TODAS as verificações necessárias na mesma resposta - não deixe para depois`;
   }
 
 

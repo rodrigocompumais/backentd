@@ -4,7 +4,9 @@ import { logger } from "../../utils/logger";
 
 export interface OpenAITokenInfo {
   available: boolean;
+  tokensUsed?: number;
   tokensRemaining?: number;
+  tokensTotal?: number;
   quotaExceeded?: boolean;
   error?: string;
 }
@@ -42,18 +44,26 @@ const CheckOpenAITokensService = async (
       // A API do OpenAI não fornece endpoint direto para verificar quota,
       // então fazemos uma chamada de teste mínima
       try {
-        await openai.createChatCompletion({
+        const completion = await openai.createChatCompletion({
           model: "gpt-3.5-turbo",
           messages: [{ role: "user", content: "test" }],
           max_tokens: 1
         });
 
         // Se chegou aqui, a API está funcionando
-        // A API do OpenAI não retorna informações de quota diretamente
-        // Mas podemos inferir que está disponível se a chamada foi bem-sucedida
+        // Extrair informações de tokens da resposta
+        const usage = completion.data.usage;
+        const promptTokens = usage?.prompt_tokens || 0;
+        const completionTokens = usage?.completion_tokens || 0;
+        const totalTokens = usage?.total_tokens || (promptTokens + completionTokens);
+
+        // A API do OpenAI não fornece quota total diretamente via API pública
+        // Mas podemos mostrar os tokens usados na última chamada
         return {
           available: true,
-          tokensRemaining: undefined // Não disponível via API
+          tokensUsed: totalTokens,
+          tokensRemaining: undefined, // Não disponível via API pública
+          tokensTotal: undefined // Não disponível via API pública
         };
       } catch (error: any) {
         if (error.response?.status === 429) {

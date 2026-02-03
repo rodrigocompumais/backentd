@@ -6,7 +6,9 @@ import { GEMINI_BASE_URL, GEMINI_MODEL } from "../../config/gemini";
 
 export interface GeminiTokenInfo {
   available: boolean;
+  tokensUsed?: number;
   tokensRemaining?: number;
+  tokensTotal?: number;
   quotaExceeded?: boolean;
   error?: string;
 }
@@ -68,11 +70,20 @@ const CheckGeminiTokensService = async (
       );
 
       // Se chegou aqui, a API está funcionando
-      // A API do Gemini não retorna informações de quota diretamente
-      // Mas podemos inferir que está disponível se a chamada foi bem-sucedida
+      // Tentar extrair informações de tokens da resposta
+      const usageMetadata = response.data?.usageMetadata;
+      const promptTokens = usageMetadata?.promptTokenCount || 0;
+      const candidatesTokenCount = usageMetadata?.candidatesTokenCount || 0;
+      const totalTokens = usageMetadata?.totalTokenCount || (promptTokens + candidatesTokenCount);
+
+      // A API do Gemini não fornece quota total diretamente via API pública
+      // Mas podemos mostrar os tokens usados na última chamada de teste
+      // Nota: Este é apenas um exemplo da última chamada, não o total acumulado
       return {
         available: true,
-        tokensRemaining: undefined // Não disponível via API
+        tokensUsed: totalTokens > 0 ? totalTokens : undefined,
+        tokensRemaining: undefined, // Não disponível via API pública do Gemini
+        tokensTotal: undefined // Não disponível via API pública do Gemini
       };
     } catch (error: any) {
       if (error.response?.status === 429) {

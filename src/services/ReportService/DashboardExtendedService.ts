@@ -7,6 +7,9 @@ import Whatsapp from "../../models/Whatsapp";
 import User from "../../models/User";
 import Queue from "../../models/Queue";
 import Task from "../../models/Task";
+import CheckGeminiTokensService, { GeminiTokenInfo } from "../AiServices/CheckGeminiTokensService";
+import CheckOpenAITokensService, { OpenAITokenInfo } from "../AiServices/CheckOpenAITokensService";
+import { logger } from "../../utils/logger";
 
 export interface ExtendedDashboardData {
   ticketsToday: number;
@@ -23,6 +26,8 @@ export interface ExtendedDashboardData {
   ticketsByHour: { hour: string; count: number }[];
   ticketsByDay: { day: string; count: number }[];
   topAttendants: { name: string; count: number }[];
+  geminiTokens: GeminiTokenInfo;
+  openAITokens: OpenAITokenInfo;
 }
 
 export interface ExtendedParams {
@@ -243,6 +248,36 @@ const DashboardExtendedService = async (
     count: parseInt(item.count, 10)
   }));
 
+  // Verificar tokens/quota do Gemini e OpenAI
+  let geminiTokens: GeminiTokenInfo = {
+    available: false,
+    error: "Não verificado"
+  };
+  let openAITokens: OpenAITokenInfo = {
+    available: false,
+    error: "Não verificado"
+  };
+
+  try {
+    geminiTokens = await CheckGeminiTokensService(companyId);
+  } catch (error: any) {
+    logger.error(`Erro ao verificar tokens do Gemini no dashboard:`, error);
+    geminiTokens = {
+      available: false,
+      error: error.message || "Erro ao verificar"
+    };
+  }
+
+  try {
+    openAITokens = await CheckOpenAITokensService(companyId);
+  } catch (error: any) {
+    logger.error(`Erro ao verificar tokens do OpenAI no dashboard:`, error);
+    openAITokens = {
+      available: false,
+      error: error.message || "Erro ao verificar"
+    };
+  }
+
   return {
     ticketsToday,
     resolutionRate,
@@ -257,7 +292,9 @@ const DashboardExtendedService = async (
     ticketsByQueue,
     ticketsByHour,
     ticketsByDay,
-    topAttendants
+    topAttendants,
+    geminiTokens,
+    openAITokens
   };
 };
 

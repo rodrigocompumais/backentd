@@ -2243,7 +2243,26 @@ export const verifyMediaMessage = async (
     companyId: ticket.companyId
   });
 
+  // Verificar se é uma resposta de avaliação ANTES de reabrir o ticket
   if (!msg.key.fromMe && ticket.status === "closed") {
+    // Buscar ticketTraking para verificar se há avaliação pendente
+    const ticketTraking = await FindOrCreateATicketTrakingService({
+      ticketId: ticket.id,
+      companyId: ticket.companyId,
+      whatsappId: ticket.whatsappId
+    });
+
+    // Se for uma resposta de avaliação, processar e não reabrir o ticket
+    if (ticketTraking && verifyRating(ticketTraking)) {
+      const bodyMessage = body?.trim() || "";
+      const ratingMatch = bodyMessage.match(/^[1-3]$/);
+      if (ratingMatch) {
+        await handleRating(parseFloat(ratingMatch[0]), ticket, ticketTraking);
+        return newMessage; // Não reabrir o ticket, apenas processar a avaliação
+      }
+    }
+
+    // Se não for avaliação, reabrir o ticket normalmente
     await ticket.update({ status: "pending" });
     await ticket.reload({
       include: [
@@ -2332,7 +2351,26 @@ export const verifyMessage = async (
 
   await CreateMessageService({ messageData, companyId: ticket.companyId });
 
+  // Verificar se é uma resposta de avaliação ANTES de reabrir o ticket
   if (!msg.key.fromMe && ticket.status === "closed") {
+    // Buscar ticketTraking para verificar se há avaliação pendente
+    const ticketTraking = await FindOrCreateATicketTrakingService({
+      ticketId: ticket.id,
+      companyId: ticket.companyId,
+      whatsappId: ticket.whatsappId
+    });
+
+    // Se for uma resposta de avaliação, processar e não reabrir o ticket
+    if (ticketTraking && verifyRating(ticketTraking)) {
+      const bodyMessage = body?.trim() || "";
+      const ratingMatch = bodyMessage.match(/^[1-3]$/);
+      if (ratingMatch) {
+        await handleRating(parseFloat(ratingMatch[0]), ticket, ticketTraking);
+        return; // Não reabrir o ticket, apenas processar a avaliação
+      }
+    }
+
+    // Se não for avaliação, reabrir o ticket normalmente
     await ticket.update({ status: "pending" });
     await ticket.reload({
       include: [

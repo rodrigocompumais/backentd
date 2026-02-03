@@ -19,6 +19,7 @@ import Whatsapp from "../../models/Whatsapp";
 import { Op } from "sequelize";
 import AppError from "../../errors/AppError";
 import Company from "../../models/Company";
+import Task from "../../models/Task";
 
 interface TicketData {
   status?: string;
@@ -121,26 +122,54 @@ const UpdateTicketService = async ({
 
       if (setting?.value === "enabled") {
         if (ticketTraking.ratingAt == null) {
-          const ratingTxt = ratingMessage || "";
-          let bodyRatingMessage = `\u200e${ratingTxt}\n\n`;
-          bodyRatingMessage +=
-            "Digite de 1 à 3 para qualificar nosso atendimento:\n*1* - _Insatisfeito_\n*2* - _Satisfeito_\n*3* - _Muito Satisfeito_\n\n";
-          await SendWhatsAppMessage({ body: bodyRatingMessage, ticket });
+          // Validar se o ticket foi criado há menos de 7 dias
+          const ticketCreatedAt = new Date(ticket.createdAt);
+          const now = new Date();
+          const daysSinceCreation = Math.floor((now.getTime() - ticketCreatedAt.getTime()) / (1000 * 60 * 60 * 24));
+          const isCreatedLessThan7Days = daysSinceCreation < 7;
 
-          await ticketTraking.update({
-            ratingAt: moment().toDate(),
-            userId: actionUserId
+          // Validar se existe tarefa vinculada com vencimento em menos de 7 dias
+          const linkedTask = await Task.findOne({
+            where: {
+              ticketId: ticket.id,
+              companyId: ticket.companyId,
+              dueDate: {
+                [Op.not]: null
+              }
+            }
           });
 
-          io.to(`company-${ticket.companyId}-open`)
-            .to(`queue-${ticket.queueId}-open`)
-            .to(ticketId.toString())
-            .emit(`company-${ticket.companyId}-ticket`, {
-              action: "delete",
-              ticketId: ticket.id
+          let hasTaskDueInLessThan7Days = false;
+          if (linkedTask && linkedTask.dueDate) {
+            const taskDueDate = new Date(linkedTask.dueDate);
+            const daysUntilDue = Math.floor((taskDueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+            // Verificar se a data de vencimento está em menos de 7 dias no futuro
+            hasTaskDueInLessThan7Days = daysUntilDue >= 0 && daysUntilDue < 7;
+          }
+
+          // Só enviar mensagem de avaliação se ambas as condições forem verdadeiras
+          if (isCreatedLessThan7Days && hasTaskDueInLessThan7Days) {
+            const ratingTxt = ratingMessage || "";
+            let bodyRatingMessage = `\u200e${ratingTxt}\n\n`;
+            bodyRatingMessage +=
+              "Digite de 1 à 3 para qualificar nosso atendimento:\n*1* - _Insatisfeito_\n*2* - _Satisfeito_\n*3* - _Muito Satisfeito_\n\n";
+            await SendWhatsAppMessage({ body: bodyRatingMessage, ticket });
+
+            await ticketTraking.update({
+              ratingAt: moment().toDate(),
+              userId: actionUserId
             });
 
-          return { ticket, oldStatus, oldUserId };
+            io.to(`company-${ticket.companyId}-open`)
+              .to(`queue-${ticket.queueId}-open`)
+              .to(ticketId.toString())
+              .emit(`company-${ticket.companyId}-ticket`, {
+                action: "delete",
+                ticketId: ticket.id
+              });
+
+            return { ticket, oldStatus, oldUserId };
+          }
         }
         ticketTraking.ratingAt = moment().toDate();
         ticketTraking.rated = false;

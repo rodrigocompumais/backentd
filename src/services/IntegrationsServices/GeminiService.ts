@@ -825,15 +825,15 @@ export const handleGemini = async (
         data: errorData,
         message: err.message
       });
-    } finally {
-      // Remover lock após processamento (com timeout de segurança já configurado)
-      processingLocks.delete(lockKey);
-      logger.debug(`Lock removido: ${lockKey}`);
       
       if (status) {
         const userMessage = interpretGeminiError(status, errorData);
         logger.error(`Erro Gemini: ${userMessage}`);
       }
+    } finally {
+      // Remover lock após processamento (com timeout de segurança já configurado)
+      processingLocks.delete(lockKey);
+      logger.debug(`Lock removido: ${lockKey}`);
     }
   } else if (msg.message?.audioMessage) {
     // Nota: Gemini não tem transcrição de áudio nativa como Whisper

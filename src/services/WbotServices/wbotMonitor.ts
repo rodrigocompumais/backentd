@@ -32,15 +32,49 @@ const wbotMonitor = async (
   companyId: number
 ): Promise<void> => {
   try {
+    // Armazenar timestamps das chamadas oferecidas para detectar rejeições rápidas
+    const callOffers = new Map<string, number>();
+
     wbot.ws.on("CB:call", async (node: BinaryNode) => {
       const content = node.content[0] as any;
 
       if (content.tag === "offer") {
         const { from, id } = node.attrs;
-
+        // Armazenar timestamp quando a chamada é oferecida
+        if (id) {
+          callOffers.set(id, Date.now());
+        }
       }
 
       if (content.tag === "terminate") {
+        const callId = content.attrs?.["call-id"] || node.attrs?.id;
+        
+        // Verificar se a chamada foi rejeitada
+        // Uma chamada rejeitada geralmente termina muito rapidamente (< 2 segundos)
+        const offerTime = callId ? callOffers.get(callId) : null;
+        const isRejected = offerTime && (Date.now() - offerTime) < 2000;
+        
+        // Também verificar atributos que indicam rejeição
+        const callReason = content.attrs?.reason || node.attrs?.reason || "";
+        const duration = content.attrs?.["duration"] ? parseInt(content.attrs["duration"]) : null;
+        const isRejectedByReason = callReason === "reject" || callReason === "timeout" || 
+                                  duration === 0 || duration === null;
+        
+        // Se a chamada foi rejeitada, não criar mensagem no chat
+        if (isRejected || isRejectedByReason) {
+          logger.info(`Chamada rejeitada detectada (reason: ${callReason}, duration: ${duration}, tempo: ${offerTime ? Date.now() - offerTime : 'N/A'}ms), não criando mensagem no chat.`);
+          // Limpar registro da chamada
+          if (callId) {
+            callOffers.delete(callId);
+          }
+          return;
+        }
+        
+        // Limpar registro da chamada após processamento
+        if (callId) {
+          callOffers.delete(callId);
+        }
+
         const sendMsgCall = await Setting.findOne({
           where: { key: "call", companyId },
         });

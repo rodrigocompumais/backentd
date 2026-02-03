@@ -45,73 +45,24 @@ const formatDateTime = (date: Date | string): string => {
 
 // Função para retornar o manual de utilização do sistema
 const getSystemManual = (): string => {
-  try {
-    // Caminho do arquivo de manual - usando path.resolve relativo ao diretório do serviço
-    // O arquivo está no mesmo diretório deste serviço (AiServices)
-    const manualPath = path.resolve(
-      __dirname,
-      "MANUAL_UTILIZACAO_SISTEMA.txt"
-    );
-    
-    // Verificar se o arquivo existe
-    if (!fs.existsSync(manualPath)) {
-      console.warn(`Manual não encontrado em: ${manualPath}`);
-      throw new Error("Manual file not found");
-    }
-    
-    // Ler o arquivo do sistema de arquivos
-    const manualContent = fs.readFileSync(manualPath, "utf-8");
-    
-    // Adicionar cabeçalho explicativo
-    return `═══════════════════════════════════════════════════════════════════
-📚 MANUAL DE UTILIZAÇÃO DO SISTEMA - BANCO DE CONHECIMENTO
-═══════════════════════════════════════════════════════════════════
+  // Retornar versão resumida otimizada para economizar tokens
+  return `📚 MANUAL DO SISTEMA COMPUCHAT (Resumo)
 
-Você tem acesso completo ao manual de utilização do sistema Compuchat.
-Use este conhecimento para responder perguntas sobre funcionalidades,
-como usar o sistema, configurações e dúvidas dos usuários.
+PRINCIPAIS FUNCIONALIDADES:
+• Tickets: Atendimento WhatsApp, transferências, filas, tags
+• Dashboard: Métricas, estatísticas, relatórios
+• Automação: Flow Builder, campanhas, mensagens rápidas
+• IA: Integração OpenAI/Gemini, análise de conversas
+• Gestão: Contatos, usuários, filas, tags, formulários
 
-IMPORTANTE:
-- Sempre consulte este manual ao responder perguntas sobre o sistema
-- Seja específico e forneça passos detalhados quando solicitado
-- Use exemplos práticos quando apropriado
-- Se não souber algo específico, seja honesto mas ofereça alternativas
+COMO USAR:
+- Tickets: Aceitar, responder, transferir, fechar, classificar com tags
+- Dashboard: Visualizar métricas, estatísticas, relatórios
+- Configurações: WhatsApp, IA, filas, tags, mensagens rápidas
+- Campanhas: Criar, agendar, enviar em massa
+- Flow Builder: Criar automações e fluxos
 
-═══════════════════════════════════════════════════════════════════
-
-${manualContent}
-
-═══════════════════════════════════════════════════════════════════`;
-  } catch (error) {
-    console.error("Erro ao ler manual de utilização:", error);
-    // Retornar versão resumida em caso de erro
-    return `═══════════════════════════════════════════════════════════════════
-📚 MANUAL DE UTILIZAÇÃO DO SISTEMA - BANCO DE CONHECIMENTO
-═══════════════════════════════════════════════════════════════════
-
-Você tem acesso ao manual de utilização do sistema Compuchat.
-Use este conhecimento para responder perguntas sobre funcionalidades,
-como usar o sistema, configurações e dúvidas dos usuários.
-
-PRINCIPAIS FUNCIONALIDADES DO SISTEMA:
-• Atendimento de conversas do WhatsApp (Tickets)
-• Dashboard com métricas e estatísticas em tempo real
-• Automação com Flow Builder
-• Campanhas de envio em massa
-• Integração com IA (OpenAI, Gemini)
-• Formulários personalizados
-• Gestão de contatos e filas
-• Sistema de tags e classificação
-• Mensagens rápidas e templates
-• Análise de conversas com IA
-
-IMPORTANTE:
-- Sempre consulte este manual ao responder perguntas sobre o sistema
-- Seja específico e forneça passos detalhados quando solicitado
-- Use exemplos práticos quando apropriado
-
-═══════════════════════════════════════════════════════════════════`;
-  }
+IMPORTANTE: Use este conhecimento para responder perguntas sobre funcionalidades e uso do sistema.`;
 };
 
 // Função para detectar entidades na pergunta do usuário
@@ -586,18 +537,18 @@ Total: ${contactTickets.length} tickets
    Mensagens: ${ticket.messagesCount}\n`;
           
           if (ticket.messages && ticket.messages.length > 0) {
-            specificData += `   --- CONVERSAS COMPLETAS ---\n`;
-            // Mostrar mais mensagens quando é um contato específico (até 25 mensagens)
-            for (const msg of ticket.messages.slice(0, 25)) {
-              const sender = msg.fromMe ? "🧑‍💼 ATENDENTE" : "👤 CLIENTE";
+            specificData += `   --- CONVERSAS ---\n`;
+            // Limitar a 8 mensagens para economizar tokens
+            for (const msg of ticket.messages.slice(0, 8)) {
+              const sender = msg.fromMe ? "ATENDENTE" : "CLIENTE";
               const time = formatDateTime(msg.createdAt);
-              const body = (msg.body || "").replace(/\n/g, " ").slice(0, 300);
+              const body = (msg.body || "").replace(/\n/g, " ").slice(0, 200);
               if (body.trim()) {
                 specificData += `   [${time}] ${sender}: ${body}\n`;
               }
             }
-            if (ticket.messages.length > 25) {
-              specificData += `   ... +${ticket.messages.length - 25} mensagens adicionais\n`;
+            if (ticket.messages.length > 8) {
+              specificData += `   ... +${ticket.messages.length - 8} mensagens\n`;
             }
           }
         }
@@ -605,34 +556,31 @@ Total: ${contactTickets.length} tickets
     }
   }
 
-  // Gerar lista de tickets da semana para o contexto
-  const weekTicketsList = companyData.weekTickets.slice(0, 50).map((t: any) => 
-    `#${t.id} | ${t.status} | ${t.contact.name} | Atendente: ${t.attendant.name} | ${formatDateTime(t.updatedAt)} | Msgs: ${t.messagesCount}`
-  ).join('\n');
+  // Gerar lista de tickets da semana para o contexto (limitado para economizar tokens)
+  const weekTicketsList = companyData.weekTickets.slice(0, 20).map((t: any) => 
+    `#${t.id} | ${t.status} | ${t.contact.name} | ${formatDateTime(t.updatedAt)}`
+  ).join(' | ');
 
-  // Gerar seção com mensagens dos tickets mais recentes
+  // Gerar seção com mensagens dos tickets mais recentes (otimizado para economizar tokens)
   const recentTicketsWithMessages = companyData.weekTickets
     .filter((t: any) => t.messages && Array.isArray(t.messages) && t.messages.length > 0)
-    .slice(0, 15) // Limitar a 15 tickets mais recentes com mensagens para não exceder limite de tokens
+    .slice(0, 10) // Reduzido de 15 para 10 tickets
     .map((ticket: any) => {
-      let ticketMessages = `\n▶ TICKET #${ticket.id} | ${ticket.status.toUpperCase()} | Cliente: ${ticket.contact?.name || "Desconhecido"} | Atendente: ${ticket.attendant?.name || "Sem atendente"}\n`;
-      ticketMessages += `   Criado: ${formatDateTime(ticket.createdAt)} | Atualizado: ${formatDateTime(ticket.updatedAt)}\n`;
-      ticketMessages += `   Fila: ${ticket.queue || "Sem fila"}\n`;
-      ticketMessages += `   --- MENSAGENS (${ticket.messages.length} total) ---\n`;
+      let ticketMessages = `\n▶ TICKET #${ticket.id} | ${ticket.status} | ${ticket.contact?.name || "Desconhecido"}\n`;
       
-      // Incluir até 8 mensagens mais recentes de cada ticket (últimas mensagens da conversa)
-      const messagesToShow = ticket.messages.slice(-8);
+      // Limitar a 6 mensagens por ticket (reduzido de 8)
+      const messagesToShow = ticket.messages.slice(-6);
       for (const msg of messagesToShow) {
-        const sender = msg.fromMe ? "🧑‍💼 ATENDENTE" : "👤 CLIENTE";
+        const sender = msg.fromMe ? "ATENDENTE" : "CLIENTE";
         const time = formatDateTime(msg.createdAt);
-        const body = (msg.body || "").replace(/\n/g, " ").slice(0, 250);
+        const body = (msg.body || "").replace(/\n/g, " ").slice(0, 150); // Reduzido de 250 para 150
         if (body.trim()) {
           ticketMessages += `   [${time}] ${sender}: ${body}\n`;
         }
       }
       
-      if (ticket.messages.length > 8) {
-        ticketMessages += `   ... +${ticket.messages.length - 8} mensagens anteriores\n`;
+      if (ticket.messages.length > 6) {
+        ticketMessages += `   ... +${ticket.messages.length - 6} msgs\n`;
       }
       
       return ticketMessages;
@@ -642,106 +590,23 @@ Total: ${contactTickets.length} tickets
   // Carregar manual de utilização do sistema
   const systemManual = getSystemManual();
 
-  const systemContext = `Você é um ASSISTENTE DE IA ESPECIALIZADO para a empresa "${companyData.company}". Você tem ACESSO TOTAL E COMPLETO aos dados do sistema de atendimento ao cliente via WhatsApp.
+  const systemContext = `Você é um ASSISTENTE DE IA para a empresa "${companyData.company}". Você tem acesso aos dados do sistema de atendimento via WhatsApp.
 
 ${systemManual}
 
-═══════════════════════════════════════════════════════════════════
-📊 ESTATÍSTICAS GERAIS (TEMPO REAL)
-═══════════════════════════════════════════════════════════════════
+📊 ESTATÍSTICAS: Tickets: ${companyData.stats.total.tickets} | Mensagens: ${companyData.stats.total.messages} | Contatos: ${companyData.stats.total.contacts} | Abertos: ${companyData.stats.ticketsByStatus.open} | Pendentes: ${companyData.stats.ticketsByStatus.pending} | Fechados: ${companyData.stats.ticketsByStatus.closed} | Hoje: ${companyData.stats.period.ticketsToday} tickets
 
-📈 TOTAIS GERAIS:
-• Total de Tickets (histórico): ${companyData.stats.total.tickets}
-• Total de Mensagens: ${companyData.stats.total.messages}
-• Total de Contatos: ${companyData.stats.total.contacts}
+👥 ATENDENTES (${companyData.users.length}): ${companyData.userTicketStats.slice(0, 5).map((s: any) => `${s.userName}: ${s.ticketsToday} hoje`).join(' | ') || 'Nenhum'}
 
-📋 TICKETS POR STATUS (AGORA):
-• Abertos (em atendimento): ${companyData.stats.ticketsByStatus.open}
-• Pendentes (aguardando): ${companyData.stats.ticketsByStatus.pending}
-• Fechados: ${companyData.stats.ticketsByStatus.closed}
+📁 FILAS: ${companyData.queueStats.slice(0, 5).map((s: any) => `${s.queueName}: ${s.ticketsCount}`).join(' | ') || 'Nenhuma'}
 
-📅 ATIVIDADE:
-• Tickets HOJE: ${companyData.stats.period.ticketsToday}
-• Tickets últimos 7 DIAS: ${companyData.stats.period.ticketsWeek}
-• Mensagens HOJE: ${companyData.stats.period.messagesToday}
+📋 TICKETS RECENTES (${companyData.weekTickets.length}): ${weekTicketsList.substring(0, 500) || 'Nenhum'}
 
-═══════════════════════════════════════════════════════════════════
-👥 EQUIPE DE ATENDENTES (${companyData.users.length} usuários)
-═══════════════════════════════════════════════════════════════════
-${companyData.userTicketStats.map((s: any) => 
-  `• ${s.userName}: ${s.ticketsToday} tickets HOJE | ${s.ticketsPeriod} na semana`
-).join('\n') || '• Nenhum atendente cadastrado'}
+💬 MENSAGENS RECENTES: ${recentTicketsWithMessages.substring(0, 800) || 'Nenhuma'}
 
-═══════════════════════════════════════════════════════════════════
-📁 FILAS/SETORES
-═══════════════════════════════════════════════════════════════════
-${companyData.queueStats.length > 0
-  ? companyData.queueStats.map((s: any) => `• ${s.queueName}: ${s.ticketsCount} tickets`).join('\n')
-  : '• Nenhuma fila cadastrada'}
+${specificData.substring(0, 1000)}
 
-═══════════════════════════════════════════════════════════════════
-📱 CONEXÕES WHATSAPP
-═══════════════════════════════════════════════════════════════════
-${companyData.whatsapps.map((w: any) => 
-  `• ${w.name} - Status: ${w.status}${w.isDefault ? ' (Principal)' : ''}`
-).join('\n') || '• Nenhuma conexão'}
-
-═══════════════════════════════════════════════════════════════════
-📋 TICKETS DOS ÚLTIMOS 7 DIAS (${companyData.weekTickets.length} tickets)
-═══════════════════════════════════════════════════════════════════
-${weekTicketsList || '• Nenhum ticket no período'}
-
-═══════════════════════════════════════════════════════════════════
-💬 MENSAGENS DOS TICKETS RECENTES (Últimos 15 tickets com mensagens)
-═══════════════════════════════════════════════════════════════════
-Esta seção contém as últimas mensagens dos tickets mais recentes da semana.
-Use estas informações para responder perguntas sobre:
-- Conteúdo específico das conversas
-- Contexto dos atendimentos
-- Análise de interações entre clientes e atendentes
-- Detalhes das mensagens trocadas
-
-${recentTicketsWithMessages || '• Nenhuma mensagem recente'}
-
-${specificData}
-
-═══════════════════════════════════════════════════════════════════
-⚠️ INSTRUÇÕES IMPORTANTES - LEIA COM ATENÇÃO
-═══════════════════════════════════════════════════════════════════
-
-1. VOCÊ TEM ACESSO COMPLETO aos dados acima, incluindo MENSAGENS COMPLETAS dos tickets. USE-OS para responder.
-2. Quando perguntarem sobre um ATENDENTE específico, verifique a seção "ATENDIMENTOS DETALHADOS DE [NOME]" acima.
-3. Quando perguntarem sobre um CONTATO/CLIENTE, verifique a seção "ATENDIMENTOS DO CONTATO" acima.
-4. Quando perguntarem sobre CONTEÚDO DE MENSAGENS ou CONVERSAS, consulte a seção "MENSAGENS DOS TICKETS RECENTES" acima.
-5. Quando perguntarem "com quem conversou", liste TODOS os contatos/clientes dos tickets do atendente.
-6. Responda SEMPRE com DADOS CONCRETOS - nomes, números de ticket, datas, horários, conteúdo das mensagens.
-7. NUNCA diga "não tenho acesso" se os dados estiverem listados acima.
-8. Se um atendente não teve atendimentos no período, informe isso claramente.
-9. Use as mensagens completas para fornecer contexto detalhado sobre conversas e atendimentos.
-10. Responda em português brasileiro, de forma clara e direta.
-
-VOCÊ PODE RESPONDER SOBRE:
-✅ Quem cada atendente atendeu (hoje, semana, etc)
-✅ Conversas completas de cada atendimento
-✅ Conteúdo das mensagens trocadas (veja seção "MENSAGENS DOS TICKETS RECENTES" acima)
-✅ Análise de conversas e contexto das mensagens
-✅ Estatísticas por atendente, fila, período
-✅ Status de tickets e conexões
-✅ Qualquer dado listado acima, incluindo mensagens completas dos tickets
-
-═══════════════════════════════════════════════════════════════════
-📚 USO DO MANUAL DE CONHECIMENTO
-═══════════════════════════════════════════════════════════════════
-
-Além dos dados acima, você tem acesso ao manual completo do sistema.
-Quando usuários perguntarem sobre:
-- Como fazer algo no sistema (ex: "como aceitar ticket?")
-- Funcionalidades e recursos (ex: "o que são mensagens rápidas?")
-- Configurações e setup (ex: "como conectar WhatsApp?")
-- Dúvidas sobre uso geral do sistema
-
-Consulte o manual de conhecimento que foi fornecido no início deste contexto
-e forneça respostas detalhadas e precisas baseadas nele.`;
+INSTRUÇÕES: Use os dados acima para responder. Seja objetivo e cite dados concretos. Responda em português brasileiro.`;
 
   // Construir histórico de conversa no formato da interface
   const chatMessages: ChatMessage[] = [];

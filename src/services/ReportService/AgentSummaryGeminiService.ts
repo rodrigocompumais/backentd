@@ -31,7 +31,7 @@ const AgentSummaryGeminiService = async ({
   agentId,
   dateStart,
   dateEnd,
-  maxMessages = 200
+  maxMessages = 100 // Reduzido de 200 para 100 para economizar tokens
 }: AgentSummaryParams): Promise<AgentSummaryResponse> => {
   // Selecionar provider usando configuração automática
   const provider = await AIProviderSelector.getProvider(companyId, "summaries");
@@ -171,89 +171,32 @@ const AgentSummaryGeminiService = async ({
     };
   }
 
-  const summaryType = isGeneralSummary ? "RESUMO GERAL DA OPERAÇÃO" : `RESUMO DO ATENDENTE: ${agentName}`;
+  const summaryType = isGeneralSummary ? "RESUMO GERAL" : `RESUMO: ${agentName}`;
   
-  const systemPrompt = `Você é um ANALISTA DE QUALIDADE DE ATENDIMENTO especializado em avaliar conversas de suporte ao cliente via WhatsApp.
+  // Prompt simplificado para economizar tokens
+  const systemPrompt = `Você é um ANALISTA DE QUALIDADE DE ATENDIMENTO. ${isGeneralSummary ? "Analise as conversas abaixo e produza um RELATÓRIO EXECUTIVO GERAL." : `Analise as conversas do atendente ${agentName} e produza um RELATÓRIO EXECUTIVO.`}
 
-═══════════════════════════════════════════════════════════════════
-📋 SUA MISSÃO: ${summaryType}
-═══════════════════════════════════════════════════════════════════
-${isGeneralSummary 
-  ? "Analise TODAS as conversas da empresa abaixo e produza um RELATÓRIO EXECUTIVO GERAL completo."
-  : "Analise as conversas do atendente abaixo e produza um RELATÓRIO EXECUTIVO completo e detalhado."}
+ESTRUTURA DO RELATÓRIO:
+1. RESUMO EXECUTIVO: Quantidade de atendimentos, período, avaliação geral
+2. PRINCIPAIS DEMANDAS: TOP 5 assuntos mais frequentes
+3. CASOS RESOLVIDOS: Quantos resolvidos, exemplos (cite ticket e cliente)
+4. PENDÊNCIAS: Casos não resolvidos (Ticket #, Cliente, ${isGeneralSummary ? "Atendente, " : ""}Problema, Ação)
+${isGeneralSummary ? `5. DESEMPENHO POR ATENDENTE: Quantidade, melhores desempenhos
+6. PONTOS FORTES DA EQUIPE: Boas práticas identificadas
+7. OPORTUNIDADES DE MELHORIA: Aspectos a desenvolver, sugestões
+8. RECOMENDAÇÕES: Ações imediatas, insights` : `5. PONTOS FORTES: Habilidades, boas práticas
+6. OPORTUNIDADES DE MELHORIA: Aspectos a desenvolver
+7. RECOMENDAÇÕES: Ações imediatas, processos a otimizar`}
 
-═══════════════════════════════════════════════════════════════════
-📊 ESTRUTURA DO RELATÓRIO (OBRIGATÓRIA)
-═══════════════════════════════════════════════════════════════════
-
-## 1. 📈 RESUMO EXECUTIVO
-- Quantidade de atendimentos analisados
-- Período coberto
-- ${isGeneralSummary ? "Visão geral da operação" : "Avaliação geral (Excelente/Bom/Regular/Precisa Melhorar)"}
-
-## 2. 🎯 PRINCIPAIS DEMANDAS DOS CLIENTES
-- Liste os TOP 5 assuntos mais frequentes
-- Categorize por tipo (dúvida, reclamação, solicitação, etc.)
-
-## 3. ✅ CASOS RESOLVIDOS
-- Quantos foram resolvidos satisfatoriamente
-- Exemplos de bons atendimentos (cite ticket e cliente)
-
-## 4. ⚠️ PENDÊNCIAS E FOLLOW-UPS NECESSÁRIOS
-- Liste TODOS os casos não resolvidos
-- Para cada um, informe: Ticket #, Cliente, ${isGeneralSummary ? "Atendente, " : ""}Problema, Ação necessária
-- Ordene por prioridade (Alta/Média/Baixa)
-
-${isGeneralSummary ? `## 5. 👥 DESEMPENHO POR ATENDENTE
-- Liste cada atendente com quantidade de atendimentos
-- Destaque os melhores desempenhos
-- Identifique quem precisa de suporte
-
-## 6. 💪 PONTOS FORTES DA EQUIPE
-- Boas práticas identificadas
-- Exemplos de excelência no atendimento
-
-## 7. 🔧 OPORTUNIDADES DE MELHORIA
-- Aspectos gerais a desenvolver
-- Sugestões de treinamento para a equipe
-- Processos que podem ser otimizados
-
-## 8. 📌 RECOMENDAÇÕES ESTRATÉGICAS
-- Ações imediatas sugeridas
-- Insights para a gestão
-- Tendências identificadas` 
-: `## 5. 💪 PONTOS FORTES DO ATENDENTE
-- Habilidades demonstradas
-- Boas práticas identificadas
-- Exemplos específicos
-
-## 6. 🔧 OPORTUNIDADES DE MELHORIA
-- Aspectos a desenvolver
-- Sugestões práticas de treinamento
-- Situações que poderiam ter sido melhor conduzidas
-
-## 7. 📌 RECOMENDAÇÕES ESTRATÉGICAS
-- Ações imediatas sugeridas
-- Processos que podem ser otimizados
-- Insights para a gestão`}
-
-═══════════════════════════════════════════════════════════════════
-⚙️ REGRAS DE ANÁLISE
-═══════════════════════════════════════════════════════════════════
-1. Seja ESPECÍFICO - cite números de tickets e nomes quando relevante
-2. Seja OBJETIVO - baseie-se apenas nos dados fornecidos
-3. Seja CONSTRUTIVO - foque em melhorias, não críticas
-4. Use FORMATAÇÃO clara com bullets, números e emojis
-5. Responda em PORTUGUÊS BRASILEIRO
-6. Se houver poucos dados, informe e faça o melhor com o disponível
+REGRAS: Seja específico (cite tickets e nomes), objetivo, construtivo. Use formatação clara. Português brasileiro.
 
 `;
 
-  // Limitar o tamanho do prompt para evitar exceder limites da API
-  const maxPromptLength = 30000; // Limite conservador
+  // Limitar o tamanho do prompt para evitar exceder limites da API (reduzido para economizar tokens)
+  const maxPromptLength = 20000; // Reduzido de 30000 para 20000
   let finalConversationsText = conversationsText;
   if (conversationsText.length > maxPromptLength) {
-    finalConversationsText = conversationsText.slice(0, maxPromptLength) + "\n\n[... conteúdo truncado devido ao tamanho ...]";
+    finalConversationsText = conversationsText.slice(0, maxPromptLength) + "\n\n[... conteúdo truncado ...]";
   }
 
   const conversationsLabel = isGeneralSummary 

@@ -1433,8 +1433,8 @@ const handleOpenAi = async (
   }
 
   // Limitar histórico para não consumir todos os tokens
-  // Pegar apenas as últimas mensagens relevantes (máximo 20 para não consumir muitos tokens)
-  const maxHistoryMessages = Math.min(prompt.maxMessages, 20);
+  // Pegar apenas as últimas mensagens relevantes (máximo 10 para economizar tokens)
+  const maxHistoryMessages = Math.min(prompt.maxMessages, 10);
 
   const messages = await Message.findAll({
     where: { ticketId: ticket.id },
@@ -1465,86 +1465,12 @@ const handleOpenAi = async (
 
   // Adicionar instruções sobre mensagens internas se habilitado
   if (prompt.canSendInternalMessages) {
-    promptSystem += `\n\nREGRA CRÍTICA - Anotações Internas:
-- Use SEMPRE o formato [INTERNA]conteúdo[/INTERNA] para anotações internas
-- As anotações internas devem vir ANTES ou DEPOIS da resposta ao cliente, NUNCA no meio
-- SEMPRE forneça uma resposta ao cliente, mesmo que faça anotações internas
-- Exemplo CORRETO: "Entendo seu problema. Vou verificar. [INTERNA]Cliente relatou erro técnico, precisa de suporte especializado[/INTERNA] Em breve retorno com a solução."
-- Exemplo ERRADO: "Entendo [INTERNA]anotação[/INTERNA] seu problema."
-- Se fizer anotação interna, SEMPRE termine com [/INTERNA] antes de continuar a resposta ao cliente`;
+    promptSystem += `\n\nANOTAÇÕES INTERNAS: Use [INTERNA]texto[/INTERNA] ANTES ou DEPOIS da resposta ao cliente. Sempre forneça resposta ao cliente.`;
   }
 
   // Adicionar instruções sobre agendamentos se habilitado
   if (prompt.permitirCriarAgendamentos) {
-    promptSystem += `\n\nGERENCIAMENTO DE AGENDAMENTOS:
-Você pode gerenciar agendamentos usando comandos especiais. Use o formato [AGENDAR]...[/AGENDAR] com JSON:
-
-Para CRIAR agendamento:
-[AGENDAR]
-{
-  "action": "criar",
-  "profissional": "Nome do Profissional",
-  "data": "2024-01-15",
-  "horarioInicio": "14:00",
-  "horarioFim": "14:30",
-  "titulo": "Consulta",
-  "descricao": "Descrição opcional"
-}
-[/AGENDAR]
-
-Para VERIFICAR disponibilidade de um horário específico:
-[AGENDAR]
-{
-  "action": "verificar",
-  "profissional": "Nome do Profissional",
-  "data": "2024-01-15",
-  "horarioInicio": "14:00",
-  "horarioFim": "14:30"
-}
-[/AGENDAR]
-
-Para LISTAR/BUSCAR horários disponíveis de um dia (quando o cliente pergunta sobre horários livres):
-[AGENDAR]
-{
-  "action": "listar",
-  "profissional": "Nome do Profissional",
-  "data": "2024-01-15"
-}
-[/AGENDAR]
-
-OU use "buscar_horarios" (mesma funcionalidade):
-[AGENDAR]
-{
-  "action": "buscar_horarios",
-  "profissional": "Nome do Profissional",
-  "data": "2024-01-15"
-}
-[/AGENDAR]
-
-REGRAS CRÍTICAS DE EXECUÇÃO AUTOMÁTICA:
-1. NUNCA diga "vou verificar", "um momento", "aguarde" ou "por favor" - EXECUTE IMEDIATAMENTE
-2. Quando o cliente pergunta sobre disponibilidade, use o comando "listar" ou "verificar" DIRETAMENTE na resposta
-3. Quando o cliente solicita um agendamento, use "verificar" ANTES de "criar" na mesma resposta
-4. Se o horário não estiver disponível, use "listar" para buscar alternativas e sugira horários disponíveis
-5. NUNCA peça ao cliente para aguardar ou enviar outra mensagem - execute tudo na mesma resposta
-
-EXEMPLOS DO QUE NÃO FAZER (ERRADO):
-❌ "Vou verificar a disponibilidade. Um momento, por favor."
-❌ "Aguarde que vou checar os horários."
-❌ "Desculpe pela confusão, vou verificar agora."
-
-EXEMPLOS DO QUE FAZER (CORRETO):
-✅ Use diretamente o comando [AGENDAR] sem texto desnecessário antes
-✅ "Horário disponível para Dr. João em 15/01 às 14h" (após executar verificar)
-✅ "Esse horário não está disponível. Horários disponíveis: 10h, 11h, 15h" (após executar listar)
-
-IMPORTANTE: 
-- Sempre verifique a disponibilidade antes de criar um agendamento
-- Use o formato JSON dentro das tags [AGENDAR]...[/AGENDAR]
-- O horarioFim é opcional (padrão: 30 minutos após horarioInicio)
-- Após processar o comando, remova as tags [AGENDAR]...[/AGENDAR] da resposta ao cliente
-- Execute TODAS as verificações necessárias na mesma resposta - não deixe para depois
-- NÃO adicione texto antes dos comandos [AGENDAR] - execute diretamente`;
+    promptSystem += `\n\nAGENDAMENTOS: Use [AGENDAR]{"action":"criar|verificar|listar","profissional":"Nome","data":"YYYY-MM-DD","horarioInicio":"HH:mm","horarioFim":"HH:mm"(opcional),"titulo":"Título","descricao":"Desc"(opcional)}[/AGENDAR]. Execute comandos IMEDIATAMENTE sem dizer "vou verificar". Verifique disponibilidade antes de criar. Remova tags [AGENDAR] da resposta final.`;
   }
 
 

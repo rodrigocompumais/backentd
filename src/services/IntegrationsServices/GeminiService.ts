@@ -187,8 +187,8 @@ export const handleGemini = async (
   );
 
   // Limitar histórico para não consumir todos os tokens
-  // Pegar apenas as últimas mensagens relevantes (máximo 20 para não consumir muitos tokens)
-  const maxHistoryMessages = Math.min(geminiSettings.maxMessages, 20);
+  // Pegar apenas as últimas mensagens relevantes (máximo 10 para economizar tokens)
+  const maxHistoryMessages = Math.min(geminiSettings.maxMessages, 10);
   
   const messages = await Message.findAll({
     where: { ticketId: ticket.id },
@@ -220,86 +220,12 @@ export const handleGemini = async (
   
   // Adicionar instruções sobre mensagens internas se habilitado
   if (geminiSettings.canSendInternalMessages) {
-    promptSystem += `\n\nREGRA CRÍTICA - Anotações Internas:
-- Use SEMPRE o formato [INTERNA]conteúdo[/INTERNA] para anotações internas
-- As anotações internas devem vir ANTES ou DEPOIS da resposta ao cliente, NUNCA no meio
-- SEMPRE forneça uma resposta ao cliente, mesmo que faça anotações internas
-- Exemplo CORRETO: "Entendo seu problema. Vou verificar. [INTERNA]Cliente relatou erro técnico, precisa de suporte especializado[/INTERNA] Em breve retorno com a solução."
-- Exemplo ERRADO: "Entendo [INTERNA]anotação[/INTERNA] seu problema."
-- Se fizer anotação interna, SEMPRE termine com [/INTERNA] antes de continuar a resposta ao cliente`;
+    promptSystem += `\n\nANOTAÇÕES INTERNAS: Use [INTERNA]texto[/INTERNA] ANTES ou DEPOIS da resposta ao cliente. Sempre forneça resposta ao cliente.`;
   }
 
   // Adicionar instruções sobre agendamentos se habilitado
   if (geminiSettings.permitirCriarAgendamentos) {
-    promptSystem += `\n\nGERENCIAMENTO DE AGENDAMENTOS:
-Você pode gerenciar agendamentos usando comandos especiais. Use o formato [AGENDAR]...[/AGENDAR] com JSON:
-
-Para CRIAR agendamento:
-[AGENDAR]
-{
-  "action": "criar",
-  "profissional": "Nome do Profissional",
-  "data": "2024-01-15",
-  "horarioInicio": "14:00",
-  "horarioFim": "14:30",
-  "titulo": "Consulta",
-  "descricao": "Descrição opcional"
-}
-[/AGENDAR]
-
-Para VERIFICAR disponibilidade:
-[AGENDAR]
-{
-  "action": "verificar",
-  "profissional": "Nome do Profissional",
-  "data": "2024-01-15",
-  "horarioInicio": "14:00",
-  "horarioFim": "14:30"
-}
-[/AGENDAR]
-
-Para LISTAR/BUSCAR horários disponíveis de um dia (quando o cliente pergunta sobre horários livres):
-[AGENDAR]
-{
-  "action": "listar",
-  "profissional": "Nome do Profissional",
-  "data": "2024-01-15"
-}
-[/AGENDAR]
-
-OU use "buscar_horarios" (mesma funcionalidade):
-[AGENDAR]
-{
-  "action": "buscar_horarios",
-  "profissional": "Nome do Profissional",
-  "data": "2024-01-15"
-}
-[/AGENDAR]
-
-REGRAS CRÍTICAS DE EXECUÇÃO AUTOMÁTICA:
-1. NUNCA diga "vou verificar", "um momento", "aguarde" ou "por favor" - EXECUTE IMEDIATAMENTE
-2. Quando o cliente pergunta sobre disponibilidade, use o comando "listar" ou "verificar" DIRETAMENTE na resposta
-3. Quando o cliente solicita um agendamento, use "verificar" ANTES de "criar" na mesma resposta
-4. Se o horário não estiver disponível, use "listar" para buscar alternativas e sugira horários disponíveis
-5. NUNCA peça ao cliente para aguardar ou enviar outra mensagem - execute tudo na mesma resposta
-
-EXEMPLOS DO QUE NÃO FAZER (ERRADO):
-❌ "Vou verificar a disponibilidade. Um momento, por favor."
-❌ "Aguarde que vou checar os horários."
-❌ "Desculpe pela confusão, vou verificar agora."
-
-EXEMPLOS DO QUE FAZER (CORRETO):
-✅ Use diretamente o comando [AGENDAR] sem texto desnecessário antes
-✅ "Horário disponível para Dr. João em 15/01 às 14h" (após executar verificar)
-✅ "Esse horário não está disponível. Horários disponíveis: 10h, 11h, 15h" (após executar listar)
-
-IMPORTANTE: 
-- Sempre verifique a disponibilidade antes de criar um agendamento
-- Use o formato JSON dentro das tags [AGENDAR]...[/AGENDAR]
-- O horarioFim é opcional (padrão: 30 minutos após horarioInicio)
-- Após processar o comando, remova as tags [AGENDAR]...[/AGENDAR] da resposta ao cliente
-- Execute TODAS as verificações necessárias na mesma resposta - não deixe para depois
-- NÃO adicione texto antes dos comandos [AGENDAR] - execute diretamente`;
+    promptSystem += `\n\nAGENDAMENTOS: Use [AGENDAR]{"action":"criar|verificar|listar","profissional":"Nome","data":"YYYY-MM-DD","horarioInicio":"HH:mm","horarioFim":"HH:mm"(opcional),"titulo":"Título","descricao":"Desc"(opcional)}[/AGENDAR]. Execute comandos IMEDIATAMENTE sem dizer "vou verificar". Verifique disponibilidade antes de criar. Remova tags [AGENDAR] da resposta final.`;
   }
 
   if (msg.message?.conversation || msg.message?.extendedTextMessage?.text) {
@@ -315,26 +241,70 @@ IMPORTANTE:
 
     // Adicionar histórico de mensagens (inverter ordem para ter do mais antigo ao mais recente)
     const sortedMessages = [...messages].reverse();
-    for (
-      let i = 0;
-      i < Math.min(geminiSettings.maxMessages, sortedMessages.length);
-      i++
-    ) {
-      const message = sortedMessages[i];
-      if (
-        message.mediaType === "conversation" ||
-        message.mediaType === "extendedTextMessage"
-      ) {
-        if (message.fromMe) {
-          contents.push({
-            role: "model",
-            parts: [{ text: message.body }]
-          });
-        } else {
-          contents.push({
-            role: "user",
-            parts: [{ text: message.body }]
-          });
+    const totalMessages = Math.min(geminiSettings.maxMessages, sortedMessages.length);
+    
+    // Se há mais de 10 mensagens, resumir as antigas e manter apenas as últimas 6-8 completas
+    if (totalMessages > 10) {
+      const keepRecent = 7; // Manter últimas 7 mensagens completas
+      const oldMessages = sortedMessages.slice(0, totalMessages - keepRecent);
+      const recentMessages = sortedMessages.slice(totalMessages - keepRecent);
+      
+      // Criar resumo simples das mensagens antigas (sem usar IA para economizar tokens)
+      const oldMessagesText = oldMessages
+        .filter(m => m.mediaType === "conversation" || m.mediaType === "extendedTextMessage")
+        .map(m => {
+          const sender = m.fromMe ? "Atendente" : "Cliente";
+          const body = (m.body || "").substring(0, 100); // Limitar a 100 caracteres por mensagem
+          return `${sender}: ${body}`;
+        })
+        .join(" | ");
+      
+      if (oldMessagesText) {
+        // Adicionar resumo das mensagens antigas
+        contents.push({
+          role: "user",
+          parts: [{ text: `[Resumo do contexto anterior: ${oldMessagesText}]` }]
+        });
+      }
+      
+      // Adicionar mensagens recentes completas
+      for (const message of recentMessages) {
+        if (
+          message.mediaType === "conversation" ||
+          message.mediaType === "extendedTextMessage"
+        ) {
+          if (message.fromMe) {
+            contents.push({
+              role: "model",
+              parts: [{ text: message.body }]
+            });
+          } else {
+            contents.push({
+              role: "user",
+              parts: [{ text: message.body }]
+            });
+          }
+        }
+      }
+    } else {
+      // Se há 10 ou menos mensagens, adicionar todas completas
+      for (let i = 0; i < totalMessages; i++) {
+        const message = sortedMessages[i];
+        if (
+          message.mediaType === "conversation" ||
+          message.mediaType === "extendedTextMessage"
+        ) {
+          if (message.fromMe) {
+            contents.push({
+              role: "model",
+              parts: [{ text: message.body }]
+            });
+          } else {
+            contents.push({
+              role: "user",
+              parts: [{ text: message.body }]
+            });
+          }
         }
       }
     }
@@ -344,6 +314,28 @@ IMPORTANTE:
       role: "user",
       parts: [{ text: bodyMessage! }]
     });
+
+    // Calcular tamanho aproximado do prompt (1 token ≈ 4 caracteres)
+    const totalChars = contents.reduce((sum, c) => sum + (c.parts?.[0]?.text?.length || 0), 0);
+    const estimatedTokens = Math.ceil(totalChars / 4);
+    const maxTokens = 30000; // Limite conservador para Gemini
+    
+    // Se exceder limite, truncar mensagens antigas
+    if (estimatedTokens > maxTokens) {
+      logger.warn(`⚠️ Prompt muito grande (${estimatedTokens} tokens estimados). Aplicando truncamento...`);
+      const charsToRemove = (estimatedTokens - maxTokens) * 4;
+      let removed = 0;
+      
+      // Truncar mensagens antigas (exceto prompt do sistema e mensagem atual)
+      for (let i = 1; i < contents.length - 1 && removed < charsToRemove; i++) {
+        const text = contents[i].parts?.[0]?.text || "";
+        if (text.length > 50) {
+          const truncateBy = Math.min(text.length - 50, charsToRemove - removed);
+          contents[i].parts[0].text = text.slice(0, text.length - truncateBy) + "...";
+          removed += truncateBy;
+        }
+      }
+    }
 
     try {
       const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent`;

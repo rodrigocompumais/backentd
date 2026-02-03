@@ -32,7 +32,7 @@ export const generateContextSummary = async ({
   ticketId,
   companyId,
   provider,
-  maxMessages = 20
+  maxMessages = 12 // Reduzido de 20 para 12 para economizar tokens
 }: GenerateContextSummaryParams): Promise<string> => {
   try {
     const ticket = await ShowTicketService(ticketId, companyId);
@@ -67,42 +67,26 @@ export const generateContextSummary = async ({
       return "Nenhuma mensagem encontrada no ticket.";
     }
 
-    // Construir contexto das mensagens (do mais antigo para o mais recente)
+    // Construir contexto das mensagens (do mais antigo para o mais recente) - limitado para economizar tokens
     const messagesContext = messages
       .reverse()
       .map((msg) => {
         const timestamp = formatDateTime(msg.createdAt);
         const sender = msg.fromMe ? "ATENDENTE" : "CLIENTE";
-        const contactName = msg.contact?.name || "Desconhecido";
-        const body = msg.body || "[Mídia]";
-        return `[${timestamp}] ${sender} (${contactName}): ${body}`;
+        const body = (msg.body || "[Mídia]").slice(0, 200); // Limitar a 200 caracteres
+        return `[${timestamp}] ${sender}: ${body}`;
       })
       .join("\n");
 
-    // Construir prompt para resumo
-    const systemPrompt = `Você é um assistente de IA especializado em criar resumos objetivos de conversas de atendimento.
+    // Construir prompt para resumo (simplificado para economizar tokens)
+    const systemPrompt = `Crie um resumo objetivo da conversa abaixo (máximo 200 palavras).
 
-CONTEXTO DO TICKET:
-- Status: ${ticketData.status}
-- Contato: ${ticketData.contact?.name || "Desconhecido"}
-- Atendente atual: ${ticketData.user?.name || "Sem atendente"}
-- Fila atual: ${ticketData.queue?.name || "Sem fila"}
-- Criado em: ${formatDateTime(ticketData.createdAt)}
-- Última atualização: ${formatDateTime(ticketData.updatedAt)}
+TICKET: ${ticketData.status} | ${ticketData.contact?.name || "Desconhecido"} | ${ticketData.user?.name || "Sem atendente"} | ${ticketData.queue?.name || "Sem fila"}
 
-ÚLTIMAS ${messages.length} MENSAGENS DA CONVERSA:
+MENSAGENS:
 ${messagesContext}
 
-INSTRUÇÕES:
-- Crie um resumo objetivo e conciso do contexto da conversa
-- Identifique o status da conversa (ex: "Venda fechada", "Dúvida técnica", "Reclamação", "Solicitação de informação")
-- Liste os pontos principais discutidos
-- Indique próximos passos necessários (se houver)
-- Seja direto e objetivo (máximo 200 palavras)
-- Use linguagem profissional
-
-FORMATO:
-Retorne APENAS o texto do resumo, sem formatação adicional, sem JSON, sem prefixos.`;
+INSTRUÇÕES: Identifique status da conversa, pontos principais, próximos passos. Seja direto e objetivo. Retorne APENAS o texto do resumo, sem formatação adicional.`;
 
     // Selecionar provider automaticamente usando a configuração da funcionalidade
     // Se provider foi especificado explicitamente, criar diretamente, senão usar selector

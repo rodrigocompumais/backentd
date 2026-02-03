@@ -1,6 +1,6 @@
 import axios from "axios";
 import Setting from "../../models/Setting";
-import { validateGeminiApiKey } from "../../helpers/ValidateGeminiApiKey";
+import { validateGeminiApiKey } from "../../config/gemini";
 import { logger } from "../../utils/logger";
 import { GEMINI_BASE_URL, GEMINI_MODEL } from "../../config/gemini";
 

@@ -38,6 +38,9 @@ type Session = WASocket & {
   id?: number;
 };
 
+// Map para rastrear processamentos em andamento e evitar duplicatas
+const processingLocks = new Map<string, number>();
+
 interface IGemini {
   name: string;
   prompt: string;
@@ -160,6 +163,36 @@ export const handleGemini = async (
   if (!geminiSettings) return;
 
   if (msg.messageStubType) return;
+
+  // Lock para evitar processamento duplicado da mesma mensagem
+  const messageId = msg.key.id || `${ticket.id}-${Date.now()}`;
+  const lockKey = `gemini-${ticket.id}-${messageId}`;
+  
+  // Verificar se já está processando
+  if (processingLocks.has(lockKey)) {
+    const lockTime = processingLocks.get(lockKey)!;
+    const timeSinceLock = Date.now() - lockTime;
+    
+    // Se o lock é muito antigo (>30s), pode ser um lock travado, remover
+    if (timeSinceLock > 30000) {
+      logger.warn(`Lock antigo detectado e removido: ${lockKey} (${timeSinceLock}ms)`);
+      processingLocks.delete(lockKey);
+    } else {
+      logger.warn(`Mensagem já está sendo processada (Gemini), ignorando duplicata: ${lockKey}`);
+      return;
+    }
+  }
+  
+  // Adicionar lock
+  processingLocks.set(lockKey, Date.now());
+  
+  // Timeout de segurança para remover lock (30 segundos)
+  setTimeout(() => {
+    if (processingLocks.has(lockKey)) {
+      processingLocks.delete(lockKey);
+      logger.debug(`Lock removido automaticamente (timeout): ${lockKey}`);
+    }
+  }, 30000);
 
   // Buscar API key do Gemini das Settings da empresa
   const geminiSetting = await Setting.findOne({
@@ -719,6 +752,30 @@ export const handleGemini = async (
       }
 
       if (cleanedResponse.trim()) {
+        // Verificar se mensagem duplicada antes de enviar
+        const recentMessage = await Message.findOne({
+          where: {
+            ticketId: ticket.id,
+            fromMe: true
+          },
+          order: [["createdAt", "DESC"]]
+        });
+
+        if (recentMessage) {
+          const timeDiff = Date.now() - new Date(recentMessage.createdAt).getTime();
+          const isRecent = timeDiff < 30000; // 30 segundos
+          const normalizedRecent = recentMessage.body?.trim().toLowerCase().replace(/\u200e/g, "").trim() || "";
+          const normalizedResponse = cleanedResponse.trim().toLowerCase().replace(/\u200e/g, "").trim();
+          const isIdentical = normalizedRecent === normalizedResponse;
+          
+          if (isRecent && isIdentical) {
+            logger.warn(`Mensagem duplicada detectada (Gemini), não enviando. Ticket: ${ticket.id}, TimeDiff: ${timeDiff}ms, Conteúdo: ${normalizedResponse.substring(0, 50)}...`);
+            // Remover lock antes de retornar
+            processingLocks.delete(lockKey);
+            return;
+          }
+        }
+
         if (geminiSettings.voice === "texto") {
           const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
             text: `\u200e ${cleanedResponse}`
@@ -768,6 +825,10 @@ export const handleGemini = async (
         data: errorData,
         message: err.message
       });
+    } finally {
+      // Remover lock após processamento (com timeout de segurança já configurado)
+      processingLocks.delete(lockKey);
+      logger.debug(`Lock removido: ${lockKey}`);
       
       if (status) {
         const userMessage = interpretGeminiError(status, errorData);

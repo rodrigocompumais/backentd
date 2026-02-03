@@ -1223,6 +1223,12 @@ const handleGeminiInListener = async (
 /**
  * Envia mensagem automática de transferência para o cliente
  */
+// Map para rastrear processamentos em andamento e evitar duplicatas (OpenAI)
+const openAiProcessingLocks = new Map<string, number>();
+
+// Map para debounce de processamento de IA (cancelar processamentos anteriores se nova mensagem chegar)
+const aiProcessingDebounces = new Map<number, NodeJS.Timeout>();
+
 const sendTransferMessage = async (
   ticket: Ticket,
   contact: Contact,
@@ -1320,6 +1326,36 @@ const handleOpenAi = async (
     logger.debug(`handleOpenAi: Sem bodyMessage para ticket ${ticket.id}`);
     return;
   }
+
+  // Lock para evitar processamento duplicado da mesma mensagem
+  const messageId = msg.key.id || `${ticket.id}-${Date.now()}`;
+  const lockKey = `openai-${ticket.id}-${messageId}`;
+  
+  // Verificar se já está processando
+  if (openAiProcessingLocks.has(lockKey)) {
+    const lockTime = openAiProcessingLocks.get(lockKey)!;
+    const timeSinceLock = Date.now() - lockTime;
+    
+    // Se o lock é muito antigo (>30s), pode ser um lock travado, remover
+    if (timeSinceLock > 30000) {
+      logger.warn(`Lock antigo detectado e removido (OpenAI): ${lockKey} (${timeSinceLock}ms)`);
+      openAiProcessingLocks.delete(lockKey);
+    } else {
+      logger.warn(`Mensagem já está sendo processada (OpenAI), ignorando duplicata: ${lockKey}`);
+      return;
+    }
+  }
+  
+  // Adicionar lock
+  openAiProcessingLocks.set(lockKey, Date.now());
+  
+  // Timeout de segurança para remover lock (30 segundos)
+  setTimeout(() => {
+    if (openAiProcessingLocks.has(lockKey)) {
+      openAiProcessingLocks.delete(lockKey);
+      logger.debug(`Lock removido automaticamente (timeout): ${lockKey}`);
+    }
+  }, 30000);
 
   let prompt = null;
 
@@ -1814,11 +1850,39 @@ const handleOpenAi = async (
     }
 
     if (cleanedResponse.trim()) {
+      // Verificar se mensagem duplicada antes de enviar
+      const recentMessage = await Message.findOne({
+        where: {
+          ticketId: ticket.id,
+          fromMe: true
+        },
+        order: [["createdAt", "DESC"]]
+      });
+
+      if (recentMessage) {
+        const timeDiff = Date.now() - new Date(recentMessage.createdAt).getTime();
+        const isRecent = timeDiff < 30000; // 30 segundos
+        const normalizedRecent = recentMessage.body?.trim().toLowerCase().replace(/\u200e/g, "").trim() || "";
+        const normalizedResponse = cleanedResponse.trim().toLowerCase().replace(/\u200e/g, "").trim();
+        const isIdentical = normalizedRecent === normalizedResponse;
+        
+        if (isRecent && isIdentical) {
+          logger.warn(`Mensagem duplicada detectada (OpenAI), não enviando. Ticket: ${ticket.id}, TimeDiff: ${timeDiff}ms, Conteúdo: ${normalizedResponse.substring(0, 50)}...`);
+          // Remover lock antes de retornar
+          openAiProcessingLocks.delete(lockKey);
+          return;
+        }
+      }
+
       const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
         text: cleanedResponse
       });
       await verifyMessage(sentMessage!, ticket, contact);
     }
+
+    // Remover lock após processamento bem-sucedido
+    openAiProcessingLocks.delete(lockKey);
+    logger.debug(`Lock removido (OpenAI): ${lockKey}`);
 
   } else if (msg.message?.audioMessage) {
     const mediaUrl = mediaSent!.mediaUrl!.split("/").pop();
@@ -2066,12 +2130,46 @@ const handleOpenAi = async (
 
     // Enviar resposta de áudio (sem mensagens internas)
     if (cleanedAudioResponse.trim()) {
+      // Verificar se mensagem duplicada antes de enviar (áudio)
+      const recentMessage = await Message.findOne({
+        where: {
+          ticketId: ticket.id,
+          fromMe: true
+        },
+        order: [["createdAt", "DESC"]]
+      });
+
+      if (recentMessage) {
+        const timeDiff = Date.now() - new Date(recentMessage.createdAt).getTime();
+        const isRecent = timeDiff < 30000; // 30 segundos
+        const normalizedRecent = recentMessage.body?.trim().toLowerCase().replace(/\u200e/g, "").trim() || "";
+        const normalizedResponse = cleanedAudioResponse.trim().toLowerCase().replace(/\u200e/g, "").trim();
+        const isIdentical = normalizedRecent === normalizedResponse;
+        
+        if (isRecent && isIdentical) {
+          logger.warn(`Mensagem duplicada detectada (OpenAI - áudio), não enviando. Ticket: ${ticket.id}, TimeDiff: ${timeDiff}ms`);
+          // Remover lock antes de retornar
+          openAiProcessingLocks.delete(lockKey);
+          return;
+        }
+      }
       const sentMessage = await wbot.sendMessage(msg.key.remoteJid!, {
         text: cleanedAudioResponse
       });
       await verifyMessage(sentMessage!, ticket, contact);
     }
+    
+    // Remover lock após processamento de áudio
+    openAiProcessingLocks.delete(lockKey);
+    logger.debug(`Lock removido (OpenAI - áudio): ${lockKey}`);
   }
+  
+  // Remover lock após processamento completo (caso não tenha sido removido antes)
+  if (openAiProcessingLocks.has(lockKey)) {
+    openAiProcessingLocks.delete(lockKey);
+    logger.debug(`Lock removido (OpenAI - final): ${lockKey}`);
+  }
+  
   messagesOpenAi = [];
 };
 
@@ -2463,16 +2561,34 @@ const verifyQueue = async (
           companyId: ticket.companyId
         });
 
-        if (prompt.provider === "gemini") {
-          await handleGeminiInListener(msg, wbot, ticket, contact, mediaSent);
-        } else {
-          await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+        // Debounce: cancelar processamento anterior se nova mensagem chegar muito rapidamente
+        const debounceKey = ticket.id;
+        if (aiProcessingDebounces.has(debounceKey)) {
+          clearTimeout(aiProcessingDebounces.get(debounceKey)!);
+          aiProcessingDebounces.delete(debounceKey);
+          logger.debug(`Debounce: cancelando processamento anterior para ticket ${ticket.id}`);
         }
 
-        await ticket.update({
-          useIntegration: true,
-          promptId: queues[0]?.promptId
-        });
+        // Agendar processamento com debounce de 500ms
+        const processAI = async () => {
+          try {
+            if (prompt.provider === "gemini") {
+              await handleGeminiInListener(msg, wbot, ticket, contact, mediaSent);
+            } else {
+              await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+            }
+            
+            await ticket.update({
+              useIntegration: true,
+              promptId: queues[0]?.promptId
+            });
+          } finally {
+            aiProcessingDebounces.delete(debounceKey);
+          }
+        };
+
+        const debounceTimeout = setTimeout(processAI, 500);
+        aiProcessingDebounces.set(debounceKey, debounceTimeout);
       } catch (err) {
         // Se não encontrar prompt, tentar OpenAI por compatibilidade
         await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
@@ -2625,16 +2741,34 @@ const verifyQueue = async (
             companyId: ticket.companyId
           });
 
-          if (prompt.provider === "gemini") {
-            await handleGeminiInListener(msg, wbot, ticket, contact, mediaSent);
-          } else {
-            await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+          // Debounce: cancelar processamento anterior se nova mensagem chegar muito rapidamente
+          const debounceKey = ticket.id;
+          if (aiProcessingDebounces.has(debounceKey)) {
+            clearTimeout(aiProcessingDebounces.get(debounceKey)!);
+            aiProcessingDebounces.delete(debounceKey);
+            logger.debug(`Debounce: cancelando processamento anterior para ticket ${ticket.id}`);
           }
 
-          await ticket.update({
-            useIntegration: true,
-            promptId: choosenQueue?.promptId
-          });
+          // Agendar processamento com debounce de 500ms
+          const processAI = async () => {
+            try {
+              if (prompt.provider === "gemini") {
+                await handleGeminiInListener(msg, wbot, ticket, contact, mediaSent);
+              } else {
+                await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+              }
+              
+              await ticket.update({
+                useIntegration: true,
+                promptId: choosenQueue?.promptId
+              });
+            } finally {
+              aiProcessingDebounces.delete(debounceKey);
+            }
+          };
+
+          const debounceTimeout = setTimeout(processAI, 500);
+          aiProcessingDebounces.set(debounceKey, debounceTimeout);
         } catch (err) {
           // Se não encontrar prompt, tentar OpenAI por compatibilidade
           await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
@@ -4067,15 +4201,33 @@ const handleMessage = async (
           maxMessages: parseInt(maxMessages)
         };
 
-        await handleGeminiInListener(
-          msg,
-          wbot,
-          ticket,
-          contact,
-          mediaSent,
-          ticketTraking,
-          geminiSettings,
-        );
+        // Debounce: cancelar processamento anterior se nova mensagem chegar muito rapidamente
+        const debounceKey = ticket.id;
+        if (aiProcessingDebounces.has(debounceKey)) {
+          clearTimeout(aiProcessingDebounces.get(debounceKey)!);
+          aiProcessingDebounces.delete(debounceKey);
+          logger.debug(`Debounce: cancelando processamento anterior para ticket ${ticket.id}`);
+        }
+
+        // Agendar processamento com debounce de 500ms
+        const processAI = async () => {
+          try {
+            await handleGeminiInListener(
+              msg,
+              wbot,
+              ticket,
+              contact,
+              mediaSent,
+              ticketTraking,
+              geminiSettings,
+            );
+          } finally {
+            aiProcessingDebounces.delete(debounceKey);
+          }
+        };
+
+        const debounceTimeout = setTimeout(processAI, 500);
+        aiProcessingDebounces.set(debounceKey, debounceTimeout);
       } else {
         let openAiSettings = {
           name,
@@ -4121,12 +4273,30 @@ const handleMessage = async (
 
         logger.info(`🤖 Bot de IA detectado - Ticket: ${ticket.id}, Prompt: ${prompt.name}, Provider: ${prompt.provider}`);
 
-        if (prompt.provider === "gemini") {
-          await handleGeminiInListener(msg, wbot, ticket, contact, mediaSent);
-        } else {
-          // OpenAI ou qualquer outro provider (default para OpenAI)
-          await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+        // Debounce: cancelar processamento anterior se nova mensagem chegar muito rapidamente
+        const debounceKey = ticket.id;
+        if (aiProcessingDebounces.has(debounceKey)) {
+          clearTimeout(aiProcessingDebounces.get(debounceKey)!);
+          aiProcessingDebounces.delete(debounceKey);
+          logger.debug(`Debounce: cancelando processamento anterior para ticket ${ticket.id}`);
         }
+
+        // Agendar processamento com debounce de 500ms
+        const processAI = async () => {
+          try {
+            if (prompt.provider === "gemini") {
+              await handleGeminiInListener(msg, wbot, ticket, contact, mediaSent);
+            } else {
+              // OpenAI ou qualquer outro provider (default para OpenAI)
+              await handleOpenAi(msg, wbot, ticket, contact, mediaSent);
+            }
+          } finally {
+            aiProcessingDebounces.delete(debounceKey);
+          }
+        };
+
+        const debounceTimeout = setTimeout(processAI, 500);
+        aiProcessingDebounces.set(debounceKey, debounceTimeout);
       } catch (err: any) {
         logger.error(`Erro ao buscar/iniciar prompt: ${err.message}`, {
           promptId: whatsapp.promptId,

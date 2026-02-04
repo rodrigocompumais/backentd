@@ -112,7 +112,8 @@ const UpdateTicketService = async ({
       queueOptionId = null;
     }
 
-    if (status !== undefined && ["closed"].indexOf(status) > -1) {
+    // Só processar mensagem de avaliação se o status está mudando PARA "closed" (não se já estava fechado)
+    if (status !== undefined && ["closed"].indexOf(status) > -1 && oldStatus !== "closed") {
       const { complationMessage, ratingMessage } = await ShowWhatsAppService(
         ticket.whatsappId,
         companyId
@@ -120,14 +121,14 @@ const UpdateTicketService = async ({
 
       if (setting?.value === "enabled") {
         if (ticketTraking.ratingAt == null) {
-          // Validar se o ticket foi criado há menos de 7 dias
+          // Validar se o ticket foi criado há menos de 3 dias
           const ticketCreatedAt = new Date(ticket.createdAt);
           const now = new Date();
           const daysSinceCreation = Math.floor((now.getTime() - ticketCreatedAt.getTime()) / (1000 * 60 * 60 * 24));
-          const isCreatedLessThan7Days = daysSinceCreation < 7;
+          const isCreatedLessThan3Days = daysSinceCreation < 3;
 
-          // Enviar mensagem de avaliação se o ticket foi criado há menos de 7 dias
-          if (isCreatedLessThan7Days) {
+          // Enviar mensagem de avaliação apenas se o ticket foi criado há menos de 3 dias
+          if (isCreatedLessThan3Days) {
             const ratingTxt = ratingMessage || "";
             let bodyRatingMessage = `\u200e${ratingTxt}\n\n`;
             bodyRatingMessage +=

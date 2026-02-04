@@ -100,37 +100,49 @@ export const saveChatConfig = async (
 
     if (config.temperature !== undefined) {
       updates.push(
-        Setting.findOrCreate({
-          where: { key: "aiChatTemperature", companyId },
-          defaults: { key: "aiChatTemperature", value: config.temperature.toString(), companyId }
-        }).then(([setting]) => setting.update({ value: config.temperature!.toString() }))
+        (async () => {
+          const [setting] = await Setting.findOrCreate({
+            where: { key: "aiChatTemperature", companyId },
+            defaults: { key: "aiChatTemperature", value: config.temperature.toString(), companyId }
+          });
+          return setting.update({ value: config.temperature!.toString() });
+        })()
       );
     }
 
     if (config.maxHistoryMessages !== undefined) {
       updates.push(
-        Setting.findOrCreate({
-          where: { key: "aiChatMaxHistoryMessages", companyId },
-          defaults: { key: "aiChatMaxHistoryMessages", value: config.maxHistoryMessages.toString(), companyId }
-        }).then(([setting]) => setting.update({ value: config.maxHistoryMessages!.toString() }))
+        (async () => {
+          const [setting] = await Setting.findOrCreate({
+            where: { key: "aiChatMaxHistoryMessages", companyId },
+            defaults: { key: "aiChatMaxHistoryMessages", value: config.maxHistoryMessages.toString(), companyId }
+          });
+          return setting.update({ value: config.maxHistoryMessages!.toString() });
+        })()
       );
     }
 
     if (config.maxTokens !== undefined) {
       updates.push(
-        Setting.findOrCreate({
-          where: { key: "aiChatMaxTokens", companyId },
-          defaults: { key: "aiChatMaxTokens", value: config.maxTokens.toString(), companyId }
-        }).then(([setting]) => setting.update({ value: config.maxTokens!.toString() }))
+        (async () => {
+          const [setting] = await Setting.findOrCreate({
+            where: { key: "aiChatMaxTokens", companyId },
+            defaults: { key: "aiChatMaxTokens", value: config.maxTokens.toString(), companyId }
+          });
+          return setting.update({ value: config.maxTokens!.toString() });
+        })()
       );
     }
 
     if (config.topP !== undefined) {
       updates.push(
-        Setting.findOrCreate({
-          where: { key: "aiChatTopP", companyId },
-          defaults: { key: "aiChatTopP", value: config.topP.toString(), companyId }
-        }).then(([setting]) => setting.update({ value: config.topP!.toString() }))
+        (async () => {
+          const [setting] = await Setting.findOrCreate({
+            where: { key: "aiChatTopP", companyId },
+            defaults: { key: "aiChatTopP", value: config.topP.toString(), companyId }
+          });
+          return setting.update({ value: config.topP!.toString() });
+        })()
       );
     }
 

@@ -11,6 +11,13 @@ import crypto from "crypto";
 const translationCache = new Map<string, { translation: string; timestamp: number }>();
 const CACHE_DURATION = 3600000; // 1 hora em ms
 
+/**
+ * Cache em memória para detecção de idioma
+ * Estrutura: Map<textHash, { language: string, timestamp: number }>
+ */
+const languageDetectionCache = new Map<string, { language: string; timestamp: number }>();
+const LANGUAGE_CACHE_DURATION = 86400000; // 24 horas em ms
+
 interface TranslateParams {
   text: string;
   sourceLanguage?: string;
@@ -54,15 +61,30 @@ export class TranslationService {
   static async detectLanguage(text: string, companyId: number): Promise<string> {
     try {
       // Validações básicas
-      if (!text || text.trim().length < 10) {
+      if (!text || typeof text !== "string") {
+        return "unknown";
+      }
+
+      const trimmedText = text.trim();
+      
+      // Texto muito curto - retornar unknown sem logar erro
+      if (trimmedText.length < 10) {
         return "unknown";
       }
 
       // Ignorar se for apenas emojis, números ou caracteres especiais
-      const textWithoutEmojis = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
+      const textWithoutEmojis = trimmedText.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
       const onlyNumbersOrSpecial = /^[0-9\s\W]+$/.test(textWithoutEmojis);
-      if (onlyNumbersOrSpecial) {
+      if (onlyNumbersOrSpecial || textWithoutEmojis.length < 5) {
         return "unknown";
+      }
+
+      // Verificar cache primeiro
+      const textHash = crypto.createHash('md5').update(trimmedText.toLowerCase()).digest('hex');
+      const cached = languageDetectionCache.get(textHash);
+      
+      if (cached && (Date.now() - cached.timestamp) < LANGUAGE_CACHE_DURATION) {
+        return cached.language;
       }
 
       // Obter provider de IA
@@ -71,7 +93,7 @@ export class TranslationService {
       // Prompt otimizado para detecção rápida de idioma
       const prompt = `Detect the language of this text and respond ONLY with the ISO 639-1 two-letter language code (pt, en, es, fr, de, it, etc.). No explanation, just the code.
 
-Text: "${text.slice(0, 500)}"
+Text: "${trimmedText.slice(0, 500)}"
 
 Language code:`;
 
@@ -83,11 +105,38 @@ Language code:`;
       // Extrair código de idioma (primeiros 2 caracteres alfanuméricos)
       const languageCode = response.trim().toLowerCase().match(/[a-z]{2}/)?.[0] || "unknown";
       
-      logger.info(`Idioma detectado: ${languageCode} para texto: "${text.slice(0, 50)}..."`);
+      // Armazenar no cache
+      languageDetectionCache.set(textHash, {
+        language: languageCode,
+        timestamp: Date.now()
+      });
+
+      // Limpar cache expirado periodicamente
+      if (languageDetectionCache.size > 1000) {
+        const now = Date.now();
+        for (const [key, value] of languageDetectionCache.entries()) {
+          if (now - value.timestamp > LANGUAGE_CACHE_DURATION) {
+            languageDetectionCache.delete(key);
+          }
+        }
+      }
+
+      logger.debug(`Idioma detectado: ${languageCode} para texto: "${trimmedText.slice(0, 50)}..."`);
       return languageCode;
 
     } catch (err: any) {
-      logger.error("Erro ao detectar idioma:", err);
+      // Logar apenas erros inesperados, não erros de validação
+      if (err instanceof AppError || err.message?.includes("API Key") || err.message?.includes("configurada")) {
+        // Erros esperados - não logar como erro crítico
+        logger.debug(`Detecção de idioma falhou (esperado): ${err.message}`);
+      } else {
+        // Erros inesperados - logar com mais detalhes
+        logger.error("Erro ao detectar idioma:", {
+          message: err.message,
+          stack: err.stack,
+          textLength: text?.length || 0
+        });
+      }
       return "unknown";
     }
   }

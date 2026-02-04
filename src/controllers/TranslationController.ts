@@ -122,15 +122,17 @@ export const detectLanguage = async (
 
     const language = await TranslationService.detectLanguage(text, companyId);
 
+    // Sempre retornar sucesso, mesmo que o idioma seja "unknown"
     return res.status(200).json({ 
       text: text.slice(0, 100),
       detectedLanguage: language 
     });
   } catch (err: any) {
+    // Logar erro mas retornar "unknown" em vez de erro 500
     console.error("Erro ao detectar idioma:", err);
-    return res.status(500).json({ 
-      error: "Erro ao detectar idioma",
-      message: err.message 
+    return res.status(200).json({ 
+      text: req.body?.text?.slice(0, 100) || "",
+      detectedLanguage: "unknown" 
     });
   }
 };

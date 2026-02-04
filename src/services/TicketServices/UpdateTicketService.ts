@@ -16,10 +16,8 @@ import ListSettingsServiceOne from "../SettingServices/ListSettingsServiceOne"; 
 import ShowUserService from "../UserServices/ShowUserService"; //NOVO PLW DESIGN//
 import { isNil } from "lodash";
 import Whatsapp from "../../models/Whatsapp";
-import { Op } from "sequelize";
 import AppError from "../../errors/AppError";
 import Company from "../../models/Company";
-import Task from "../../models/Task";
 
 interface TicketData {
   status?: string;
@@ -128,27 +126,8 @@ const UpdateTicketService = async ({
           const daysSinceCreation = Math.floor((now.getTime() - ticketCreatedAt.getTime()) / (1000 * 60 * 60 * 24));
           const isCreatedLessThan7Days = daysSinceCreation < 7;
 
-          // Validar se existe tarefa vinculada com vencimento em menos de 7 dias
-          const linkedTask = await Task.findOne({
-            where: {
-              ticketId: ticket.id,
-              companyId: ticket.companyId,
-              dueDate: {
-                [Op.not]: null
-              }
-            }
-          });
-
-          let hasTaskDueInLessThan7Days = false;
-          if (linkedTask && linkedTask.dueDate) {
-            const taskDueDate = new Date(linkedTask.dueDate);
-            const daysUntilDue = Math.floor((taskDueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-            // Verificar se a data de vencimento está em menos de 7 dias no futuro
-            hasTaskDueInLessThan7Days = daysUntilDue >= 0 && daysUntilDue < 7;
-          }
-
-          // Só enviar mensagem de avaliação se ambas as condições forem verdadeiras
-          if (isCreatedLessThan7Days && hasTaskDueInLessThan7Days) {
+          // Enviar mensagem de avaliação se o ticket foi criado há menos de 7 dias
+          if (isCreatedLessThan7Days) {
             const ratingTxt = ratingMessage || "";
             let bodyRatingMessage = `\u200e${ratingTxt}\n\n`;
             bodyRatingMessage +=

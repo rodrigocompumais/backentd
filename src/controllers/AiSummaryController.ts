@@ -204,4 +204,58 @@ export const setProviderConfiguration = async (
   }
 };
 
+/**
+ * Obtém configurações do chat IA
+ */
+export const getChatConfig = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  try {
+    const { companyId } = req.user;
+    const { getChatConfig } = await import("../services/AiServices/ChatConfigService");
+    const config = await getChatConfig(companyId);
+    return res.status(200).json(config);
+  } catch (err: any) {
+    console.error("Erro ao obter configurações do chat:", err);
+    return res.status(500).json({ 
+      error: "ERR_GET_CHAT_CONFIG",
+      message: err.message || "Erro ao obter configurações do chat"
+    });
+  }
+};
+
+/**
+ * Salva configurações do chat IA
+ */
+export const setChatConfig = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  try {
+    const { companyId } = req.user;
+    const { temperature, maxHistoryMessages, maxTokens, topP } = req.body;
+    const { saveChatConfig } = await import("../services/AiServices/ChatConfigService");
+    
+    const config = await saveChatConfig(companyId, {
+      temperature,
+      maxHistoryMessages,
+      maxTokens,
+      topP
+    });
+
+    return res.status(200).json({
+      success: true,
+      config,
+      message: "Configurações do chat salvas com sucesso"
+    });
+  } catch (err: any) {
+    console.error("Erro ao salvar configurações do chat:", err);
+    return res.status(400).json({ 
+      error: "ERR_SET_CHAT_CONFIG",
+      message: err.message || "Erro ao salvar configurações do chat"
+    });
+  }
+};
+
 

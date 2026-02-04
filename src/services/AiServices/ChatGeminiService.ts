@@ -608,45 +608,6 @@ ${specificData.substring(0, 1000)}
 
 INSTRUÇÕES: Use os dados acima para responder. Seja objetivo e cite dados concretos. Responda em português brasileiro.`;
 
-  // Construir histórico de conversa no formato da interface
-  const chatMessages: ChatMessage[] = [];
-
-  // Sempre adicionar contexto do sistema na primeira mensagem
-  if (conversationHistory.length === 0) {
-    chatMessages.push({
-      role: "system",
-      content: systemContext
-    });
-    chatMessages.push({
-      role: "assistant",
-      content: "Olá! Sou o Compuchat, seu assistente inteligente. Tenho acesso completo aos dados do sistema e ao manual de utilização.\n\nPosso ajudar você com:\n✅ Dúvidas sobre como usar o sistema\n✅ Informações sobre atendimentos e conversas\n✅ Estatísticas e métricas em tempo real\n✅ Explicações sobre funcionalidades\n✅ Orientações sobre tickets, filas, contatos, campanhas e muito mais\n\nO que você gostaria de saber?"
-    });
-  } else {
-    // Adicionar contexto atualizado mesmo com histórico
-    chatMessages.push({
-      role: "system",
-      content: systemContext
-    });
-    chatMessages.push({
-      role: "assistant",
-      content: "Dados atualizados. Continuando..."
-    });
-    
-    // Adicionar histórico de conversa existente
-    for (const hist of conversationHistory) {
-      chatMessages.push({
-        role: hist.role === "user" ? "user" : "assistant",
-        content: hist.content
-      });
-    }
-  }
-
-  // Adicionar mensagem atual do usuário
-  chatMessages.push({
-    role: "user",
-    content: message
-  });
-
   try {
     console.log(`📤 Enviando mensagem para ${provider.name}...`);
     console.log(`📊 Contexto: ${companyData.stats.total.tickets} tickets, ${companyData.users.length} usuários`);
@@ -654,11 +615,57 @@ INSTRUÇÕES: Use os dados acima para responder. Seja objetivo e cite dados conc
       console.log(`👤 Atendentes detectados: ${entities.matchedUsers.map(u => u.name).join(", ")}`);
     }
 
-    // Usar o provider selecionado para realizar o chat
+    // Buscar configurações do chat IA
+    const { getChatConfig } = await import("./ChatConfigService");
+    const chatConfig = await getChatConfig(companyId);
+
+    // Limitar histórico de mensagens conforme configuração
+    const limitedHistory = conversationHistory.slice(-chatConfig.maxHistoryMessages);
+    
+    // Construir histórico de conversa no formato da interface
+    const chatMessages: ChatMessage[] = [];
+    
+    // Sempre adicionar contexto do sistema na primeira mensagem
+    if (limitedHistory.length === 0) {
+      chatMessages.push({
+        role: "system",
+        content: systemContext
+      });
+      chatMessages.push({
+        role: "assistant",
+        content: "Olá! Sou o Compuchat, seu assistente inteligente. Tenho acesso completo aos dados do sistema e ao manual de utilização.\n\nPosso ajudar você com:\n✅ Dúvidas sobre como usar o sistema\n✅ Informações sobre atendimentos e conversas\n✅ Estatísticas e métricas em tempo real\n✅ Explicações sobre funcionalidades\n✅ Orientações sobre tickets, filas, contatos, campanhas e muito mais\n\nO que você gostaria de saber?"
+      });
+    } else {
+      // Adicionar contexto atualizado mesmo com histórico
+      chatMessages.push({
+        role: "system",
+        content: systemContext
+      });
+      chatMessages.push({
+        role: "assistant",
+        content: "Dados atualizados. Continuando..."
+      });
+      
+      // Adicionar histórico de conversa limitado
+      for (const hist of limitedHistory) {
+        chatMessages.push({
+          role: hist.role === "user" ? "user" : "assistant",
+          content: hist.content
+        });
+      }
+    }
+
+    // Adicionar mensagem atual do usuário
+    chatMessages.push({
+      role: "user",
+      content: message
+    });
+
+    // Usar o provider selecionado para realizar o chat com configurações personalizadas
     const text = await provider.chat(chatMessages, {
-      temperature: 0.3,
-      maxTokens: 4096,
-      topP: 0.95
+      temperature: chatConfig.temperature,
+      maxTokens: chatConfig.maxTokens,
+      topP: chatConfig.topP
     });
 
     if (!text || text.trim() === "") {

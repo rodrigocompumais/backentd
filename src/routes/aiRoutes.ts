@@ -14,6 +14,10 @@ routes.get("/ai/test-key", isAuth, AiSummaryController.testApiKey);
 routes.get("/ai/providers/config", isAuth, AiSummaryController.getProviderConfigurations);
 routes.post("/ai/providers/config", isAuth, AiSummaryController.setProviderConfiguration);
 
+// Rotas de configuração do chat IA
+routes.get("/ai/chat/config", isAuth, AiSummaryController.getChatConfig);
+routes.post("/ai/chat/config", isAuth, AiSummaryController.setChatConfig);
+
 // Todas as outras rotas de IA precisam validar a API key antes de acessar (agora genérico - Gemini ou OpenAI)
 routes.post("/ai/summary/agent", isAuth, validateAIApiKey, AiSummaryController.agentSummary);
 routes.post("/ai/chat", isAuth, validateAIApiKey, AiSummaryController.chat);

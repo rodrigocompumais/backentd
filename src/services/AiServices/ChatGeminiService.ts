@@ -672,10 +672,22 @@ INSTRUÇÕES: Use os dados acima para responder. Seja objetivo e cite dados conc
       throw new AppError("Resposta vazia da IA", 500);
     }
 
-    console.log(`✅ Resposta recebida do ${provider.name} (${text.length} caracteres)`);
+    // Sanitizar resposta final: remover caracteres de controle inválidos e garantir encoding correto
+    const sanitizedResponse = text
+      .trim()
+      .replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, "") // Remover caracteres de controle exceto \n, \r, \t
+      .replace(/\uFFFD/g, "") // Remover caracteres de substituição Unicode
+      .replace(/\u0000/g, "") // Remover null bytes
+      .normalize("NFC"); // Normalizar Unicode
+
+    if (!sanitizedResponse || sanitizedResponse.trim() === "") {
+      throw new AppError("Resposta vazia após sanitização", 500);
+    }
+
+    console.log(`✅ Resposta recebida do ${provider.name} (${sanitizedResponse.length} caracteres)`);
 
     return {
-      response: text.trim()
+      response: sanitizedResponse.trim()
     };
   } catch (err: any) {
     console.error(`❌ Erro ao chamar ${provider.name} API (Chat):`, {

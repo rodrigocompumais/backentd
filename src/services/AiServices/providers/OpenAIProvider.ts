@@ -60,7 +60,15 @@ export class OpenAIProvider implements IAIProvider {
         throw new AppError("A IA não retornou resposta válida", 500);
       }
 
-      return text.trim();
+      // Sanitizar resposta: remover caracteres de controle inválidos e garantir encoding correto
+      const sanitized = text
+        .trim()
+        .replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, "") // Remover caracteres de controle exceto \n, \r, \t
+        .replace(/\uFFFD/g, "") // Remover caracteres de substituição Unicode
+        .replace(/\u0000/g, "") // Remover null bytes
+        .normalize("NFC"); // Normalizar Unicode mantendo acentos
+
+      return sanitized.trim();
     } catch (err: any) {
       const userMessage = interpretOpenAIError(err);
       throw new AppError(`Erro ao gerar texto com OpenAI: ${userMessage}`, err?.status || 500);
@@ -101,7 +109,15 @@ export class OpenAIProvider implements IAIProvider {
         throw new AppError("A IA não retornou resposta válida", 500);
       }
 
-      return text.trim();
+      // Sanitizar resposta: remover caracteres de controle inválidos e garantir encoding correto
+      const sanitized = text
+        .trim()
+        .replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, "") // Remover caracteres de controle exceto \n, \r, \t
+        .replace(/\uFFFD/g, "") // Remover caracteres de substituição Unicode
+        .replace(/\u0000/g, "") // Remover null bytes
+        .normalize("NFC"); // Normalizar Unicode mantendo acentos
+
+      return sanitized.trim();
     } catch (err: any) {
       const userMessage = interpretOpenAIError(err);
       throw new AppError(`Erro ao realizar chat com OpenAI: ${userMessage}`, err?.status || 500);

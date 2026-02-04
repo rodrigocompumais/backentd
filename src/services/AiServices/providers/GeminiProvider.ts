@@ -43,12 +43,19 @@ export class GeminiProvider implements IAIProvider {
     try {
       const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent`;
 
+      // Sanitizar prompt antes de enviar
+      const sanitizedPrompt = (prompt || "")
+        .replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, "") // Remover caracteres de controle inválidos
+        .replace(/\uFFFD/g, "") // Remover caracteres de substituição Unicode
+        .replace(/\u0000/g, "") // Remover null bytes
+        .normalize("NFC"); // Normalizar Unicode
+
       const payload = {
         contents: [
           {
             parts: [
               {
-                text: prompt
+                text: sanitizedPrompt
               }
             ]
           }
@@ -102,13 +109,24 @@ export class GeminiProvider implements IAIProvider {
       }
 
       const parts = first?.content?.parts || [];
-      const text = parts.map((p: any) => p.text).join("\n");
+      const text = parts
+        .map((p: any) => p?.text || "")
+        .filter((t: string) => t && typeof t === "string")
+        .join("\n");
 
       if (!text || text.trim() === "") {
         throw new AppError("A IA não retornou resposta válida", 500);
       }
 
-      return text.trim();
+      // Sanitizar resposta: remover caracteres de controle inválidos e garantir encoding correto
+      const sanitized = text
+        .trim()
+        .replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, "") // Remover caracteres de controle exceto \n, \r, \t
+        .replace(/\uFFFD/g, "") // Remover caracteres de substituição Unicode
+        .replace(/\u0000/g, "") // Remover null bytes
+        .normalize("NFC"); // Normalizar Unicode mantendo acentos
+
+      return sanitized.trim();
     } catch (err: any) {
       if (err instanceof AppError) {
         throw err;
@@ -142,11 +160,20 @@ export class GeminiProvider implements IAIProvider {
     try {
       const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent`;
 
-      // Converter mensagens para o formato Gemini
-      const contents = messages.map(msg => ({
-        role: msg.role === "system" ? "user" : msg.role === "user" ? "user" : "model",
-        parts: [{ text: msg.content }]
-      }));
+      // Converter mensagens para o formato Gemini, sanitizando o conteúdo
+      const contents = messages.map(msg => {
+        // Sanitizar conteúdo da mensagem antes de enviar
+        const sanitizedContent = (msg.content || "")
+          .replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, "") // Remover caracteres de controle inválidos
+          .replace(/\uFFFD/g, "") // Remover caracteres de substituição Unicode
+          .replace(/\u0000/g, "") // Remover null bytes
+          .normalize("NFC"); // Normalizar Unicode
+        
+        return {
+          role: msg.role === "system" ? "user" : msg.role === "user" ? "user" : "model",
+          parts: [{ text: sanitizedContent }]
+        };
+      });
 
       const payload = {
         contents,
@@ -199,13 +226,24 @@ export class GeminiProvider implements IAIProvider {
       }
 
       const parts = first?.content?.parts || [];
-      const text = parts.map((p: any) => p.text).join("\n");
+      const text = parts
+        .map((p: any) => p?.text || "")
+        .filter((t: string) => t && typeof t === "string")
+        .join("\n");
 
       if (!text || text.trim() === "") {
         throw new AppError("A IA não retornou resposta válida", 500);
       }
 
-      return text.trim();
+      // Sanitizar resposta: remover caracteres de controle inválidos e garantir encoding correto
+      const sanitized = text
+        .trim()
+        .replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, "") // Remover caracteres de controle exceto \n, \r, \t
+        .replace(/\uFFFD/g, "") // Remover caracteres de substituição Unicode
+        .replace(/\u0000/g, "") // Remover null bytes
+        .normalize("NFC"); // Normalizar Unicode mantendo acentos
+
+      return sanitized.trim();
     } catch (err: any) {
       if (err instanceof AppError) {
         throw err;

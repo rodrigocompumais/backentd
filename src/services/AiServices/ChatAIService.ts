@@ -76,7 +76,7 @@ const fetchLastMessages = async (
       "contact"
     ],
     order: [["createdAt", "DESC"]],
-    limit: 20,
+    limit: 100,
     raw: false
   });
 
@@ -139,33 +139,34 @@ CONTEXTO DO TICKET:
 - Criado em: ${formatDateTime(ticketData.createdAt)}
 - Última atualização: ${formatDateTime(ticketData.updatedAt)}
 
-ÚLTIMAS 20 MENSAGENS DA CONVERSA:
+ÚLTIMAS ${messages.length} MENSAGENS DA CONVERSA:
 ${messagesContext}
 
 INSTRUÇÕES:
-${suggestResponse 
-  ? `- Analise o contexto da conversa
+${suggestResponse
+      ? `- Analise o contexto da conversa
 - Gere 3-5 sugestões de resposta curtas e objetivas que o atendente pode usar
 - As sugestões devem ser profissionais, empáticas e diretas
 - Foque em resolver o problema do cliente de forma eficiente`
-  : question
-  ? `- Responda a seguinte pergunta do usuário sobre a conversa: "${question}"
+      : question
+        ? `- Responda a seguinte pergunta do usuário sobre a conversa: "${question}"
 - Seja objetivo e preciso
 - Use apenas as informações fornecidas no contexto`
-  : `- Analise o contexto da conversa
+        : `- Analise o contexto da conversa
 - Identifique os pontos principais discutidos
 - Resuma a situação atual do atendimento
 - Destaque informações importantes que o atendente deve saber
-- Seja objetivo e conciso`}
+- Seja profissional, empático e prestativo
+- Evite linguagem muito robótica`}
 
 FORMATO DE RESPOSTA:
-${suggestResponse 
-  ? `Retorne APENAS um JSON válido com este formato:
+${suggestResponse
+      ? `Retorne APENAS um JSON válido com este formato:
 {
   "suggestions": ["sugestão 1", "sugestão 2", "sugestão 3"],
   "keyPoints": ["ponto 1", "ponto 2", "ponto 3"]
 }`
-  : `Retorne APENAS um JSON válido com este formato:
+      : `Retorne APENAS um JSON válido com este formato:
 {
   "analysis": "análise detalhada da conversa",
   "keyPoints": ["ponto principal 1", "ponto principal 2", "ponto principal 3"]
@@ -178,7 +179,7 @@ ${suggestResponse
       maxTokens: 4096,
       topP: 0.95
     });
-    
+
     // Tentar extrair JSON da resposta
     let parsedResponse: any = {};
     try {
@@ -254,12 +255,12 @@ export const summarizeUnreadAudios = async ({
     const timestamp = formatDateTime(msg.createdAt);
     const sender = msg.fromMe ? "ATENDENTE" : "CLIENTE";
     const contactName = msg.contact?.name || "Desconhecido";
-    
+
     // Se houver transcrição no body, usar. Caso contrário, indicar que precisa transcrição
-    const transcript = msg.body && msg.body.trim() 
-      ? msg.body 
+    const transcript = msg.body && msg.body.trim()
+      ? msg.body
       : "[Áudio sem transcrição disponível]";
-    
+
     return `ÁUDIO ${index + 1}:
 - Data/Hora: ${timestamp}
 - Remetente: ${sender} (${contactName})
@@ -301,7 +302,7 @@ Retorne APENAS um JSON válido:
       maxTokens: 4096,
       topP: 0.95
     });
-    
+
     // Tentar extrair JSON da resposta
     let parsedResponse: any = {};
     try {
@@ -374,8 +375,8 @@ export const improveMessage = async ({
   // Construir contexto das mensagens
   const messagesContext = messages.length > 0
     ? messages.map((msg, index) => {
-        return `[${msg.createdAt}] ${msg.sender} (${msg.contactName}): ${msg.body || "[Mídia]"}`;
-      }).join("\n")
+      return `[${msg.createdAt}] ${msg.sender} (${msg.contactName}): ${msg.body || "[Mídia]"}`;
+    }).join("\n")
     : "Nenhuma mensagem anterior na conversa.";
 
   // Construir prompt baseado se há rascunho ou não
@@ -390,8 +391,8 @@ CONTEXTO DO TICKET:
 ÚLTIMAS 20 MENSAGENS DA CONVERSA:
 ${messagesContext}
 
-${draftText.trim() 
-  ? `RASCUNHO DA MENSAGEM DO ATENDENTE:
+${draftText.trim()
+      ? `RASCUNHO DA MENSAGEM DO ATENDENTE:
 "${draftText}"
 
 INSTRUÇÕES:
@@ -405,7 +406,7 @@ INSTRUÇÕES:
 - Seja respeitoso e prestativo
 
 IMPORTANTE: Retorne APENAS o texto melhorado, sem explicações ou comentários adicionais.`
-  : `INSTRUÇÕES:
+      : `INSTRUÇÕES:
 - Com base no contexto da conversa acima, sugira uma resposta completa e apropriada
 - A resposta deve ser profissional, empática e adequada ao contexto
 - Considere o status do ticket e o histórico da conversa
@@ -490,8 +491,8 @@ export const generateTicketInfo = async ({
   // Construir contexto das mensagens
   const messagesContext = messages.length > 0
     ? messages.map((msg, index) => {
-        return `[${msg.createdAt}] ${msg.sender} (${msg.contactName}): ${msg.body || "[Mídia]"}`;
-      }).join("\n")
+      return `[${msg.createdAt}] ${msg.sender} (${msg.contactName}): ${msg.body || "[Mídia]"}`;
+    }).join("\n")
     : "Nenhuma mensagem anterior na conversa.";
 
   // Construir prompt para gerar informações do ticket

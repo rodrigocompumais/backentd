@@ -44,7 +44,12 @@ import userQuickButtonRoutes from "./userQuickButtonRoutes";
 import userAppointmentRoutes from "./userAppointmentRoutes";
 import translationRoutes from "./translationRoutes";
 import customProposalRoutes from "./customProposalRoutes";
+import instagramRoutes from "./instagramRoutes";
+
 const routes = Router();
+
+routes.use(instagramRoutes);
+
 
 routes.use(userRoutes);
 routes.use("/auth", authRoutes);

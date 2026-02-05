@@ -29,24 +29,39 @@ const SendWhatsAppMessage = async ({
   }
 
   if (quotedMsg) {
-      const chatMessages = await Message.findOne({
-        where: {
-          id: quotedMsg.id
-        }
-      });
-
-      if (chatMessages) {
-        const msgFound = JSON.parse(chatMessages.dataJson);
-
-        options = {
-          quoted: {
-            key: msgFound.key,
-            message: {
-              extendedTextMessage: msgFound.message.extendedTextMessage
-            }
-          }
-        };
+    const chatMessages = await Message.findOne({
+      where: {
+        id: quotedMsg.id
       }
+    });
+
+    if (chatMessages) {
+      const msgFound = JSON.parse(chatMessages.dataJson);
+
+      options = {
+        quoted: {
+          key: msgFound.key,
+          message: {
+            extendedTextMessage: msgFound.message.extendedTextMessage
+          }
+        }
+      };
+    }
+  }
+
+  // Se for Instagram, usa o Adapter
+  if (whatsapp.type === "instagram") {
+    const { ChannelAdapterFactory } = require("../ChannelAdapters/ChannelAdapterFactory"); // Lazy import to avoid circular dep issues if any, or standard import
+    const adapter = ChannelAdapterFactory(whatsapp);
+    try {
+      const sentMessage = await adapter.sendMessage(whatsapp, ticket.contact, { body });
+      await ticket.update({ lastMessage: body });
+      return sentMessage;
+    } catch (err) {
+      Sentry.captureException(err);
+      console.log(err);
+      throw new AppError("ERR_SENDING_IG_MSG");
+    }
   }
 
   try {

@@ -10,10 +10,10 @@ export const StartWhatsAppSession = async (
   whatsapp: Whatsapp,
   companyId: number
 ): Promise<void> => {
-  // Se provider for Gupshup, não iniciar sessão Baileys
-  if (whatsapp.provider === "gupshup") {
-    logger.info(`Sessão ${whatsapp.name} é Gupshup. Não iniciando sessão Baileys.`);
-    // Apenas garantir que o status está correto
+  // Se provider for Gupshup ou Instagram, não iniciar sessão Baileys
+  if (whatsapp.provider === "gupshup" || whatsapp.type === "instagram") {
+    logger.info(`Sessão ${whatsapp.name} é ${whatsapp.type || whatsapp.provider}. Não iniciando sessão Baileys.`);
+    // Apenas garantir que o status está correto e inicializar Adapter se necessário
     if (whatsapp.status !== "CONNECTED") {
       await whatsapp.update({ status: "CONNECTED" });
     }

@@ -21,7 +21,7 @@ import WhatsappQueue from "./WhatsappQueue";
 import Company from "./Company";
 import Prompt from "./Prompt";
 import QueueIntegrations from "./QueueIntegrations";
-import {FlowBuilderModel} from "./FlowBuilder";
+import { FlowBuilderModel } from "./FlowBuilder";
 
 @Table
 class Whatsapp extends Model<Whatsapp> {
@@ -156,13 +156,28 @@ class Whatsapp extends Model<Whatsapp> {
   @BelongsTo(() => FlowBuilderModel)
   flowBuilder: FlowBuilderModel
 
-  @AllowNull
   @Column
   gupshupApiKey: string;
 
   @AllowNull
   @Column
   gupshupAppName: string;
+
+  @Default('whatsapp')
+  @Column
+  type: string;
+
+  @AllowNull
+  @Column
+  fbPageId: string;
+
+  @AllowNull
+  @Column(DataType.TEXT)
+  facebookUserToken: string;
+
+  @AllowNull
+  @Column(DataType.TEXT)
+  tokenStore: string;
 }
 
 export default Whatsapp;

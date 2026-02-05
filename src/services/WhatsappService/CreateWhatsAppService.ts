@@ -23,13 +23,17 @@ interface Request {
   //sendIdQueue?: number;
   //timeSendQueue?: number;
   transferQueueId?: number;
-  timeToTransfer?: number;    
+  timeToTransfer?: number;
   promptId?: number;
   maxUseBotQueues?: number;
   timeUseBotQueues?: number;
   expiresTicket?: number;
   expiresInactiveMessage?: string;
-  integrationId?: number
+  integrationId?: number;
+  type?: string;
+  fbPageId?: string;
+  facebookUserToken?: string;
+  tokenStore?: string;
 }
 
 interface Response {
@@ -54,13 +58,17 @@ const CreateWhatsAppService = async ({
   //timeSendQueue,
   //sendIdQueue,
   transferQueueId,
-  timeToTransfer,    
+  timeToTransfer,
   promptId,
   maxUseBotQueues = 3,
   timeUseBotQueues = 0,
   expiresTicket = 0,
   expiresInactiveMessage = "",
-  integrationId = null
+  integrationId = null,
+  type = "whatsapp",
+  fbPageId,
+  facebookUserToken,
+  tokenStore
 }: Request): Promise<Response> => {
 
   const company = await Company.findOne({
@@ -179,14 +187,18 @@ const CreateWhatsAppService = async ({
       gupshupAppName: provider === "gupshup" ? gupshupAppName : null,
       //timeSendQueue,
       //sendIdQueue,
-	    transferQueueId,
-	    timeToTransfer,	  
+      transferQueueId,
+      timeToTransfer,
       promptId,
       maxUseBotQueues,
       timeUseBotQueues,
       expiresTicket,
       expiresInactiveMessage,
-      integrationId
+      integrationId,
+      type,
+      fbPageId,
+      facebookUserToken,
+      tokenStore
     },
     { include: ["queues"] }
   );

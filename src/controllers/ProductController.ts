@@ -6,6 +6,8 @@ import UpdateProductService from "../services/ProductServices/UpdateProductServi
 import DeleteProductService from "../services/ProductServices/DeleteProductService";
 import ListProductsService from "../services/ProductServices/ListProductsService";
 import ShowProductService from "../services/ProductServices/ShowProductService";
+import Product from "../models/Product";
+import Form from "../models/Form";
 import AppError from "../errors/AppError";
 
 export const index = async (req: Request, res: Response): Promise<Response> => {
@@ -139,4 +141,36 @@ export const destroy = async (
   });
 
   return res.status(200).json({ message: "Produto deletado com sucesso" });
+};
+
+export const getPublicMenuProducts = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  const { formSlug } = req.params;
+
+  // Buscar formulário pelo slug para obter companyId
+  const form = await Form.findOne({
+    where: { slug: formSlug, isActive: true },
+    attributes: ["id", "companyId"],
+  });
+
+  if (!form) {
+    throw new AppError("ERR_FORM_NOT_FOUND", 404);
+  }
+
+  // Buscar todos os produtos de cardápio da empresa
+  const products = await Product.findAll({
+    where: {
+      companyId: form.companyId,
+      isMenuProduct: true,
+    },
+    order: [["grupo", "ASC"], ["name", "ASC"]],
+    attributes: ["id", "name", "description", "value", "grupo", "isMenuProduct"],
+  });
+
+  return res.json({
+    products,
+    count: products.length,
+  });
 };

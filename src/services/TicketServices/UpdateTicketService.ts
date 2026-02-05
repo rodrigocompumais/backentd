@@ -18,6 +18,7 @@ import { isNil } from "lodash";
 import Whatsapp from "../../models/Whatsapp";
 import AppError from "../../errors/AppError";
 import Company from "../../models/Company";
+import { logger } from "../../utils/logger";
 
 interface TicketData {
   status?: string;
@@ -189,32 +190,15 @@ const UpdateTicketService = async ({
         const queue = await Queue.findByPk(queueId);
         const wbot = await GetTicketWbot(ticket);
 
-        const translatedMessage = {
-          'pt': "*Mensagem automática*:\nVocê foi transferido para o departamento *" + queue?.name + "*\naguarde, já vamos te atender!",
-          'en': "*Automatic message*:\nYou have been transferred to the *" + queue?.name + "* department\nplease wait, we'll assist you soon!",
-          'es': "*Mensaje automático*:\nHas sido transferido al departamento *" + queue?.name + "*\npor favor espera, ¡te atenderemos pronto!"
-        }
-
-        const queueChangedMessage = await wbot.sendMessage(
-          getChatJid(ticket),
-          {
-            text: translatedMessage[language]
-          }
-        );
-        await verifyMessage(queueChangedMessage, ticket, ticket.contact);
-      }
-      else
-        // Mensagem de transferencia do ATENDENTE
-        if (oldUserId !== userId && oldQueueId === queueId && !isNil(oldUserId) && !isNil(userId)) {
-
-          const {language} = await Company.findByPk(companyId);
-          const wbot = await GetTicketWbot(ticket);
-          const nome = await ShowUserService(ticketData.userId);
-
+        // Se for Instagram, não enviar mensagem automática via Baileys
+        // Instagram não suporta mensagens automáticas de transferência da mesma forma
+        if (!wbot) {
+          logger.info(`Ticket ${ticket.id} é Instagram. Pulando mensagem automática de transferência.`);
+        } else {
           const translatedMessage = {
-              'pt': "*Mensagem automática*:\nFoi transferido para o atendente *" + nome.name + "*\naguarde, já vamos te atender!",
-              'en': "*Automatic message*:\nYou have been transferred to agent *" + nome.name + "*\nplease wait, we'll assist you soon!",
-              'es': "*Mensaje automático*:\nHas sido transferido al agente *" + nome.name + "*\npor favor espera, ¡te atenderemos pronto!"
+            'pt': "*Mensagem automática*:\nVocê foi transferido para o departamento *" + queue?.name + "*\naguarde, já vamos te atender!",
+            'en': "*Automatic message*:\nYou have been transferred to the *" + queue?.name + "* department\nplease wait, we'll assist you soon!",
+            'es': "*Mensaje automático*:\nHas sido transferido al departamento *" + queue?.name + "*\npor favor espera, ¡te atenderemos pronto!"
           }
 
           const queueChangedMessage = await wbot.sendMessage(
@@ -225,19 +209,23 @@ const UpdateTicketService = async ({
           );
           await verifyMessage(queueChangedMessage, ticket, ticket.contact);
         }
-        else
-          // Mensagem de transferencia do ATENDENTE e da FILA
-          if (oldUserId !== userId && !isNil(oldUserId) && !isNil(userId) && oldQueueId !== queueId && !isNil(oldQueueId) && !isNil(queueId)) {
+      }
+      else
+        // Mensagem de transferencia do ATENDENTE
+        if (oldUserId !== userId && oldQueueId === queueId && !isNil(oldUserId) && !isNil(userId)) {
 
-            const {language} = await Company.findByPk(companyId);
-            const wbot = await GetTicketWbot(ticket);
-            const queue = await Queue.findByPk(queueId);
-            const nome = await ShowUserService(ticketData.userId);
+          const {language} = await Company.findByPk(companyId);
+          const wbot = await GetTicketWbot(ticket);
+          const nome = await ShowUserService(ticketData.userId);
 
+          // Se for Instagram, não enviar mensagem automática via Baileys
+          if (!wbot) {
+            logger.info(`Ticket ${ticket.id} é Instagram. Pulando mensagem automática de transferência.`);
+          } else {
             const translatedMessage = {
-              'pt': "*Mensagem automática*:\nVocê foi transferido para o departamento *" + queue?.name + "* e contará com a presença de *" + nome.name + "*\naguarde, já vamos te atender!",
-              'en': "*Automatic message*:\nYou have been transferred to the *" + queue?.name + "* department and will be assisted by *" + nome.name + "*\nplease wait, we'll assist you soon!",
-              'es': "*Mensaje automático*:\nHas sido transferido al departamento *" + queue?.name + "* y serás atendido por *" + nome.name + "*\npor favor espera, ¡te atenderemos pronto!"
+                'pt': "*Mensagem automática*:\nFoi transferido para o atendente *" + nome.name + "*\naguarde, já vamos te atender!",
+                'en': "*Automatic message*:\nYou have been transferred to agent *" + nome.name + "*\nplease wait, we'll assist you soon!",
+                'es': "*Mensaje automático*:\nHas sido transferido al agente *" + nome.name + "*\npor favor espera, ¡te atenderemos pronto!"
             }
 
             const queueChangedMessage = await wbot.sendMessage(
@@ -247,17 +235,25 @@ const UpdateTicketService = async ({
               }
             );
             await verifyMessage(queueChangedMessage, ticket, ticket.contact);
-          } else
-            if (oldUserId !== undefined && isNil(userId) && oldQueueId !== queueId && !isNil(queueId)) {
+          }
+        }
+        else
+          // Mensagem de transferencia do ATENDENTE e da FILA
+          if (oldUserId !== userId && !isNil(oldUserId) && !isNil(userId) && oldQueueId !== queueId && !isNil(oldQueueId) && !isNil(queueId)) {
 
-              const {language} = await Company.findByPk(companyId);
-              const queue = await Queue.findByPk(queueId);
-              const wbot = await GetTicketWbot(ticket);
+            const {language} = await Company.findByPk(companyId);
+            const wbot = await GetTicketWbot(ticket);
+            const queue = await Queue.findByPk(queueId);
+            const nome = await ShowUserService(ticketData.userId);
 
+            // Se for Instagram, não enviar mensagem automática via Baileys
+            if (!wbot) {
+              logger.info(`Ticket ${ticket.id} é Instagram. Pulando mensagem automática de transferência.`);
+            } else {
               const translatedMessage = {
-                'pt': "*Mensagem automática*:\nVocê foi transferido para o departamento *" + queue?.name + "*\naguarde, já vamos te atender!",
-                'en': "*Automatic message*:\nYou have been transferred to the *" + queue?.name + "* department\nplease wait, we'll assist you soon!",
-                'es': "*Mensaje automático*:\nHas sido transferido al departamento *" + queue?.name + "*\npor favor espera, ¡te atenderemos pronto!"
+                'pt': "*Mensagem automática*:\nVocê foi transferido para o departamento *" + queue?.name + "* e contará com a presença de *" + nome.name + "*\naguarde, já vamos te atender!",
+                'en': "*Automatic message*:\nYou have been transferred to the *" + queue?.name + "* department and will be assisted by *" + nome.name + "*\nplease wait, we'll assist you soon!",
+                'es': "*Mensaje automático*:\nHas sido transferido al departamento *" + queue?.name + "* y serás atendido por *" + nome.name + "*\npor favor espera, ¡te atenderemos pronto!"
               }
 
               const queueChangedMessage = await wbot.sendMessage(
@@ -267,6 +263,32 @@ const UpdateTicketService = async ({
                 }
               );
               await verifyMessage(queueChangedMessage, ticket, ticket.contact);
+            }
+          } else
+            if (oldUserId !== undefined && isNil(userId) && oldQueueId !== queueId && !isNil(queueId)) {
+
+              const {language} = await Company.findByPk(companyId);
+              const queue = await Queue.findByPk(queueId);
+              const wbot = await GetTicketWbot(ticket);
+
+              // Se for Instagram, não enviar mensagem automática via Baileys
+              if (!wbot) {
+                logger.info(`Ticket ${ticket.id} é Instagram. Pulando mensagem automática de transferência.`);
+              } else {
+                const translatedMessage = {
+                  'pt': "*Mensagem automática*:\nVocê foi transferido para o departamento *" + queue?.name + "*\naguarde, já vamos te atender!",
+                  'en': "*Automatic message*:\nYou have been transferred to the *" + queue?.name + "* department\nplease wait, we'll assist you soon!",
+                  'es': "*Mensaje automático*:\nHas sido transferido al departamento *" + queue?.name + "*\npor favor espera, ¡te atenderemos pronto!"
+                }
+
+                const queueChangedMessage = await wbot.sendMessage(
+                  getChatJid(ticket),
+                  {
+                    text: translatedMessage[language]
+                  }
+                );
+                await verifyMessage(queueChangedMessage, ticket, ticket.contact);
+              }
             }
     }
 

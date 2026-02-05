@@ -30,6 +30,31 @@ class WhatsAppAdapter implements IChannelAdapter {
 
         return sent as unknown as Message;
     }
+
+    async sendMedia(
+        whatsapp: Whatsapp,
+        contact: Contact,
+        mediaData: {
+            mediaPath: string;
+            fileName: string;
+            mimetype: string;
+            caption?: string;
+        }
+    ): Promise<Message> {
+        // Calls the existing WhatsAppService.sendMedia
+        const sent = await WhatsAppService.sendMedia(
+            whatsapp,
+            contact.number,
+            mediaData.mediaPath,
+            {
+                fileName: mediaData.fileName,
+                caption: mediaData.caption,
+                mimetype: mediaData.mimetype
+            }
+        );
+
+        return sent as unknown as Message;
+    }
 }
 
 export default WhatsAppAdapter;

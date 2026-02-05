@@ -45,6 +45,7 @@ import userAppointmentRoutes from "./userAppointmentRoutes";
 import translationRoutes from "./translationRoutes";
 import customProposalRoutes from "./customProposalRoutes";
 import instagramRoutes from "./instagramRoutes";
+import productRoutes from "./productRoutes";
 
 const routes = Router();
 
@@ -97,5 +98,6 @@ routes.use(userQuickButtonRoutes);
 routes.use(userAppointmentRoutes);
 routes.use(translationRoutes);
 routes.use(customProposalRoutes);
+routes.use(productRoutes);
 
 export default routes;

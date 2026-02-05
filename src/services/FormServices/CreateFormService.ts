@@ -74,9 +74,10 @@ const CreateFormService = async ({
     ...otherSettings,
   });
 
-  // Verificar se é formulário de cotação
+  // Verificar se é formulário de cotação ou cardápio
   const formSettings = form.settings as any;
   const isQuotationForm = formSettings?.formType === "quotation";
+  const isMenuForm = formSettings?.formType === "cardapio";
 
   const fieldsToCreate: Field[] = [];
 
@@ -107,9 +108,38 @@ const CreateFormService = async ({
       isRequired: true,
       order: 2,
       metadata: { isAutoField: true, autoFieldType: "sellerName" },
+      } as Field);
+  } else if (isMenuForm) {
+    // Para formulários de cardápio, criar campos automáticos: Nome e Telefone (obrigatórios)
+    fieldsToCreate.push({
+      label: "Nome",
+      fieldType: "text",
+      placeholder: "Digite seu nome",
+      isRequired: true,
+      order: 0,
+      metadata: { isAutoField: true, autoFieldType: "name" },
     } as Field);
+
+    fieldsToCreate.push({
+      label: "Telefone",
+      fieldType: "phone",
+      placeholder: "Digite seu telefone (ex: 5534999999999)",
+      isRequired: true,
+      order: 1,
+      metadata: { isAutoField: true, autoFieldType: "phone" },
+    } as Field);
+
+    // Campos customizados da aba finalizar serão adicionados pelo gestor
+    if (fields && fields.length > 0) {
+      fields.forEach((field, index) => {
+        fieldsToCreate.push({
+          ...field,
+          order: 2 + index,
+        });
+      });
+    }
   } else {
-    // Se não for cotação, criar campos automáticos de Nome e Telefone se não for anônimo
+    // Se não for cotação nem cardápio, criar campos automáticos de Nome e Telefone se não for anônimo
     if (!form.isAnonymous) {
       // Campo Nome (primeiro)
       fieldsToCreate.push({

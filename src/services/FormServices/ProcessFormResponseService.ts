@@ -4,6 +4,10 @@ import FormResponse from "../../models/FormResponse";
 import ResponseAnswer from "../../models/ResponseAnswer";
 import CreateOrUpdateContactService from "../ContactServices/CreateOrUpdateContactService";
 import CreateTicketService from "../TicketServices/CreateTicketService";
+import FindOrCreateTicketService from "../TicketServices/FindOrCreateTicketService";
+import GetDefaultWhatsApp from "../../helpers/GetDefaultWhatsApp";
+import FormatMenuOrderMessage from "./FormatMenuOrderMessage";
+import SendWhatsAppMessage from "../WbotServices/SendWhatsAppMessage";
 import AppError from "../../errors/AppError";
 import axios from "axios";
 
@@ -18,6 +22,13 @@ interface Request {
   formId: number;
   answers: Answer[];
   quotationItems?: object[];
+  menuItems?: Array<{
+    productId: number;
+    quantity: number;
+    productName?: string;
+    productValue?: number;
+    grupo?: string;
+  }>;
   responderPhone?: string;
   responderEmail?: string;
   responderName?: string;
@@ -30,6 +41,7 @@ const ProcessFormResponseService = async ({
   formId,
   answers,
   quotationItems,
+  menuItems,
   responderPhone,
   responderEmail,
   responderName,
@@ -91,17 +103,25 @@ const ProcessFormResponseService = async ({
     }
   }
 
-  // Check if form is quotation type and process quotationItems
+  // Check if form is quotation or menu type and process items
   const formSettings = form.settings as any;
   const isQuotationForm = formSettings?.formType === "quotation";
+  const isMenuForm = formSettings?.formType === "cardapio";
   
-  // Prepare metadata with quotationItems if applicable
+  // Prepare metadata with quotationItems or menuItems if applicable
   const responseMetadata: any = metadata || {};
   if (isQuotationForm && quotationItems && quotationItems.length > 0) {
     responseMetadata.quotationItems = quotationItems;
     console.log("ProcessFormResponseService: Saving quotationItems:", quotationItems);
   } else if (isQuotationForm) {
     console.log("ProcessFormResponseService: Form is quotation but no quotationItems received");
+  }
+  
+  if (isMenuForm && menuItems && menuItems.length > 0) {
+    responseMetadata.menuItems = menuItems;
+    console.log("ProcessFormResponseService: Saving menuItems:", menuItems);
+  } else if (isMenuForm) {
+    console.log("ProcessFormResponseService: Form is menu but no menuItems received");
   }
 
   // Create FormResponse
@@ -195,6 +215,11 @@ const ProcessFormResponseService = async ({
         payload.quotationItems = quotationItems;
       }
 
+      // Include menuItems if form is menu type
+      if (isMenuForm && menuItems && menuItems.length > 0) {
+        payload.menuItems = menuItems;
+      }
+
       await axios.post(form.webhookUrl, payload, {
         timeout: 5000,
       });
@@ -204,6 +229,157 @@ const ProcessFormResponseService = async ({
     }
   }
 
+  // Process menu form: send WhatsApp message to customer
+  let whatsappSent = false;
+  let whatsappError = null;
+  
+  console.log("ProcessFormResponseService - Checking menu form:", {
+    isMenuForm,
+    menuItemsCount: menuItems?.length || 0,
+    contactPhone: contactPhone ? "present" : "missing",
+  });
+  
+  if (isMenuForm && menuItems && menuItems.length > 0 && contactPhone) {
+    try {
+      console.log("ProcessFormResponseService - Starting WhatsApp send process");
+      
+      // Get WhatsApp connection - use selected one or default
+      let whatsappToUse;
+      const formSettings = form.settings as any;
+      const selectedWhatsappId = formSettings?.whatsappId;
+      
+      console.log("ProcessFormResponseService - WhatsApp selection:", {
+        selectedWhatsappId,
+        hasSettings: !!formSettings,
+      });
+      
+      if (selectedWhatsappId) {
+        // Use selected WhatsApp connection
+        const Whatsapp = (await import("../../models/Whatsapp")).default;
+        whatsappToUse = await Whatsapp.findOne({
+          where: { id: selectedWhatsappId, companyId: form.companyId, status: "CONNECTED" },
+        });
+        
+        console.log("ProcessFormResponseService - Selected WhatsApp found:", !!whatsappToUse);
+        
+        if (!whatsappToUse) {
+          console.warn(`Selected WhatsApp ${selectedWhatsappId} not found or not connected, using default`);
+          whatsappToUse = await GetDefaultWhatsApp(form.companyId);
+        }
+      } else {
+        // Use default WhatsApp connection
+        console.log("ProcessFormResponseService - Using default WhatsApp");
+        whatsappToUse = await GetDefaultWhatsApp(form.companyId);
+      }
+      
+      if (!whatsappToUse) {
+        throw new Error("Nenhuma conexão WhatsApp disponível");
+      }
+      
+      console.log("ProcessFormResponseService - WhatsApp to use:", {
+        id: whatsappToUse.id,
+        name: whatsappToUse.name,
+        status: whatsappToUse.status,
+      });
+      
+      // Ensure contact exists (should already exist from createContact above, but double-check)
+      if (!contact && contactPhone) {
+        contact = await CreateOrUpdateContactService({
+          name: contactName || "Sem nome",
+          number: contactPhone,
+          email: contactEmail,
+          isGroup: false,
+          companyId: form.companyId,
+        });
+      }
+
+      if (contact) {
+        // Create or find ticket for sending message
+        const ticket = await FindOrCreateTicketService(
+          contact,
+          whatsappToUse.id,
+          0,
+          form.companyId
+        );
+
+        // Get custom fields from answers
+        const customFields = answers
+          .map((answer) => {
+            const field = fields.find((f) => f.id === answer.fieldId);
+            // Exclude auto fields (name, phone)
+            if (field) {
+              const fieldMetadata = field.metadata as any;
+              if (
+                fieldMetadata?.autoFieldType === "name" ||
+                fieldMetadata?.autoFieldType === "phone" ||
+                field.fieldType === "phone"
+              ) {
+                return null;
+              }
+              return {
+                label: field.label,
+                answer: typeof answer.answer === "string" ? answer.answer : String(answer.answer),
+              };
+            }
+            return null;
+          })
+          .filter((f): f is { label: string; answer: string } => f !== null);
+
+        // Format order message
+        const orderMessage = await FormatMenuOrderMessage({
+          menuItems,
+          customerName: contactName || "Cliente",
+          customerPhone: contactPhone,
+          customFields,
+        });
+
+        // Send WhatsApp message using existing SendWhatsAppMessage function
+        try {
+          console.log("ProcessFormResponseService - Sending WhatsApp message:", {
+            ticketId: ticket.id,
+            contactNumber: ticket.contact.number,
+            messageLength: orderMessage.length,
+          });
+          
+          const sentMessage = await SendWhatsAppMessage({
+            body: orderMessage,
+            ticket,
+          });
+          
+          // Verificar se a mensagem foi realmente enviada
+          if (sentMessage) {
+            whatsappSent = true;
+            console.log("ProcessFormResponseService - Menu order WhatsApp message sent successfully", {
+              messageId: sentMessage?.key?.id,
+            });
+          } else {
+            console.error("ProcessFormResponseService - SendWhatsAppMessage returned empty/null");
+            throw new Error("Mensagem não foi enviada - resposta vazia");
+          }
+        } catch (sendErr: any) {
+          console.error("ProcessFormResponseService - Error in SendWhatsAppMessage:", {
+            error: sendErr.message,
+            stack: sendErr.stack,
+          });
+          throw sendErr; // Re-throw para ser capturado pelo catch externo
+        }
+      }
+    } catch (err: any) {
+      console.error("ProcessFormResponseService - Error sending menu order WhatsApp message:", {
+        error: err.message,
+        stack: err.stack,
+        name: err.name,
+      });
+      whatsappError = err.message || "Erro ao enviar mensagem WhatsApp";
+      // Don't fail the request if WhatsApp send fails - order is still saved
+    }
+  } else if (isMenuForm) {
+    console.log("ProcessFormResponseService - Menu form conditions not met:", {
+      hasMenuItems: !!(menuItems && menuItems.length > 0),
+      hasContactPhone: !!contactPhone,
+    });
+  }
+
   await response.reload({
     include: [
       { association: "answers", include: [{ association: "field" }] },
@@ -211,6 +387,12 @@ const ProcessFormResponseService = async ({
       { association: "ticket" },
     ],
   });
+
+  // Add WhatsApp send status to response for menu forms
+  if (isMenuForm) {
+    (response as any).whatsappSent = whatsappSent;
+    (response as any).whatsappError = whatsappError;
+  }
 
   return response;
 };

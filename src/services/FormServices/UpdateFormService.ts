@@ -57,17 +57,19 @@ const UpdateFormService = async ({
 
   // Salvar valores antigos antes de atualizar
   const oldIsQuotationForm = (form.settings as any)?.formType === "quotation";
+  const oldIsMenuForm = (form.settings as any)?.formType === "cardapio";
   const oldIsAnonymous = form.isAnonymous;
 
   await form.update(formData);
   await form.reload();
 
-  // Verificar se é formulário de cotação (após atualização)
+  // Verificar se é formulário de cotação ou cardápio (após atualização)
   const formSettings = form.settings as any;
   const isQuotationForm = formSettings?.formType === "quotation";
+  const isMenuForm = formSettings?.formType === "cardapio";
 
   // Se mudou formType ou isAnonymous, recriar campos automáticos
-  if (fields !== undefined || (isQuotationForm !== oldIsQuotationForm) || (oldIsAnonymous !== form.isAnonymous)) {
+  if (fields !== undefined || (isQuotationForm !== oldIsQuotationForm) || (isMenuForm !== oldIsMenuForm) || (oldIsAnonymous !== form.isAnonymous)) {
     // Delete all existing fields (incluindo campos automáticos se existirem)
     await FormField.destroy({
       where: { formId: form.id },
@@ -103,8 +105,37 @@ const UpdateFormService = async ({
         order: 2,
         metadata: { isAutoField: true, autoFieldType: "sellerName" },
       } as Field);
+    } else if (isMenuForm) {
+      // Para formulários de cardápio, criar campos automáticos: Nome e Telefone (obrigatórios)
+      fieldsToCreate.push({
+        label: "Nome",
+        fieldType: "text",
+        placeholder: "Digite seu nome",
+        isRequired: true,
+        order: 0,
+        metadata: { isAutoField: true, autoFieldType: "name" },
+      } as Field);
+
+      fieldsToCreate.push({
+        label: "Telefone",
+        fieldType: "phone",
+        placeholder: "Digite seu telefone (ex: 5534999999999)",
+        isRequired: true,
+        order: 1,
+        metadata: { isAutoField: true, autoFieldType: "phone" },
+      } as Field);
+
+      // Campos customizados da aba finalizar serão adicionados pelo gestor
+      if (fields && fields.length > 0) {
+        fields.forEach((field, index) => {
+          fieldsToCreate.push({
+            ...field,
+            order: 2 + index,
+          });
+        });
+      }
     } else {
-      // Se não for cotação, criar campos automáticos de Nome e Telefone se não for anônimo
+      // Se não for cotação nem cardápio, criar campos automáticos de Nome e Telefone se não for anônimo
       if (!form.isAnonymous) {
         // Campo Nome (primeiro)
         fieldsToCreate.push({

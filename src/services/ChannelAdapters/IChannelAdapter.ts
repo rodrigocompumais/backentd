@@ -14,6 +14,17 @@ export interface IChannelAdapter {
         }
     ): Promise<Message>;
 
+    sendMedia(
+        whatsapp: Whatsapp,
+        contact: Contact,
+        mediaData: {
+            mediaPath: string;
+            fileName: string;
+            mimetype: string;
+            caption?: string;
+        }
+    ): Promise<Message>;
+
     // Future methods
     // refreshSession(whatsapp: Whatsapp): Promise<void>;
     // validateStatus(whatsapp: Whatsapp): Promise<boolean>;

@@ -204,10 +204,11 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
               ) {
                 removeWbot(id, false);
                 // Aguardar um pouco antes de reconectar para evitar múltiplas inicializações
+                // Não reconectar se for Instagram ou Gupshup (não usam Baileys)
                 setTimeout(
                   () => {
-                    // Verificar se não está já inicializando antes de reconectar
-                    if (!initializingSessions.get(id)) {
+                    // Verificar se não está já inicializando e se não é Instagram/Gupshup antes de reconectar
+                    if (!initializingSessions.get(id) && whatsapp.type !== "instagram" && whatsapp.provider !== "gupshup") {
                       StartWhatsAppSession(whatsapp, whatsapp.companyId);
                     }
                   },
@@ -222,10 +223,11 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
                 });
                 removeWbot(id, false);
                 // Aguardar um pouco antes de reconectar para evitar múltiplas inicializações
+                // Não reconectar se for Instagram ou Gupshup (não usam Baileys)
                 setTimeout(
                   () => {
-                    // Verificar se não está já inicializando antes de reconectar
-                    if (!initializingSessions.get(id)) {
+                    // Verificar se não está já inicializando e se não é Instagram/Gupshup antes de reconectar
+                    if (!initializingSessions.get(id) && whatsapp.type !== "instagram" && whatsapp.provider !== "gupshup") {
                       StartWhatsAppSession(whatsapp, whatsapp.companyId);
                     }
                   },

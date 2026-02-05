@@ -9,7 +9,15 @@ const store = async (req: Request, res: Response): Promise<Response> => {
   const { companyId } = req.user;
 
   const whatsapp = await ShowWhatsAppService(whatsappId, companyId);
-  await StartWhatsAppSession(whatsapp, companyId);
+  
+  // Não iniciar sessão Baileys para Instagram ou Gupshup
+  if (whatsapp.type !== "instagram" && whatsapp.provider !== "gupshup") {
+    await StartWhatsAppSession(whatsapp, companyId);
+  } else {
+    return res.status(400).json({ 
+      message: "Esta conexão não requer inicialização de sessão (Instagram/Gupshup)." 
+    });
+  }
 
   return res.status(200).json({ message: "Starting session." });
 };
@@ -24,7 +32,14 @@ const update = async (req: Request, res: Response): Promise<Response> => {
     whatsappData: { session: "" }
   });
 
-  await StartWhatsAppSession(whatsapp, companyId);
+  // Não iniciar sessão Baileys para Instagram ou Gupshup
+  if (whatsapp.type !== "instagram" && whatsapp.provider !== "gupshup") {
+    await StartWhatsAppSession(whatsapp, companyId);
+  } else {
+    return res.status(400).json({ 
+      message: "Esta conexão não requer reinicialização de sessão (Instagram/Gupshup)." 
+    });
+  }
 
   return res.status(200).json({ message: "Starting session." });
 };

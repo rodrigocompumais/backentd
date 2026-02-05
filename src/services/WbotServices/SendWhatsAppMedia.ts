@@ -131,6 +131,26 @@ const SendWhatsAppMedia = async ({
     const bodyMessage = formatBody(body, ticket.contact);
     const number = ticket.contact.number;
 
+    // Se for Instagram, usa o Adapter
+    if (whatsapp.type === "instagram") {
+      const { ChannelAdapterFactory } = require("../ChannelAdapters/ChannelAdapterFactory");
+      const adapter = ChannelAdapterFactory(whatsapp);
+      try {
+        const sentMessage = await adapter.sendMedia(whatsapp, ticket.contact, {
+          mediaPath: pathMedia,
+          fileName: media.originalname,
+          mimetype: media.mimetype,
+          caption: bodyMessage
+        });
+        await ticket.update({ lastMessage: bodyMessage });
+        return sentMessage;
+      } catch (err) {
+        Sentry.captureException(err);
+        console.log(err);
+        throw new AppError("ERR_SENDING_INSTAGRAM_MEDIA");
+      }
+    }
+
     // Para Baileys, ainda precisa processar áudio
     let finalMediaPath = pathMedia;
     if (typeMessage === "audio") {

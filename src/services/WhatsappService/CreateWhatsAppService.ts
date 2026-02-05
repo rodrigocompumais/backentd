@@ -43,7 +43,7 @@ interface Response {
 
 const CreateWhatsAppService = async ({
   name,
-  status = "OPENING",
+  status,
   queueIds = [],
   greetingMessage,
   complationMessage,
@@ -70,6 +70,21 @@ const CreateWhatsAppService = async ({
   facebookUserToken,
   tokenStore
 }: Request): Promise<Response> => {
+  // CORRIGIDO: Se provider for "instagram", garantir que type também seja "instagram"
+  // Isso deve ser feito ANTES de definir o status padrão para evitar que o valor padrão do modelo sobrescreva
+  if (provider === "instagram") {
+    type = "instagram";
+  }
+
+  // Definir status padrão baseado no tipo de conexão
+  // Instagram e Gupshup não precisam de QR code, então começam como CONNECTED
+  if (!status) {
+    if (type === "instagram" || provider === "gupshup") {
+      status = "CONNECTED";
+    } else {
+      status = "OPENING"; // WhatsApp precisa de QR code
+    }
+  }
 
   const company = await Company.findOne({
     where: {
@@ -131,6 +146,21 @@ const CreateWhatsAppService = async ({
     }
   }
 
+  // Validar campos Instagram se provider for "instagram"
+  // O tipo já foi definido acima, então apenas validamos e definimos status
+  if (provider === "instagram") {
+    if (!fbPageId || !facebookUserToken) {
+      throw new AppError(
+        "Campos ID da Página e Token de Usuário são obrigatórios para Instagram"
+      );
+    }
+    const VerifyInstagram = require("../../services/InstagramServices/VerifyInstagram").default;
+    await VerifyInstagram({ token: facebookUserToken });
+
+    // Status inicial para Instagram é CONNECTED (não precisa QR code)
+    status = "CONNECTED";
+  }
+
   // Validar campos Gupshup se provider for "gupshup"
   if (provider === "gupshup") {
     if (!gupshupApiKey || !gupshupAppName) {
@@ -139,6 +169,20 @@ const CreateWhatsAppService = async ({
       );
     }
     // Status inicial para Gupshup é CONNECTED (não precisa QR code)
+    status = "CONNECTED";
+  }
+
+  // Validar campos Instagram se type for "instagram" (fallback caso provider não seja definido)
+  if (type === "instagram" && provider !== "instagram") {
+    if (!fbPageId || !facebookUserToken) {
+      throw new AppError(
+        "Campos ID da Página e Token de Usuário são obrigatórios para Instagram"
+      );
+    }
+    const VerifyInstagram = require("../../services/InstagramServices/VerifyInstagram").default;
+    await VerifyInstagram({ token: facebookUserToken });
+
+    // Status inicial para Instagram é CONNECTED (não precisa QR code)
     status = "CONNECTED";
   }
 

@@ -49,6 +49,7 @@ import FormField from "../models/FormField";
 import FormResponse from "../models/FormResponse";
 import ResponseAnswer from "../models/ResponseAnswer";
 import UserAppointment from "../models/UserAppointment";
+import Product from "../models/Product";
 
 // eslint-disable-next-line
 const dbConfig = require("../config/database");
@@ -107,6 +108,7 @@ const models = [
   FormResponse,
   ResponseAnswer,
   UserAppointment,
+  Product,
 ];
 
 sequelize.addModels(models);

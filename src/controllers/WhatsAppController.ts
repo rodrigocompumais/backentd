@@ -26,13 +26,16 @@ interface WhatsappData {
   //sendIdQueue?: number;
   //timeSendQueue?: number;
   transferQueueId?: number;
-  timeToTransfer?: number;  
+  timeToTransfer?: number;
   promptId?: number;
   maxUseBotQueues?: number;
   timeUseBotQueues?: number;
   expiresTicket?: number;
   expiresInactiveMessage?: string;
-  integrationId?: number
+  integrationId?: number;
+  type?: string;
+  fbPageId?: string;
+  facebookUserToken?: string;
 }
 
 interface QueryParams {
@@ -62,14 +65,17 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
     gupshupAppName,
     //timeSendQueue,
     //sendIdQueue,
-	  transferQueueId,
-	  timeToTransfer,
+    transferQueueId,
+    timeToTransfer,
     promptId,
     maxUseBotQueues,
     timeUseBotQueues,
     expiresTicket,
     expiresInactiveMessage,
-    integrationId
+    integrationId,
+    type,
+    fbPageId,
+    facebookUserToken
   }: WhatsappData = req.body;
   const { companyId } = req.user;
 
@@ -88,18 +94,21 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
     gupshupAppName,
     //timeSendQueue,
     //sendIdQueue,
-	  transferQueueId,
-	  timeToTransfer,	
+    transferQueueId,
+    timeToTransfer,
     promptId,
     maxUseBotQueues,
     timeUseBotQueues,
     expiresTicket,
     expiresInactiveMessage,
-    integrationId
+    integrationId,
+    type,
+    fbPageId,
+    facebookUserToken
   });
 
-  // Não iniciar sessão Baileys se provider for Gupshup
-  if (whatsapp.provider !== "gupshup") {
+  // Não iniciar sessão Baileys se provider for Gupshup ou Instagram
+  if (whatsapp.provider !== "gupshup" && whatsapp.type !== "instagram") {
     StartWhatsAppSession(whatsapp, companyId);
   }
 

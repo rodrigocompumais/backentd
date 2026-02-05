@@ -10,6 +10,8 @@ export const StartWhatsAppSession = async (
   whatsapp: Whatsapp,
   companyId: number
 ): Promise<void> => {
+  logger.info(`StartWhatsAppSession - ID: ${whatsapp.id} | Name: ${whatsapp.name} | Provider: ${whatsapp.provider} | Type: ${whatsapp.type}`);
+
   // Se provider for Gupshup ou Instagram, não iniciar sessão Baileys
   if (whatsapp.provider === "gupshup" || whatsapp.type === "instagram") {
     logger.info(`Sessão ${whatsapp.name} é ${whatsapp.type || whatsapp.provider}. Não iniciando sessão Baileys.`);

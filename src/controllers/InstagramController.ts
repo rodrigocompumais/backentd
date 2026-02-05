@@ -69,6 +69,12 @@ export const webhookEvent = async (
                 return;
             }
 
+            // Validar que a conexão é realmente do tipo Instagram
+            if (whatsapp.type !== "instagram") {
+                logger.warn(`Received Instagram event for non-Instagram connection: ${whatsapp.id} (type: ${whatsapp.type})`);
+                return;
+            }
+
             // Processamento básico de mensagens
             if (entry.messaging) {
                 const HandleInstagramMessageService = require("../services/InstagramServices/HandleInstagramMessageService").default;

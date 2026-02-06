@@ -241,6 +241,7 @@ const ProcessFormResponseService = async ({
             formId: form.id,
             formName: form.name,
             responseId: response.id,
+            protocol: response.protocol,
             submittedAt: response.submittedAt,
             responder: {
               name: contactName,

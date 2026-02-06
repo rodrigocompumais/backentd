@@ -50,6 +50,10 @@ import FormResponse from "../models/FormResponse";
 import ResponseAnswer from "../models/ResponseAnswer";
 import UserAppointment from "../models/UserAppointment";
 import Product from "../models/Product";
+import PrintDevice from "../models/PrintDevice";
+import PrintPedido from "../models/PrintPedido";
+import Module from "../models/Module";
+import CompanyModule from "../models/CompanyModule";
 
 // eslint-disable-next-line
 const dbConfig = require("../config/database");
@@ -109,6 +113,10 @@ const models = [
   ResponseAnswer,
   UserAppointment,
   Product,
+  PrintDevice,
+  PrintPedido,
+  Module,
+  CompanyModule,
 ];
 
 sequelize.addModels(models);

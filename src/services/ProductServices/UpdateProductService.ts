@@ -10,6 +10,7 @@ interface Request {
   quantity?: number;
   isMenuProduct?: boolean;
   grupo?: string;
+  imageUrl?: string;
 }
 
 const UpdateProductService = async ({
@@ -21,6 +22,7 @@ const UpdateProductService = async ({
   quantity,
   isMenuProduct,
   grupo,
+  imageUrl,
 }: Request): Promise<Product> => {
   const product = await Product.findOne({
     where: { id: productId, companyId },
@@ -58,6 +60,10 @@ const UpdateProductService = async ({
 
   if (grupo !== undefined) {
     product.grupo = grupo?.trim() || null;
+  }
+
+  if (imageUrl !== undefined) {
+    product.imageUrl = imageUrl?.trim() || null;
   }
 
   await product.save();

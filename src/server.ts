@@ -1,6 +1,7 @@
 import gracefulShutdown from "http-graceful-shutdown";
 import app from "./app";
 import { initIO } from "./libs/socket";
+import { initPrintWebSocket } from "./libs/printWebSocket";
 import { logger } from "./utils/logger";
 import { StartAllWhatsAppsSessions } from "./services/WbotServices/StartAllWhatsAppsSessions";
 import Company from "./models/Company";
@@ -10,6 +11,10 @@ import cron from "node-cron";
 import TestAllGeminiApiKeysService from "./services/AiServices/TestAllGeminiApiKeysService";
 import RenewSubscriptionService, { findCompaniesNeedingRenewal } from "./services/SubscriptionService/RenewSubscriptionService";
 import CheckRemindersService from "./services/ReminderServices/CheckRemindersService";
+import CheckOrderAutoConfirmService from "./services/OrderServices/CheckOrderAutoConfirmService";
+import { Op } from "sequelize";
+import PrintPedido from "./models/PrintPedido";
+import FormResponse from "./models/FormResponse";
 
 const server = app.listen(process.env.PORT, async () => {
   const companies = await Company.findAll();
@@ -86,5 +91,68 @@ cron.schedule("* * * * *", async () => {
   }
 });
 
+// Job para avançar pedidos novo -> confirmado automaticamente
+cron.schedule("* * * * *", async () => {
+  try {
+    await CheckOrderAutoConfirmService();
+  } catch (error: any) {
+    logger.error("Erro no job de auto-confirmação de pedidos:", error);
+  }
+});
+
+// Job para reverter jobs de impressão travados (printing há mais de 5 min)
+cron.schedule("* * * * *", async () => {
+  try {
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+    const [affected] = await PrintPedido.update(
+      { status: "pending" },
+      {
+        where: {
+          status: "printing",
+          updatedAt: { [Op.lt]: fiveMinAgo }
+        }
+      }
+    );
+    if (affected > 0) {
+      logger.info(`Reverted ${affected} stuck print job(s) to pending`);
+    }
+  } catch (error: any) {
+    logger.error("Erro ao reverter jobs de impressão travados:", error);
+  }
+});
+
+// Cleanup de jobs expirados (done/error com mais de 24h)
+cron.schedule("0 2 * * *", async () => {
+  try {
+    const result = await PrintPedido.destroy({
+      where: {
+        status: { [Op.in]: ["done", "error"] },
+        expiresAt: { [Op.lt]: new Date() }
+      }
+    });
+    if (result > 0) {
+      logger.info(`Cleaned up ${result} expired print job(s)`);
+    }
+  } catch (error: any) {
+    logger.error("Erro no cleanup de jobs de impressão:", error);
+  }
+});
+
+// Cleanup de respostas/pedidos de formulário com mais de 24h
+cron.schedule("0 3 * * *", async () => {
+  try {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const result = await FormResponse.destroy({
+      where: { submittedAt: { [Op.lt]: cutoff } }
+    });
+    if (result > 0) {
+      logger.info(`Removidas ${result} resposta(s) de formulário com mais de 24h`);
+    }
+  } catch (error: any) {
+    logger.error("Erro no cleanup de respostas de formulário:", error);
+  }
+});
+
 initIO(server);
+initPrintWebSocket(server);
 gracefulShutdown(server);

@@ -24,6 +24,9 @@ import { hash } from "bcryptjs";
 import moment from "moment";
 import CreateCompanyWithPaymentService from "../services/CompanyService/CreateCompanyWithPaymentService";
 import { createPreapproval, getPreapprovalStatus, cancelPreapproval, updatePreapproval } from "../services/PaymentService/MercadoPagoService";
+import ListCompanyModulesService from "../services/CompanyModuleServices/ListCompanyModulesService";
+import CompanyModule from "../models/CompanyModule";
+import Module from "../models/Module";
 
 type IndexQuery = {
   searchParam: string;
@@ -833,4 +836,44 @@ export const getCompanyByEmail = async (req: Request, res: Response): Promise<Re
 
     throw new AppError("Erro ao buscar empresa", 400);
   }
+};
+
+/** GET /companies/:id/modules - Super admin: listar módulos da empresa */
+export const getCompanyModules = async (req: Request, res: Response): Promise<Response> => {
+  const companyId = Number(req.params.id);
+  if (!companyId || isNaN(companyId)) {
+    throw new AppError("ID da empresa inválido", 400);
+  }
+  const modules = await ListCompanyModulesService(companyId);
+  return res.json({ modules });
+};
+
+/** PUT /companies/:id/modules - Super admin: definir módulos da empresa (slugs) */
+export const updateCompanyModules = async (req: Request, res: Response): Promise<Response> => {
+  const companyId = Number(req.params.id);
+  const { modules } = req.body as { modules?: string[] };
+
+  if (!companyId || isNaN(companyId)) {
+    throw new AppError("ID da empresa inválido", 400);
+  }
+
+  const company = await Company.findByPk(companyId);
+  if (!company) {
+    throw new AppError("Empresa não encontrada", 404);
+  }
+
+  const slugs = Array.isArray(modules) ? modules : [];
+  const activeModules = await Module.findAll({
+    where: { slug: slugs, isActive: true },
+    attributes: ["id", "slug"],
+  });
+
+  await CompanyModule.destroy({ where: { companyId } });
+
+  for (const mod of activeModules) {
+    await CompanyModule.create({ companyId, moduleId: mod.id });
+  }
+
+  const result = await ListCompanyModulesService(companyId);
+  return res.json({ modules: result });
 };

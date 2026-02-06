@@ -1,3 +1,4 @@
+import { Op } from "sequelize";
 import Form from "../../models/Form";
 import FormField from "../../models/FormField";
 import FormResponse from "../../models/FormResponse";
@@ -9,7 +10,8 @@ import GetDefaultWhatsApp from "../../helpers/GetDefaultWhatsApp";
 import FormatMenuOrderMessage from "./FormatMenuOrderMessage";
 import SendWhatsAppMessage from "../WbotServices/SendWhatsAppMessage";
 import AppError from "../../errors/AppError";
-import axios from "axios";
+import PrintDevice from "../../models/PrintDevice";
+import CreateAndDispatchPrintJobService from "../PrintJobService/CreateAndDispatchPrintJobService";
 
 interface Answer {
   fieldId: number;
@@ -84,22 +86,34 @@ const ProcessFormResponseService = async ({
   let contactPhone = responderPhone || "";
   let contactEmail = responderEmail || "";
 
+  const toStr = (v: unknown): string =>
+    v == null ? "" : Array.isArray(v) ? v.join(", ") : String(v);
+
   // Try to find name, phone, email in form fields
   for (const answer of answers) {
     const field = fields.find((f) => f.id === answer.fieldId);
     if (field) {
       const fieldMetadata = field.metadata as any;
+      const val = toStr(answer.answer).trim();
       if (fieldMetadata?.autoFieldType === "supplierName" || (field.fieldType === "text" && field.label.toLowerCase().includes("nome do fornecedor"))) {
-        contactName = typeof answer.answer === "string" ? answer.answer : contactName;
+        if (val) contactName = val;
       } else if (fieldMetadata?.autoFieldType === "name" || (field.fieldType === "text" && field.label.toLowerCase().includes("nome"))) {
-        contactName = typeof answer.answer === "string" ? answer.answer : contactName;
+        if (val) contactName = val;
       }
       if (fieldMetadata?.autoFieldType === "phone" || field.fieldType === "phone") {
-        contactPhone = typeof answer.answer === "string" ? answer.answer : contactPhone;
+        if (val) contactPhone = val;
       }
       if (field.fieldType === "email") {
-        contactEmail = typeof answer.answer === "string" ? answer.answer : contactEmail;
+        if (val) contactEmail = val;
       }
+    }
+  }
+
+  // Normalizar telefone: só dígitos, garantir 55 para Brasil se tiver 10+ dígitos
+  if (contactPhone) {
+    const digits = contactPhone.replace(/\D/g, "");
+    if (digits.length >= 10) {
+      contactPhone = digits.startsWith("55") ? digits : "55" + digits;
     }
   }
 
@@ -124,8 +138,8 @@ const ProcessFormResponseService = async ({
     console.log("ProcessFormResponseService: Form is menu but no menuItems received");
   }
 
-  // Create FormResponse
-  const response = await FormResponse.create({
+  // Create FormResponse (orderStatus "novo" for menu/cardapio forms)
+  const createPayload: any = {
     formId: form.id,
     responderPhone: contactPhone,
     responderEmail: contactEmail,
@@ -133,7 +147,31 @@ const ProcessFormResponseService = async ({
     ipAddress,
     userAgent,
     metadata: responseMetadata,
-  });
+  };
+  if (isMenuForm) {
+    createPayload.orderStatus = "novo";
+    // Gerar protocolo único PED-YYYYMMDD-NNNN por empresa/dia
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+    const count = await FormResponse.count({
+      include: [
+        {
+          model: Form,
+          as: "form",
+          required: true,
+          where: { companyId: form.companyId },
+          attributes: [],
+        },
+      ],
+      where: {
+        submittedAt: { [Op.between]: [startOfDay, endOfDay] } as any,
+      },
+    });
+    createPayload.protocol = `PED-${dateStr}-${String(count + 1).padStart(4, "0")}`;
+  }
+  const response = await FormResponse.create(createPayload);
 
   // Create ResponseAnswers
   const answersToCreate = answers.map((answer) => ({
@@ -186,46 +224,51 @@ const ProcessFormResponseService = async ({
     }
   }
 
-  // Send Webhook if configured
-  if (form.sendWebhook && form.webhookUrl) {
+  // Create print job for menu form if print device configured
+  if (isMenuForm && menuItems && menuItems.length > 0) {
     try {
-      const payload: any = {
-        event: "form.submitted",
-        formId: form.id,
-        formName: form.name,
-        responseId: response.id,
-        submittedAt: response.submittedAt,
-        responder: {
-          name: contactName,
-          phone: contactPhone,
-          email: contactEmail,
-        },
-        answers: answers.map((answer) => {
-          const field = fields.find((f) => f.id === answer.fieldId);
-          return {
-            fieldId: answer.fieldId,
-            label: field?.label || "",
-            answer: answer.answer,
+      const formSettings = form.settings as any;
+      const printDeviceId = formSettings?.printDeviceId;
+
+      if (printDeviceId) {
+        const printDevice = await PrintDevice.findOne({
+          where: { id: printDeviceId, companyId: form.companyId }
+        });
+
+        if (printDevice) {
+          const conteudo = {
+            event: "form.submitted",
+            formId: form.id,
+            formName: form.name,
+            responseId: response.id,
+            submittedAt: response.submittedAt,
+            responder: {
+              name: contactName,
+              phone: contactPhone,
+              email: contactEmail,
+            },
+            answers: answers.map((answer) => {
+              const field = fields.find((f) => f.id === answer.fieldId);
+              return {
+                fieldId: answer.fieldId,
+                label: field?.label || "",
+                answer: answer.answer,
+              };
+            }),
+            menuItems,
           };
-        }),
-      };
 
-      // Include quotationItems if form is quotation type
-      if (isQuotationForm && quotationItems && quotationItems.length > 0) {
-        payload.quotationItems = quotationItems;
+          await CreateAndDispatchPrintJobService({
+            companyId: form.companyId,
+            deviceId: printDevice.deviceId,
+            formId: form.id,
+            formResponseId: response.id,
+            conteudo,
+          });
+        }
       }
-
-      // Include menuItems if form is menu type
-      if (isMenuForm && menuItems && menuItems.length > 0) {
-        payload.menuItems = menuItems;
-      }
-
-      await axios.post(form.webhookUrl, payload, {
-        timeout: 5000,
-      });
     } catch (err) {
-      console.error("Error sending webhook:", err);
-      // Don't fail the request if webhook fails
+      console.error("Error creating print job:", err);
     }
   }
 
@@ -331,6 +374,7 @@ const ProcessFormResponseService = async ({
           customerName: contactName || "Cliente",
           customerPhone: contactPhone,
           customFields,
+          protocol: response.protocol || undefined,
         });
 
         // Send WhatsApp message using existing SendWhatsAppMessage function

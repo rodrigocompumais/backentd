@@ -7,6 +7,7 @@ const routes = express.Router();
 
 routes.get("/dashboard", isAuth, DashboardController.index);
 routes.get("/dashboard/extended", isAuth, DashboardController.extended);
+routes.get("/dashboard/orders-stats", isAuth, DashboardController.ordersStats);
 routes.get("/dashboard/ticketsUsers", DashboardController.reportsUsers);
 routes.get("/dashboard/ticketsDay", DashboardController.reportsDay);
 

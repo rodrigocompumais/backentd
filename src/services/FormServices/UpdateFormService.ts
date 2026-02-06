@@ -1,6 +1,7 @@
 import Form from "../../models/Form";
 import FormField from "../../models/FormField";
 import AppError from "../../errors/AppError";
+import HasCompanyModuleService, { MODULE_LANCHONETES } from "../CompanyModuleServices/HasCompanyModuleService";
 
 interface Field {
   id?: number;
@@ -53,6 +54,14 @@ const UpdateFormService = async ({
 
   if (!form) {
     throw new AppError("ERR_FORM_NOT_FOUND", 404);
+  }
+
+  const newFormType = (formData.settings as any)?.formType ?? (form.settings as any)?.formType;
+  if (newFormType === "cardapio") {
+    const hasModule = await HasCompanyModuleService(companyId, MODULE_LANCHONETES);
+    if (!hasModule) {
+      throw new AppError("ERR_MODULE_LANCHONETES_REQUIRED", 403);
+    }
   }
 
   // Salvar valores antigos antes de atualizar
@@ -170,11 +179,21 @@ const UpdateFormService = async ({
     }
 
     if (fieldsToCreate.length > 0) {
-      const fieldsToInsert = fieldsToCreate.map((field) => ({
-        ...field,
-        formId: form.id,
-      }));
-      await FormField.bulkCreate(fieldsToInsert);
+      const baseIndex = isQuotationForm ? 3 : (isMenuForm ? 2 : (form.isAnonymous ? 0 : 2));
+      const fieldsToInsert = fieldsToCreate.map((field) => {
+        const { conditionalFieldIndex, ...rest } = field as any;
+        return { ...rest, formId: form.id };
+      });
+      const created = await FormField.bulkCreate(fieldsToInsert);
+      for (let i = 0; i < fieldsToCreate.length; i++) {
+        const field = fieldsToCreate[i] as any;
+        if (typeof field.conditionalFieldIndex === "number" && field.hasConditional) {
+          const sourceIdx = baseIndex + field.conditionalFieldIndex;
+          if (sourceIdx >= 0 && sourceIdx < created.length && created[sourceIdx]) {
+            await created[i].update({ conditionalFieldId: created[sourceIdx].id });
+          }
+        }
+      }
     }
   }
 

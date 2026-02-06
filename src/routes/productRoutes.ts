@@ -1,15 +1,21 @@
 import express from "express";
+import multer from "multer";
 import isAuth from "../middleware/isAuth";
+import hasCompanyModule from "../middleware/hasCompanyModule";
+import uploadProductImage from "../config/uploadProductImage";
 
 import * as ProductController from "../controllers/ProductController";
 
 const routes = express.Router();
+const upload = multer(uploadProductImage);
+const requireLanchonetes = hasCompanyModule("lanchonetes");
 
-routes.get("/products", isAuth, ProductController.index);
-routes.post("/products", isAuth, ProductController.store);
-routes.get("/products/:id", isAuth, ProductController.show);
-routes.put("/products/:id", isAuth, ProductController.update);
-routes.delete("/products/:id", isAuth, ProductController.destroy);
+routes.get("/products", isAuth, requireLanchonetes, ProductController.index);
+routes.post("/products", isAuth, requireLanchonetes, ProductController.store);
+routes.post("/products/upload-image", isAuth, requireLanchonetes, upload.single("image"), ProductController.uploadImage);
+routes.get("/products/:id", isAuth, requireLanchonetes, ProductController.show);
+routes.put("/products/:id", isAuth, requireLanchonetes, ProductController.update);
+routes.delete("/products/:id", isAuth, requireLanchonetes, ProductController.destroy);
 
 // Public route for menu products (no auth required)
 routes.get("/public/forms/:formSlug/products", ProductController.getPublicMenuProducts);

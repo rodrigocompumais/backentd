@@ -57,6 +57,7 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
       .nullable(),
     isMenuProduct: Yup.boolean().nullable(),
     grupo: Yup.string().nullable(),
+    imageUrl: Yup.string().nullable(),
   });
 
   try {
@@ -99,6 +100,7 @@ export const update = async (
       .nullable(),
     isMenuProduct: Yup.boolean().nullable(),
     grupo: Yup.string().nullable(),
+    imageUrl: Yup.string().nullable(),
   });
 
   try {
@@ -166,11 +168,21 @@ export const getPublicMenuProducts = async (
       isMenuProduct: true,
     },
     order: [["grupo", "ASC"], ["name", "ASC"]],
-    attributes: ["id", "name", "description", "value", "grupo", "isMenuProduct"],
+    attributes: ["id", "name", "description", "value", "grupo", "isMenuProduct", "imageUrl"],
   });
 
   return res.json({
     products,
     count: products.length,
   });
+};
+
+export const uploadImage = async (req: Request, res: Response): Promise<Response> => {
+  const file = req.file as Express.Multer.File;
+  if (!file || !file.filename) {
+    throw new AppError("ERR_PRODUCT_IMAGE_REQUIRED", 400);
+  }
+  const baseUrl = process.env.BACKEND_URL || "http://localhost:3333";
+  const imageUrl = `${baseUrl.replace(/\/$/, "")}/public/products/${file.filename}`;
+  return res.json({ imageUrl });
 };

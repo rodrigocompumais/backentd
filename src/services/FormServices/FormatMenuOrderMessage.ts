@@ -18,6 +18,7 @@ interface Request {
   customerName: string;
   customerPhone: string;
   customFields?: CustomField[];
+  protocol?: string;
 }
 
 const FormatMenuOrderMessage = async ({
@@ -25,6 +26,7 @@ const FormatMenuOrderMessage = async ({
   customerName,
   customerPhone,
   customFields = [],
+  protocol,
 }: Request): Promise<string> => {
   // Buscar informações completas dos produtos se não estiverem no menuItem
   const productIds = menuItems.map((item) => item.productId);
@@ -60,6 +62,9 @@ const FormatMenuOrderMessage = async ({
 
   // Construir mensagem
   let message = "🍽️ *NOVO PEDIDO - CARDÁPIO*\n\n";
+  if (protocol) {
+    message += `📋 *Protocolo:* ${protocol}\n`;
+  }
   message += `👤 *Cliente:* ${customerName}\n`;
   message += `📱 *Telefone:* ${customerPhone}\n\n`;
   message += "📋 *ITENS DO PEDIDO:*\n\n";

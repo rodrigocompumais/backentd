@@ -45,6 +45,9 @@ class Product extends Model<Product> {
   @Column
   grupo: string;
 
+  @Column(DataType.TEXT)
+  imageUrl: string;
+
   @ForeignKey(() => Company)
   @Column
   companyId: number;

@@ -24,6 +24,9 @@ companyRoutes.delete("/companies/:id/preapproval", isAuth, CompanyController.can
 companyRoutes.put("/companies/:id/auto-renew", isAuth, CompanyController.updateCompanyAutoRenew);
 companyRoutes.get("/companies/by-email", CompanyController.getCompanyByEmail);
 
+companyRoutes.get("/companies/:id/modules", isAuth, isSuper, CompanyController.getCompanyModules);
+companyRoutes.put("/companies/:id/modules", isAuth, isSuper, CompanyController.updateCompanyModules);
+
 // Rota para listar o plano da empresa
 companyRoutes.get("/companies/listPlan/:id", isAuth, CompanyController.listPlan);
 companyRoutes.get("/companiesPlan", isAuth, CompanyController.indexPlan);

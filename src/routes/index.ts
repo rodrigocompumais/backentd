@@ -10,6 +10,7 @@ import messageRoutes from "./messageRoutes";
 import whatsappSessionRoutes from "./whatsappSessionRoutes";
 import queueRoutes from "./queueRoutes";
 import companyRoutes from "./companyRoutes";
+import companyModuleRoutes from "./companyModuleRoutes";
 import planRoutes from "./planRoutes";
 import ticketNoteRoutes from "./ticketNoteRoutes";
 import quickMessageRoutes from "./quickMessageRoutes";
@@ -46,6 +47,8 @@ import translationRoutes from "./translationRoutes";
 import customProposalRoutes from "./customProposalRoutes";
 import instagramRoutes from "./instagramRoutes";
 import productRoutes from "./productRoutes";
+import moduleRoutes from "./moduleRoutes";
+import printDeviceRoutes from "./printDeviceRoutes";
 
 const routes = Router();
 
@@ -63,6 +66,7 @@ routes.use(messageRoutes);
 routes.use(whatsappSessionRoutes);
 routes.use(queueRoutes);
 routes.use(companyRoutes);
+routes.use(companyModuleRoutes);
 routes.use(planRoutes);
 routes.use(ticketNoteRoutes);
 routes.use(quickMessageRoutes);
@@ -99,5 +103,7 @@ routes.use(userAppointmentRoutes);
 routes.use(translationRoutes);
 routes.use(customProposalRoutes);
 routes.use(productRoutes);
+routes.use(moduleRoutes);
+routes.use(printDeviceRoutes);
 
 export default routes;

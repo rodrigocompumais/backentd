@@ -7,7 +7,136 @@ import Form from "../models/Form";
 import FormResponse from "../models/FormResponse";
 import ResponseAnswer from "../models/ResponseAnswer";
 import ProcessFormResponseService from "../services/FormServices/ProcessFormResponseService";
+import UpdateOrderStatusService from "../services/OrderServices/UpdateOrderStatusService";
 import AppError from "../errors/AppError";
+
+const RESPONSES_MAX_AGE_HOURS = 24;
+
+const getResponsesCutoff = (): Date =>
+  new Date(Date.now() - RESPONSES_MAX_AGE_HOURS * 60 * 60 * 1000);
+
+export const listOrders = async (req: Request, res: Response): Promise<Response> => {
+  const { formId } = req.params;
+  const { companyId } = req.user;
+  const { dateFrom, dateTo, orderStatus, search } = req.query;
+
+  const form = await Form.findOne({
+    where: { id: formId, companyId },
+  });
+
+  if (!form) {
+    throw new AppError("ERR_FORM_NOT_FOUND", 404);
+  }
+
+  const formSettings = form.settings as any;
+  if (formSettings?.formType !== "cardapio") {
+    throw new AppError("ERR_FORM_NOT_MENU", 400);
+  }
+
+  const whereCondition: any = { formId: Number(formId) };
+  if (dateFrom || dateTo) {
+    const dateRange: any = {};
+    if (dateFrom) dateRange[Op.gte] = new Date(String(dateFrom));
+    if (dateTo) dateRange[Op.lte] = new Date(String(dateTo));
+    whereCondition.submittedAt = dateRange;
+  } else {
+    whereCondition.submittedAt = { [Op.gte]: getResponsesCutoff() } as any;
+  }
+  if (orderStatus && typeof orderStatus === "string") {
+    whereCondition.orderStatus = orderStatus;
+  }
+  if (search && typeof search === "string" && search.trim()) {
+    const searchTerm = `%${search.trim()}%`;
+    whereCondition[Op.or] = [
+      { responderName: { [Op.like]: searchTerm } },
+      { responderPhone: { [Op.like]: searchTerm } },
+      { responderEmail: { [Op.like]: searchTerm } },
+    ];
+  }
+
+  const responses = await FormResponse.findAll({
+    where: whereCondition,
+    include: [
+      { association: "answers", include: [{ association: "field" }] },
+      { association: "contact", attributes: ["id", "name", "number", "email"] },
+      { association: "ticket", attributes: ["id", "status"] },
+    ],
+    order: [["submittedAt", "DESC"]],
+    limit: 500,
+  });
+
+  return res.json({ orders: responses });
+};
+
+const isCardapioForm = (form: Form): boolean => {
+  try {
+    const s = form.settings;
+    const settings = typeof s === "string" ? JSON.parse(s || "{}") : (s || {});
+    return (settings as any)?.formType === "cardapio";
+  } catch {
+    return false;
+  }
+};
+
+export const listAllOrders = async (req: Request, res: Response): Promise<Response> => {
+  const { companyId } = req.user;
+  const { dateFrom, dateTo, orderStatus, search, formId: formIdFilter } = req.query;
+
+  const allForms = await Form.findAll({
+    where: { companyId },
+    attributes: ["id", "name", "settings"],
+  });
+  const cardapioForms = allForms.filter(isCardapioForm);
+  const cardapioFormIds = cardapioForms.map((f) => f.id);
+
+  if (cardapioFormIds.length === 0) {
+    return res.json({ orders: [], forms: [] });
+  }
+
+  const whereCondition: any = { formId: { [Op.in]: cardapioFormIds } };
+  if (formIdFilter && typeof formIdFilter === "string") {
+    const fid = Number(formIdFilter);
+    if (cardapioFormIds.includes(fid)) {
+      whereCondition.formId = fid;
+    }
+  }
+  if (dateFrom || dateTo) {
+    const dateRange: any = {};
+    if (dateFrom) dateRange[Op.gte] = new Date(String(dateFrom));
+    if (dateTo) dateRange[Op.lte] = new Date(String(dateTo));
+    whereCondition.submittedAt = dateRange;
+  } else {
+    whereCondition.submittedAt = { [Op.gte]: getResponsesCutoff() } as any;
+  }
+  if (orderStatus && typeof orderStatus === "string") {
+    whereCondition.orderStatus = orderStatus;
+  }
+  if (search && typeof search === "string" && search.trim()) {
+    const searchTerm = `%${search.trim()}%`;
+    whereCondition[Op.or] = [
+      { responderName: { [Op.like]: searchTerm } },
+      { responderPhone: { [Op.like]: searchTerm } },
+      { responderEmail: { [Op.like]: searchTerm } },
+    ];
+  }
+
+  const responses = await FormResponse.findAll({
+    where: whereCondition,
+    include: [
+      { association: "answers", include: [{ association: "field" }] },
+      { association: "contact", attributes: ["id", "name", "number", "email"] },
+      { association: "ticket", attributes: ["id", "status"] },
+      { association: "form", attributes: ["id", "name", "settings"] },
+    ],
+    order: [["submittedAt", "DESC"]],
+    limit: 500,
+  });
+
+  return res.json({
+    orders: responses,
+    forms: cardapioForms.map((f) => ({ id: f.id, name: f.name })),
+  });
+};
 
 export const index = async (req: Request, res: Response): Promise<Response> => {
   const { formId } = req.params;
@@ -23,12 +152,15 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
     throw new AppError("ERR_FORM_NOT_FOUND", 404);
   }
 
-  const whereCondition: any = { formId: Number(formId) };
-  
+  const whereCondition: any = {
+    formId: Number(formId),
+    submittedAt: { [Op.gte]: getResponsesCutoff() } as any,
+  };
+
   if (isRead !== undefined) {
     whereCondition.isRead = isRead === "true";
   }
-  
+
   if (isStarred !== undefined) {
     whereCondition.isStarred = isStarred === "true";
   }
@@ -132,7 +264,13 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
     response,
   });
 
-  return res.status(200).json(response);
+  const payload = response.get ? response.get({ plain: true }) : response;
+  const body = {
+    ...payload,
+    whatsappSent: (response as any).whatsappSent,
+    whatsappError: (response as any).whatsappError,
+  };
+  return res.status(200).json(body);
 };
 
 export const destroy = async (
@@ -199,6 +337,34 @@ export const markAsRead = async (
   return res.status(200).json(response);
 };
 
+export const updateOrderStatus = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  const { formId, id } = req.params;
+  const { orderStatus } = req.body;
+  const { companyId } = req.user;
+
+  if (!orderStatus || typeof orderStatus !== "string") {
+    throw new AppError("ERR_ORDER_STATUS_REQUIRED", 400);
+  }
+
+  const response = await UpdateOrderStatusService({
+    formId: Number(formId),
+    responseId: Number(id),
+    orderStatus,
+    companyId,
+  });
+
+  const io = getIO();
+  io.to(`company-${companyId}-mainchannel`).emit(`company-${companyId}-formResponse`, {
+    action: "update",
+    response,
+  });
+
+  return res.status(200).json(response);
+};
+
 export const toggleStar = async (
   req: Request,
   res: Response
@@ -246,7 +412,10 @@ export const exportData = async (
   }
 
   const responses = await FormResponse.findAll({
-    where: { formId: form.id },
+    where: {
+      formId: form.id,
+      submittedAt: { [Op.gte]: getResponsesCutoff() } as any,
+    },
     include: [
       {
         association: "answers",
@@ -351,12 +520,16 @@ export const getAnalytics = async (
     throw new AppError("ERR_FORM_NOT_FOUND", 404);
   }
 
+  const whereAnalytics = {
+    formId: form.id,
+    submittedAt: { [Op.gte]: getResponsesCutoff() } as any,
+  };
   const responseCount = await FormResponse.count({
-    where: { formId: form.id },
+    where: whereAnalytics,
   });
 
   const responses = await FormResponse.findAll({
-    where: { formId: form.id },
+    where: whereAnalytics,
     include: [
       {
         association: "answers",

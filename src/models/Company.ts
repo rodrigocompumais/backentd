@@ -22,6 +22,7 @@ import TicketTraking from "./TicketTraking";
 import User from "./User";
 import UserRating from "./UserRating";
 import Whatsapp from "./Whatsapp";
+import PrintDevice from "./PrintDevice";
 
 @Table
 class Company extends Model<Company> {
@@ -139,6 +140,13 @@ class Company extends Model<Company> {
     hooks: true
   })
   tickets: Ticket[];
+
+  @HasMany(() => PrintDevice, {
+    onUpdate: "CASCADE",
+    onDelete: "CASCADE",
+    hooks: true
+  })
+  printDevices: PrintDevice[];
 
   @HasMany(() => TicketTraking, {
     onUpdate: "CASCADE",

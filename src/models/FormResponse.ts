@@ -71,6 +71,12 @@ class FormResponse extends Model<FormResponse> {
   @Column(DataType.JSONB)
   metadata: object; // UTM params, referrer, etc.
 
+  @Column
+  orderStatus: string; // novo, confirmado, em_preparo, pronto, saiu_entrega, entregue, cancelado (só para formType=cardapio)
+
+  @Column
+  protocol: string; // PED-YYYYMMDD-NNNN para identificação única do pedido
+
   @HasMany(() => ResponseAnswer, {
     onUpdate: "CASCADE",
     onDelete: "CASCADE",

@@ -1,6 +1,7 @@
 import AppError from "../../errors/AppError";
 import Contact from "../../models/Contact";
 import ContactCustomField from "../../models/ContactCustomField";
+import { Op } from "sequelize";
 
 interface ExtraInfo {
   id?: number;
@@ -40,6 +41,24 @@ const UpdateContactService = async ({
 
   if (!contact) {
     throw new AppError("ERR_NO_CONTACT_FOUND", 404);
+  }
+
+  // Verificar se o número já existe para outro contato na mesma empresa
+  if (number && number !== contact.number) {
+    const existingContact = await Contact.findOne({
+      where: {
+        number,
+        companyId,
+        id: { [Op.ne]: contactId } // Excluir o contato atual
+      }
+    });
+
+    if (existingContact) {
+      throw new AppError(
+        `Já existe um contato com o número ${number} nesta empresa`,
+        400
+      );
+    }
   }
 
   if (extraInfo) {

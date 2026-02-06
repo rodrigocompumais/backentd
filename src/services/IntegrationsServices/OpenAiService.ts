@@ -65,7 +65,8 @@ const deleteFileSync = (path: string): void => {
 
 const sanitizeName = (name: string): string => {
   let sanitized = name.split(" ")[0];
-  sanitized = sanitized.replace(/[^a-zA-Z0-9]/g, "");
+  // Remove apenas caracteres especiais problemáticos, mantendo acentos e letras Unicode
+  sanitized = sanitized.replace(/[^\p{L}\p{N}]/gu, "");
   return sanitized.substring(0, 60);
 };
 

@@ -8,6 +8,7 @@ import ListTicketsService from "../services/TicketServices/ListTicketsService";
 import ShowTicketUUIDService from "../services/TicketServices/ShowTicketFromUUIDService";
 import ShowTicketService from "../services/TicketServices/ShowTicketService";
 import UpdateTicketService from "../services/TicketServices/UpdateTicketService";
+import SetTicketMessagesAsUnread from "../helpers/SetTicketMessagesAsUnread";
 import ListTicketsServiceKanban from "../services/TicketServices/ListTicketsServiceKanban";
 
 type IndexQuery = {
@@ -196,6 +197,19 @@ export const update = async (
 
 
   return res.status(200).json(ticket);
+};
+
+export const markAsUnread = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  const { ticketId } = req.params;
+  const { companyId } = req.user;
+
+  const ticket = await ShowTicketService(ticketId, companyId);
+  await SetTicketMessagesAsUnread(ticket);
+
+  return res.status(200).json({ ticket: await ticket.reload() });
 };
 
 export const remove = async (

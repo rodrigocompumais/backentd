@@ -10,6 +10,7 @@ import Whatsapp from "../models/Whatsapp";
 import formatBody from "../helpers/Mustache";
 
 import ListMessagesService from "../services/MessageServices/ListMessagesService";
+import SearchMessagesService from "../services/MessageServices/SearchMessagesService";
 import ShowTicketService from "../services/TicketServices/ShowTicketService";
 import FindOrCreateTicketService from "../services/TicketServices/FindOrCreateTicketService";
 import UpdateTicketService from "../services/TicketServices/UpdateTicketService";
@@ -59,6 +60,31 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
   SetTicketMessagesAsRead(ticket);
 
   return res.json({ count, messages, ticket, hasMore });
+};
+
+export const search = async (req: Request, res: Response): Promise<Response> => {
+  const { ticketId } = req.params;
+  const { query } = req.query as { query?: string };
+  const { companyId, profile } = req.user;
+  const queues: number[] = [];
+
+  if (profile !== "admin") {
+    const user = await User.findByPk(req.user.id, {
+      include: [{ model: Queue, as: "queues" }]
+    });
+    user.queues.forEach(queue => {
+      queues.push(queue.id);
+    });
+  }
+
+  const { messages } = await SearchMessagesService({
+    ticketId,
+    companyId,
+    query: query || "",
+    queues
+  });
+
+  return res.json({ messages });
 };
 
 export const store = async (req: Request, res: Response): Promise<Response> => {

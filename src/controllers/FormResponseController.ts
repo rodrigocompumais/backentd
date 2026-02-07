@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { Op } from "sequelize";
+import { Op, Sequelize } from "sequelize";
 import { getIO } from "../libs/socket";
 import XLSX from "xlsx";
 
@@ -18,7 +18,7 @@ const getResponsesCutoff = (): Date =>
 export const listOrders = async (req: Request, res: Response): Promise<Response> => {
   const { formId } = req.params;
   const { companyId } = req.user;
-  const { dateFrom, dateTo, orderStatus, search } = req.query;
+  const { dateFrom, dateTo, orderStatus, search, orderType } = req.query;
 
   const form = await Form.findOne({
     where: { id: formId, companyId },
@@ -53,6 +53,17 @@ export const listOrders = async (req: Request, res: Response): Promise<Response>
       { responderEmail: { [Op.like]: searchTerm } },
     ];
   }
+  if (orderType === "delivery") {
+    whereCondition[Op.and] = whereCondition[Op.and] || [];
+    whereCondition[Op.and].push(
+      Sequelize.literal("metadata->>'orderType' = 'delivery'")
+    );
+  } else if (orderType === "mesa") {
+    whereCondition[Op.and] = whereCondition[Op.and] || [];
+    whereCondition[Op.and].push(
+      Sequelize.literal("(metadata->>'orderType' IS NULL OR metadata->>'orderType' = 'mesa')")
+    );
+  }
 
   const responses = await FormResponse.findAll({
     where: whereCondition,
@@ -80,7 +91,7 @@ const isCardapioForm = (form: Form): boolean => {
 
 export const listAllOrders = async (req: Request, res: Response): Promise<Response> => {
   const { companyId } = req.user;
-  const { dateFrom, dateTo, orderStatus, search, formId: formIdFilter } = req.query;
+  const { dateFrom, dateTo, orderStatus, search, formId: formIdFilter, orderType } = req.query;
 
   const allForms = await Form.findAll({
     where: { companyId },
@@ -118,6 +129,17 @@ export const listAllOrders = async (req: Request, res: Response): Promise<Respon
       { responderPhone: { [Op.like]: searchTerm } },
       { responderEmail: { [Op.like]: searchTerm } },
     ];
+  }
+  if (orderType === "delivery") {
+    whereCondition[Op.and] = whereCondition[Op.and] || [];
+    whereCondition[Op.and].push(
+      Sequelize.literal("metadata->>'orderType' = 'delivery'")
+    );
+  } else if (orderType === "mesa") {
+    whereCondition[Op.and] = whereCondition[Op.and] || [];
+    whereCondition[Op.and].push(
+      Sequelize.literal("(metadata->>'orderType' IS NULL OR metadata->>'orderType' = 'mesa')")
+    );
   }
 
   const responses = await FormResponse.findAll({

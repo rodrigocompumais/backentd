@@ -90,12 +90,12 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
 
 export const store = async (req: Request, res: Response): Promise<Response> => {
   const { contactId, status, userId, queueId, whatsappId }: TicketData = req.body;
-  const { companyId } = req.user;
+  const { companyId, id: currentUserId } = req.user;
 
   const ticket = await CreateTicketService({
     contactId,
     status,
-    userId,
+    userId: (userId != null ? Number(userId) : currentUserId) as number,
     companyId,
     queueId,
     whatsappId

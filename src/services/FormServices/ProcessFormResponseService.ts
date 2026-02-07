@@ -12,6 +12,8 @@ import SendWhatsAppMessage from "../WbotServices/SendWhatsAppMessage";
 import AppError from "../../errors/AppError";
 import PrintDevice from "../../models/PrintDevice";
 import CreateAndDispatchPrintJobService from "../PrintJobService/CreateAndDispatchPrintJobService";
+import OcuparMesaService from "../MesaServices/OcuparMesaService";
+import Mesa from "../../models/Mesa";
 
 interface Answer {
   fieldId: number;
@@ -221,6 +223,33 @@ const ProcessFormResponseService = async ({
       await response.update({ ticketId: ticket.id });
     } catch (err) {
       console.error("Error creating ticket from form:", err);
+    }
+  }
+
+  // Auto-ocupação de mesa: quando cliente pede via cardápio com mesa livre (?mesa=X)
+  const tableId = (metadata as any)?.tableId ?? responseMetadata?.tableId;
+  if (tableId != null && contact) {
+    try {
+      const mesaId = typeof tableId === "string" ? parseInt(tableId, 10) : Number(tableId);
+      if (!Number.isNaN(mesaId)) {
+        const mesa = await Mesa.findOne({
+          where: { id: mesaId, companyId: form.companyId },
+        });
+        if (mesa && mesa.status === "livre") {
+          await OcuparMesaService({
+            mesaId: mesa.id,
+            companyId: form.companyId,
+            contactId: contact.id,
+            ticketId: ticket?.id,
+          });
+          // Atualizar metadata com número/nome da mesa para exibição
+          const updatedMeta = { ...(response.metadata as object || {}), tableNumber: mesa.name || mesa.number };
+          await response.update({ metadata: updatedMeta });
+        }
+      }
+    } catch (err: any) {
+      // Não quebrar o fluxo se mesa já ocupada ou outro erro
+      console.warn("ProcessFormResponseService - Auto-ocupar mesa:", err?.message || err);
     }
   }
 

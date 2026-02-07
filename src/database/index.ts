@@ -54,6 +54,7 @@ import PrintDevice from "../models/PrintDevice";
 import PrintPedido from "../models/PrintPedido";
 import Module from "../models/Module";
 import CompanyModule from "../models/CompanyModule";
+import Mesa from "../models/Mesa";
 
 // eslint-disable-next-line
 const dbConfig = require("../config/database");
@@ -117,6 +118,7 @@ const models = [
   PrintPedido,
   Module,
   CompanyModule,
+  Mesa,
 ];
 
 sequelize.addModels(models);

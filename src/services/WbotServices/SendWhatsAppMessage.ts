@@ -12,14 +12,16 @@ interface Request {
   body: string;
   ticket: Ticket;
   quotedMsg?: Message;
+  mentions?: string[];
 }
 
 const SendWhatsAppMessage = async ({
   body,
   ticket,
-  quotedMsg
+  quotedMsg,
+  mentions
 }: Request): Promise<WAMessage | any> => {
-  let options = {};
+  let options: Record<string, any> = {};
   const number = ticket.contact.number;
 
   // Obter whatsapp do ticket
@@ -47,6 +49,13 @@ const SendWhatsAppMessage = async ({
         }
       };
     }
+  }
+
+  if (mentions && mentions.length > 0 && ticket.isGroup) {
+    options.contextInfo = {
+      ...(options.contextInfo || {}),
+      mentionedJid: mentions
+    };
   }
 
   // Se for Instagram, usa o Adapter

@@ -10,6 +10,7 @@ import ShowTicketService from "../services/TicketServices/ShowTicketService";
 import UpdateTicketService from "../services/TicketServices/UpdateTicketService";
 import SetTicketMessagesAsUnread from "../helpers/SetTicketMessagesAsUnread";
 import ListTicketsServiceKanban from "../services/TicketServices/ListTicketsServiceKanban";
+import GetGroupParticipantsService from "../services/TicketServices/GetGroupParticipantsService";
 
 type IndexQuery = {
   searchParam: string;
@@ -159,6 +160,14 @@ export const kanban = async (req: Request, res: Response): Promise<Response> => 
   });
 
   return res.status(200).json({ tickets, count, hasMore });
+};
+
+export const groupParticipants = async (req: Request, res: Response): Promise<Response> => {
+  const { ticketId } = req.params;
+  const { companyId } = req.user;
+
+  const participants = await GetGroupParticipantsService(ticketId, companyId);
+  return res.status(200).json({ participants });
 };
 
 export const show = async (req: Request, res: Response): Promise<Response> => {

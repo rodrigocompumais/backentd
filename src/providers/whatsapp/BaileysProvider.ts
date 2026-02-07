@@ -52,11 +52,18 @@ class BaileysProvider implements IWhatsAppProvider {
       const formattedBody = `\u200e${body}`;
 
       // Converter opções para o formato esperado pelo Baileys
-      const baileysOptions: MiscMessageGenerationOptions = options as any;
+      const baileysOptions = options as MiscMessageGenerationOptions & { contextInfo?: { mentionedJid?: string[] } };
+
+      // Baileys espera "mentions" no nível raiz do conteúdo (não contextInfo) - processa e injeta em contextInfo
+      const messageContent: any = { text: formattedBody };
+      const mentionedJid = baileysOptions?.contextInfo?.mentionedJid;
+      if (mentionedJid?.length) {
+        messageContent.mentions = mentionedJid;
+      }
 
       const sentMessage = await wbot.sendMessage(
         chatId,
-        { text: formattedBody },
+        messageContent,
         baileysOptions
       );
 

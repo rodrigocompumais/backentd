@@ -132,7 +132,7 @@ const transcribeAudio = async ({
 
     if (!transcription || transcription.trim() === "") {
       logger.error(`Transcrição vazia retornada pelo ${providerName}`);
-      throw new AppError("Não foi possível transcrever o áudio. A transcrição retornada está vazia.", 500);
+      throw new AppError("ERR_AI_TRANSCRIPTION_EMPTY", 500);
     }
 
     logger.info(`✅ Transcrição concluída com sucesso usando ${providerName} (${transcription.length} caracteres)`);

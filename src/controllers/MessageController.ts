@@ -5,6 +5,7 @@ import SetTicketMessagesAsRead from "../helpers/SetTicketMessagesAsRead";
 import { getIO } from "../libs/socket";
 import Message from "../models/Message";
 import Queue from "../models/Queue";
+import Ticket from "../models/Ticket";
 import User from "../models/User";
 import Whatsapp from "../models/Whatsapp";
 import formatBody from "../helpers/Mustache";
@@ -15,8 +16,10 @@ import ShowTicketService from "../services/TicketServices/ShowTicketService";
 import FindOrCreateTicketService from "../services/TicketServices/FindOrCreateTicketService";
 import UpdateTicketService from "../services/TicketServices/UpdateTicketService";
 import DeleteWhatsAppMessage from "../services/WbotServices/DeleteWhatsAppMessage";
+import EditWhatsAppMessage from "../services/WbotServices/EditWhatsAppMessage";
 import SendWhatsAppMedia from "../services/WbotServices/SendWhatsAppMedia";
 import SendWhatsAppMessage from "../services/WbotServices/SendWhatsAppMessage";
+import SendWhatsAppReaction from "../services/WbotServices/SendWhatsAppReaction";
 import CreateMessageService from "../services/MessageServices/CreateMessageService";
 import CheckContactNumber from "../services/WbotServices/CheckNumber";
 import CheckIsValidContact from "../services/WbotServices/CheckIsValidContact";
@@ -31,6 +34,7 @@ type MessageData = {
   fromMe: boolean;
   read: boolean;
   quotedMsg?: Message;
+  mentions?: string[];
   number?: string;
   closeTicket?: true;
 };
@@ -89,7 +93,7 @@ export const search = async (req: Request, res: Response): Promise<Response> => 
 
 export const store = async (req: Request, res: Response): Promise<Response> => {
   const { ticketId } = req.params;
-  const { body, quotedMsg, isInternal }: MessageData & { isInternal?: boolean } = req.body;
+  const { body, quotedMsg, mentions, isInternal }: MessageData & { isInternal?: boolean } = req.body;
   const medias = req.files as Express.Multer.File[];
   const { companyId } = req.user;
 
@@ -124,7 +128,7 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
       })
     );
   } else {
-    const send = await SendWhatsAppMessage({ body, ticket, quotedMsg });
+    const send = await SendWhatsAppMessage({ body, ticket, quotedMsg, mentions });
   }
 
   return res.send();
@@ -143,6 +147,52 @@ export const remove = async (
   io.to(message.ticketId.toString()).emit(`company-${companyId}-appMessage`, {
     action: "update",
     message
+  });
+
+  return res.send();
+};
+
+export const update = async (req: Request, res: Response): Promise<Response> => {
+  const { messageId } = req.params;
+  const { body } = req.body as { body?: string };
+  const { companyId } = req.user;
+
+  const message = await EditWhatsAppMessage({ messageId, body: body || "" });
+
+  const io = getIO();
+  io.to(message.ticketId.toString()).emit(`company-${companyId}-appMessage`, {
+    action: "update",
+    message
+  });
+
+  return res.json(message);
+};
+
+export const react = async (req: Request, res: Response): Promise<Response> => {
+  const { messageId } = req.params;
+  const { emoji } = req.body as { emoji?: string };
+  const { companyId } = req.user;
+
+  const message = await Message.findByPk(messageId, {
+    include: [{ model: Ticket, as: "ticket", attributes: ["companyId"] }]
+  });
+
+  if (!message) {
+    return res.status(404).json({ error: "Mensagem não encontrada" });
+  }
+
+  if (message.mediaType === "reactionMessage") {
+    return res.status(400).json({ error: "Não é possível reagir a uma reação" });
+  }
+
+  const ticket = (message as any).ticket;
+  if (!ticket || ticket.companyId !== companyId) {
+    return res.status(403).json({ error: "Acesso negado" });
+  }
+
+  await SendWhatsAppReaction({
+    messageId,
+    emoji: emoji || "👍"
   });
 
   return res.send();

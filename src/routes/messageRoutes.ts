@@ -14,6 +14,8 @@ messageRoutes.get("/messages/:ticketId", isAuth, MessageController.index);
 messageRoutes.get("/messages/:ticketId/search", isAuth, MessageController.search);
 messageRoutes.post("/messages/:ticketId", isAuth, upload.array("medias"), MessageController.store);
 messageRoutes.delete("/messages/:messageId", isAuth, MessageController.remove);
+messageRoutes.put("/messages/:messageId", isAuth, MessageController.update);
+messageRoutes.post("/messages/:messageId/react", isAuth, MessageController.react);
 messageRoutes.post("/api/messages/send", tokenAuth, upload.array("medias"), MessageController.send);
 messageRoutes.post("/messages/send-by-phone", isAuth, MessageController.sendMessageByPhone);
 

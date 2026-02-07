@@ -706,11 +706,14 @@ export const getQuotedMessage = (msg: proto.IWebMessageInfo): any => {
   return extractMessageContent(body[Object.keys(body).values().next().value]);
 };
 export const getQuotedMessageId = (msg: proto.IWebMessageInfo) => {
+  // Reações usam reactionMessage.key.id para referenciar a mensagem reagida
+  if (msg?.message?.reactionMessage) {
+    return msg.message.reactionMessage?.key?.id ?? null;
+  }
   const body = extractMessageContent(msg.message)[
     Object.keys(msg?.message).values().next().value
   ];
-
-  return body?.contextInfo?.stanzaId;
+  return body?.contextInfo?.stanzaId ?? null;
 };
 
 const getMeSocket = (wbot: Session): IMe => {

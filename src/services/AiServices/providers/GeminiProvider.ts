@@ -372,12 +372,9 @@ export class GeminiProvider implements IAIProvider {
       if (!transcription || transcription.trim() === "") {
         // Verificar se finishReason foi MAX_TOKENS - indica que modelo gastou todos os tokens
         if (first?.finishReason === "MAX_TOKENS") {
-          throw new AppError(
-            "Transcrição vazia: o modelo atingiu o limite de tokens. Isso pode ocorrer se o prompt for muito complexo ou o áudio muito longo. Tente simplificar o prompt ou dividir o áudio.",
-            500
-          );
+          throw new AppError("ERR_AI_AUDIO_TOO_LONG", 400);
         }
-        throw new AppError("Não foi possível transcrever o áudio. A transcrição retornada está vazia.", 500);
+        throw new AppError("ERR_AI_TRANSCRIPTION_EMPTY", 500);
       }
 
       return transcription.trim();
@@ -389,9 +386,15 @@ export class GeminiProvider implements IAIProvider {
       const status = err.response?.status;
       const errorData = err.response?.data;
       
+      if (status === 429) {
+        throw new AppError("ERR_AI_QUOTA_EXCEEDED", 429);
+      }
+      if (status === 403 || (status === 400 && (errorData?.error?.message || "").includes("API_KEY"))) {
+        throw new AppError("ERR_AI_CONFIG_MISSING", status);
+      }
       if (status) {
         const userMessage = interpretGeminiError(status, errorData);
-        throw new AppError(`Erro ao transcrever áudio: ${userMessage}`, status);
+        throw new AppError(`ERR_AI_TRANSCRIPTION_ERROR: ${userMessage}`, status);
       }
       
       throw new AppError(`Erro ao transcrever áudio: ${err.message || "Erro desconhecido"}`, 500);

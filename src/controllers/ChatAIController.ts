@@ -155,13 +155,15 @@ export const transcribe = async (
   } catch (err: any) {
     console.error("Erro ao transcrever áudio:", err);
     
-    if (err.message?.includes("GEMINI_KEY") || err.message?.includes("Chave da API")) {
-      return res.status(400).json({ error: "GEMINI_KEY_MISSING" });
+    if (err.message?.includes("GEMINI_KEY") || err.message?.includes("Chave da API") || err.message === "ERR_AI_CONFIG_MISSING") {
+      return res.status(400).json({ error: "ERR_AI_CONFIG_MISSING" });
     }
     
     if (err instanceof AppError) {
+      // Usar código de erro para o frontend exibir mensagem amigável via i18n
+      const errorCode = err.message?.startsWith("ERR_") ? err.message.split(":")[0] : null;
       return res.status(err.statusCode || 500).json({
-        error: err.message || "Erro ao transcrever áudio"
+        error: errorCode || err.message || "ERR_CHAT_AI_TRANSCRIBE"
       });
     }
     

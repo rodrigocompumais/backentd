@@ -198,24 +198,22 @@ export class OpenAIProvider implements IAIProvider {
 
       // Verificar se a transcrição está vazia
       if (!text || typeof text !== "string" || text.trim() === "") {
-        logger.error("Transcrição vazia retornada pela API Whisper", {
-          responseType: typeof response,
-          responseValue: response,
-          responseKeys: response && typeof response === "object" ? Object.keys(response) : [],
-          promptUsed: promptToUse ? "Sim" : "Não",
-          promptLength: promptToUse?.length || 0
-        });
-        throw new AppError(
-          "A transcrição retornada está vazia. Possíveis causas: áudio sem fala, áudio muito baixo, ou prompt muito complexo. Tente novamente sem prompt ou com prompt mais curto.",
-          500
-        );
+        logger.error("Transcrição vazia retornada pela API Whisper");
+        throw new AppError("ERR_AI_TRANSCRIPTION_EMPTY", 500);
       }
 
       logger.info(`✅ Transcrição OpenAI concluída (${text.length} caracteres)`);
       return text.trim();
     } catch (err: any) {
+      const status = err?.response?.status;
+      if (status === 429) {
+        throw new AppError("ERR_AI_QUOTA_EXCEEDED", 429);
+      }
+      if (status === 401) {
+        throw new AppError("ERR_AI_CONFIG_MISSING", 401);
+      }
       const userMessage = interpretOpenAIError(err);
-      throw new AppError(`Erro ao transcrever áudio com OpenAI: ${userMessage}`, err?.status || 500);
+      throw new AppError(`ERR_AI_TRANSCRIPTION_ERROR: ${userMessage}`, status || 500);
     }
   }
 }

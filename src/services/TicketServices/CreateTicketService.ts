@@ -14,6 +14,8 @@ interface Request {
   companyId: number;
   queueId?: number;
   whatsappId?: string;
+  /** Ao ocupar mesa: reutilizar ticket aberto do contato em vez de retornar ERR_OTHER_OPEN_TICKET */
+  reuseOpenTicket?: boolean;
 }
 
 const CreateTicketService = async ({
@@ -22,7 +24,8 @@ const CreateTicketService = async ({
   userId,
   queueId,
   companyId,
-  whatsappId
+  whatsappId,
+  reuseOpenTicket = false,
 }: Request): Promise<Ticket> => {
   let whatsapp;
 
@@ -38,16 +41,22 @@ const CreateTicketService = async ({
   if (!defaultWhatsapp)
     defaultWhatsapp = await GetDefaultWhatsApp(companyId);
 
-  await CheckContactOpenTickets(contactId, whatsappId);
+  if (!reuseOpenTicket) {
+    await CheckContactOpenTickets(contactId, whatsappId);
+  }
 
   const { isGroup } = await ShowContactService(contactId, companyId);
 
+  const whereTicket: { contactId: number; companyId: number; whatsappId?: string | number } = {
+    contactId,
+    companyId,
+  };
+  if (whatsappId != null && whatsappId !== "") {
+    whereTicket.whatsappId = whatsappId;
+  }
+
   const [{ id }] = await Ticket.findOrCreate({
-    where: {
-      contactId,
-      companyId,
-      whatsappId
-    },
+    where: whereTicket,
     defaults: {
       contactId,
       companyId,

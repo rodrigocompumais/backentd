@@ -23,7 +23,7 @@ const ListContactsService = async ({
     [Op.or]: [
       {
         name: Sequelize.where(
-          Sequelize.fn("LOWER", Sequelize.col("Contacts.name")),
+          Sequelize.fn("LOWER", Sequelize.col("Contact.name")),
           "LIKE",
           `%${searchParam.toLowerCase().trim()}%`
         )
@@ -42,7 +42,7 @@ const ListContactsService = async ({
       where: whereCondition,
       limit,
       offset,
-      order: [[Sequelize.col("Contacts.name"), "ASC"]],
+      order: [[Sequelize.col("Contact.name"), "ASC"]],
       include: [
         {
           model: User,
@@ -65,7 +65,7 @@ const ListContactsService = async ({
       where: whereCondition,
       limit,
       offset,
-      order: [[Sequelize.col("Contacts.name"), "ASC"]]
+      order: [[Sequelize.col("Contact.name"), "ASC"]]
     });
 
     return {

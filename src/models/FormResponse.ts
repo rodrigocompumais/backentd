@@ -77,6 +77,9 @@ class FormResponse extends Model<FormResponse> {
   @Column
   protocol: string; // PED-YYYYMMDD-NNNN para identificação única do pedido
 
+  @Column
+  mesaSessionId: string; // Sessão da mesa ao qual o pedido pertence (para conta ao liberar)
+
   @HasMany(() => ResponseAnswer, {
     onUpdate: "CASCADE",
     onDelete: "CASCADE",

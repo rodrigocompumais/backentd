@@ -14,6 +14,9 @@ import PrintDevice from "../../models/PrintDevice";
 import CreateAndDispatchPrintJobService from "../PrintJobService/CreateAndDispatchPrintJobService";
 import OcuparMesaService from "../MesaServices/OcuparMesaService";
 import Mesa from "../../models/Mesa";
+import Contact from "../../models/Contact";
+import Ticket from "../../models/Ticket";
+import { verifyOrderToken } from "../../helpers/MesaLinkSign";
 
 interface Answer {
   fieldId: number;
@@ -39,6 +42,8 @@ interface Request {
   ipAddress?: string;
   userAgent?: string;
   metadata?: object;
+  /** Token de sessão da mesa (retornado ao abrir link assinado). Garante que o pedido vá para a mesa correta. */
+  orderToken?: string;
 }
 
 const ProcessFormResponseService = async ({
@@ -52,6 +57,7 @@ const ProcessFormResponseService = async ({
   ipAddress,
   userAgent,
   metadata,
+  orderToken,
 }: Request): Promise<FormResponse> => {
   // Load form with fields
   const form = await Form.findByPk(formId, {
@@ -151,7 +157,14 @@ const ProcessFormResponseService = async ({
     metadata: responseMetadata,
   };
   if (isMenuForm) {
-    createPayload.orderStatus = "novo";
+    // Mesa: pedido pelo garçom → confirmado; pedido direto pelo QR da mesa → novo
+    const orderType = (responseMetadata.orderType ?? (metadata as any)?.orderType) as string | undefined;
+    const placedByGarcom = !!(responseMetadata.garcomName ?? responseMetadata.placedByGarcom ?? (metadata as any)?.placedByGarcom);
+    if (orderType === "mesa" && placedByGarcom) {
+      createPayload.orderStatus = "confirmado";
+    } else {
+      createPayload.orderStatus = "novo";
+    }
     // Gerar protocolo único PED-YYYYMMDD-NNNN por empresa/dia
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
@@ -191,8 +204,43 @@ const ProcessFormResponseService = async ({
   let contact = null;
   let ticket = null;
 
+  let tableId = (metadata as any)?.tableId ?? (responseMetadata as any)?.tableId;
+  if (orderToken) {
+    const decoded = verifyOrderToken(orderToken);
+    if (!decoded || decoded.formId !== form.id) {
+      throw new AppError("ERR_MESA_LINK_INVALID", 403);
+    }
+    tableId = decoded.mesaId;
+  }
+
+  // Reutilizar contact/ticket da mesa quando pedido é para mesa já ocupada (ex.: Garçom adiciona pedido)
+  if (isMenuForm && tableId != null) {
+    const mesaIdNum = typeof tableId === "string" ? parseInt(tableId, 10) : Number(tableId);
+    if (!Number.isNaN(mesaIdNum)) {
+      const mesa = await Mesa.findOne({
+        where: { id: mesaIdNum, companyId: form.companyId },
+      });
+      if (mesa && mesa.status === "ocupada" && mesa.contactId) {
+        contact = await Contact.findOne({
+          where: { id: mesa.contactId, companyId: form.companyId },
+        });
+        if (contact) {
+          ticket = mesa.ticketId
+            ? await Ticket.findOne({ where: { id: mesa.ticketId, companyId: form.companyId } })
+            : null;
+          const updatePayload: { contactId: number; ticketId?: number | null; mesaSessionId?: string } = {
+            contactId: contact.id,
+            ticketId: ticket?.id ?? null,
+          };
+          if (mesa.sessionId) updatePayload.mesaSessionId = mesa.sessionId;
+          await response.update(updatePayload);
+        }
+      }
+    }
+  }
+
   // Create/Update Contact if configured
-  if (form.createContact && contactPhone) {
+  if (form.createContact && contactPhone && !contact) {
     try {
       contact = await CreateOrUpdateContactService({
         name: contactName || "Sem nome",
@@ -209,7 +257,7 @@ const ProcessFormResponseService = async ({
   }
 
   // Create Ticket if configured
-  if (form.createTicket && contact) {
+  if (form.createTicket && contact && !ticket) {
     try {
       // Use form creator as userId, or 0 if not set (ticket will be unassigned)
       const userId = form.createdBy || 0;
@@ -226,8 +274,33 @@ const ProcessFormResponseService = async ({
     }
   }
 
+  // Para cardápio com mesa: garantir contact antes do auto-ocupar (mesmo se createContact estiver desligado)
+  if (isMenuForm && tableId != null && !contact && contactPhone) {
+    try {
+      contact = await CreateOrUpdateContactService({
+        name: contactName || "Sem nome",
+        number: contactPhone,
+        email: contactEmail,
+        isGroup: false,
+        companyId: form.companyId,
+      });
+      await response.update({ contactId: contact.id });
+      if (form.createTicket) {
+        const userId = form.createdBy || 0;
+        ticket = await CreateTicketService({
+          contactId: contact.id,
+          status: "pending",
+          userId,
+          companyId: form.companyId,
+        });
+        await response.update({ ticketId: ticket.id });
+      }
+    } catch (err) {
+      console.error("Error ensuring contact for mesa auto-occupy:", err);
+    }
+  }
+
   // Auto-ocupação de mesa: quando cliente pede via cardápio com mesa livre (?mesa=X)
-  const tableId = (metadata as any)?.tableId ?? responseMetadata?.tableId;
   if (tableId != null && contact) {
     try {
       const mesaId = typeof tableId === "string" ? parseInt(tableId, 10) : Number(tableId);
@@ -236,15 +309,17 @@ const ProcessFormResponseService = async ({
           where: { id: mesaId, companyId: form.companyId },
         });
         if (mesa && mesa.status === "livre") {
-          await OcuparMesaService({
+          const mesaOcupada = await OcuparMesaService({
             mesaId: mesa.id,
             companyId: form.companyId,
             contactId: contact.id,
             ticketId: ticket?.id,
           });
-          // Atualizar metadata com número/nome da mesa para exibição
           const updatedMeta = { ...(response.metadata as object || {}), tableNumber: mesa.name || mesa.number };
-          await response.update({ metadata: updatedMeta });
+          await response.update({
+            metadata: updatedMeta,
+            ...(mesaOcupada.sessionId && { mesaSessionId: mesaOcupada.sessionId }),
+          });
         }
       }
     } catch (err: any) {
@@ -265,6 +340,9 @@ const ProcessFormResponseService = async ({
         });
 
         if (printDevice) {
+          const meta = (response.metadata || metadata || {}) as Record<string, unknown>;
+          const tableNumber = (meta?.tableNumber as string) || "";
+          const garcomName = (meta?.garcomName as string) || "";
           const conteudo = {
             event: "form.submitted",
             formId: form.id,
@@ -272,6 +350,8 @@ const ProcessFormResponseService = async ({
             responseId: response.id,
             protocol: response.protocol,
             submittedAt: response.submittedAt,
+            tableNumber,
+            garcomName,
             responder: {
               name: contactName,
               phone: contactPhone,
@@ -302,93 +382,60 @@ const ProcessFormResponseService = async ({
     }
   }
 
-  // Process menu form: send WhatsApp message to customer
-  let whatsappSent = false;
-  let whatsappError = null;
-  
+  // Process menu form: send WhatsApp message to customer em segundo plano (não bloqueia a resposta)
   console.log("ProcessFormResponseService - Checking menu form:", {
     isMenuForm,
     menuItemsCount: menuItems?.length || 0,
     contactPhone: contactPhone ? "present" : "missing",
   });
-  
+
   if (isMenuForm && menuItems && menuItems.length > 0 && contactPhone) {
-    try {
-      console.log("ProcessFormResponseService - Starting WhatsApp send process");
-      
-      // Get WhatsApp connection - use selected one or default
-      let whatsappToUse;
-      const formSettings = form.settings as any;
-      const selectedWhatsappId = formSettings?.whatsappId;
-      
-      console.log("ProcessFormResponseService - WhatsApp selection:", {
-        selectedWhatsappId,
-        hasSettings: !!formSettings,
-      });
-      
-      if (selectedWhatsappId) {
-        // Use selected WhatsApp connection
-        const Whatsapp = (await import("../../models/Whatsapp")).default;
-        whatsappToUse = await Whatsapp.findOne({
-          where: { id: selectedWhatsappId, companyId: form.companyId, status: "CONNECTED" },
-        });
-        
-        console.log("ProcessFormResponseService - Selected WhatsApp found:", !!whatsappToUse);
-        
-        if (!whatsappToUse) {
-          console.warn(`Selected WhatsApp ${selectedWhatsappId} not found or not connected, using default`);
+    (async () => {
+      try {
+        console.log("ProcessFormResponseService (background) - Starting WhatsApp send");
+        const formSettings = form.settings as any;
+        const selectedWhatsappId = formSettings?.whatsappId;
+        let whatsappToUse;
+        if (selectedWhatsappId) {
+          const Whatsapp = (await import("../../models/Whatsapp")).default;
+          whatsappToUse = await Whatsapp.findOne({
+            where: { id: selectedWhatsappId, companyId: form.companyId, status: "CONNECTED" },
+          });
+          if (!whatsappToUse) whatsappToUse = await GetDefaultWhatsApp(form.companyId);
+        } else {
           whatsappToUse = await GetDefaultWhatsApp(form.companyId);
         }
-      } else {
-        // Use default WhatsApp connection
-        console.log("ProcessFormResponseService - Using default WhatsApp");
-        whatsappToUse = await GetDefaultWhatsApp(form.companyId);
-      }
-      
-      if (!whatsappToUse) {
-        throw new Error("Nenhuma conexão WhatsApp disponível");
-      }
-      
-      console.log("ProcessFormResponseService - WhatsApp to use:", {
-        id: whatsappToUse.id,
-        name: whatsappToUse.name,
-        status: whatsappToUse.status,
-      });
-      
-      // Ensure contact exists (should already exist from createContact above, but double-check)
-      if (!contact && contactPhone) {
-        contact = await CreateOrUpdateContactService({
-          name: contactName || "Sem nome",
-          number: contactPhone,
-          email: contactEmail,
-          isGroup: false,
-          companyId: form.companyId,
-        });
-      }
-
-      if (contact) {
-        // Create or find ticket for sending message
+        if (!whatsappToUse) {
+          console.warn("ProcessFormResponseService (background) - Nenhuma conexão WhatsApp disponível");
+          return;
+        }
+        let contactForSend = contact;
+        if (!contactForSend && contactPhone) {
+          contactForSend = await CreateOrUpdateContactService({
+            name: contactName || "Sem nome",
+            number: contactPhone,
+            email: contactEmail,
+            isGroup: false,
+            companyId: form.companyId,
+          });
+        }
+        if (!contactForSend) return;
         const ticket = await FindOrCreateTicketService(
-          contact,
+          contactForSend,
           whatsappToUse.id,
           0,
           form.companyId
         );
-
-        // Get custom fields from answers
         const customFields = answers
           .map((answer) => {
             const field = fields.find((f) => f.id === answer.fieldId);
-            // Exclude auto fields (name, phone)
             if (field) {
               const fieldMetadata = field.metadata as any;
               if (
                 fieldMetadata?.autoFieldType === "name" ||
                 fieldMetadata?.autoFieldType === "phone" ||
                 field.fieldType === "phone"
-              ) {
-                return null;
-              }
+              ) return null;
               return {
                 label: field.label,
                 answer: typeof answer.answer === "string" ? answer.answer : String(answer.answer),
@@ -397,61 +444,26 @@ const ProcessFormResponseService = async ({
             return null;
           })
           .filter((f): f is { label: string; answer: string } => f !== null);
-
-        // Format order message
+        const meta = (response.metadata || metadata || {}) as Record<string, unknown>;
+        const tableNumberMsg = (meta?.tableNumber as string) || undefined;
+        const garcomNameMsg = (meta?.garcomName as string) || undefined;
         const orderMessage = await FormatMenuOrderMessage({
           menuItems,
           customerName: contactName || "Cliente",
           customerPhone: contactPhone,
           customFields,
           protocol: response.protocol || undefined,
+          tableNumber: tableNumberMsg,
+          garcomName: garcomNameMsg,
         });
-
-        // Send WhatsApp message using existing SendWhatsAppMessage function
-        try {
-          console.log("ProcessFormResponseService - Sending WhatsApp message:", {
-            ticketId: ticket.id,
-            contactNumber: ticket.contact.number,
-            messageLength: orderMessage.length,
-          });
-          
-          const sentMessage = await SendWhatsAppMessage({
-            body: orderMessage,
-            ticket,
-          });
-          
-          // Verificar se a mensagem foi realmente enviada
-          if (sentMessage) {
-            whatsappSent = true;
-            console.log("ProcessFormResponseService - Menu order WhatsApp message sent successfully", {
-              messageId: sentMessage?.key?.id,
-            });
-          } else {
-            console.error("ProcessFormResponseService - SendWhatsAppMessage returned empty/null");
-            throw new Error("Mensagem não foi enviada - resposta vazia");
-          }
-        } catch (sendErr: any) {
-          console.error("ProcessFormResponseService - Error in SendWhatsAppMessage:", {
-            error: sendErr.message,
-            stack: sendErr.stack,
-          });
-          throw sendErr; // Re-throw para ser capturado pelo catch externo
+        const sentMessage = await SendWhatsAppMessage({ body: orderMessage, ticket });
+        if (sentMessage) {
+          console.log("ProcessFormResponseService (background) - WhatsApp message sent", { messageId: sentMessage?.key?.id });
         }
+      } catch (err: any) {
+        console.error("ProcessFormResponseService (background) - Error sending WhatsApp:", err?.message);
       }
-    } catch (err: any) {
-      console.error("ProcessFormResponseService - Error sending menu order WhatsApp message:", {
-        error: err.message,
-        stack: err.stack,
-        name: err.name,
-      });
-      whatsappError = err.message || "Erro ao enviar mensagem WhatsApp";
-      // Don't fail the request if WhatsApp send fails - order is still saved
-    }
-  } else if (isMenuForm) {
-    console.log("ProcessFormResponseService - Menu form conditions not met:", {
-      hasMenuItems: !!(menuItems && menuItems.length > 0),
-      hasContactPhone: !!contactPhone,
-    });
+    })();
   }
 
   await response.reload({
@@ -462,10 +474,9 @@ const ProcessFormResponseService = async ({
     ],
   });
 
-  // Add WhatsApp send status to response for menu forms
+  // Envio WhatsApp é em segundo plano; frontend não deve bloquear
   if (isMenuForm) {
-    (response as any).whatsappSent = whatsappSent;
-    (response as any).whatsappError = whatsappError;
+    (response as any).whatsappSent = "pending";
   }
 
   return response;

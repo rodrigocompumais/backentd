@@ -8,6 +8,7 @@ const routes = express.Router();
 
 // Orders - centralized Kanban (all cardapio forms)
 routes.get("/orders", isAuth, FormResponseController.listAllOrders);
+routes.get("/orders/unconfirmed-counts", isAuth, FormResponseController.unconfirmedOrderCounts);
 
 // Authenticated routes - Forms management
 routes.get("/forms", isAuth, FormController.index);

@@ -34,6 +34,7 @@ interface TicketData {
   useIntegration: boolean;
   promptId: number;
   integrationId: number;
+  reuseOpenTicket?: boolean;
 }
 
 export const index = async (req: Request, res: Response): Promise<Response> => {
@@ -89,7 +90,7 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
 };
 
 export const store = async (req: Request, res: Response): Promise<Response> => {
-  const { contactId, status, userId, queueId, whatsappId }: TicketData = req.body;
+  const { contactId, status, userId, queueId, whatsappId, reuseOpenTicket }: TicketData = req.body;
   const { companyId, id: currentUserId } = req.user;
 
   const ticket = await CreateTicketService({
@@ -98,7 +99,8 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
     userId: (userId != null ? Number(userId) : currentUserId) as number,
     companyId,
     queueId,
-    whatsappId
+    whatsappId,
+    reuseOpenTicket,
   });
 
   const io = getIO();

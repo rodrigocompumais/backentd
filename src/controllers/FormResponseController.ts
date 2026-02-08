@@ -18,7 +18,7 @@ const getResponsesCutoff = (): Date =>
 export const listOrders = async (req: Request, res: Response): Promise<Response> => {
   const { formId } = req.params;
   const { companyId } = req.user;
-  const { dateFrom, dateTo, orderStatus, search, orderType } = req.query;
+  const { dateFrom, dateTo, orderStatus, search, orderType, tableId } = req.query;
 
   const form = await Form.findOne({
     where: { id: formId, companyId },
@@ -64,9 +64,17 @@ export const listOrders = async (req: Request, res: Response): Promise<Response>
       Sequelize.literal("(metadata->>'orderType' IS NULL OR metadata->>'orderType' = 'mesa')")
     );
   }
+  const replacements: Record<string, string> = {};
+  if (tableId != null && String(tableId).trim() !== "") {
+    const tid = String(tableId).trim();
+    whereCondition[Op.and] = whereCondition[Op.and] || [];
+    whereCondition[Op.and].push(Sequelize.literal("metadata->>'tableId' = :tableId"));
+    replacements.tableId = tid;
+  }
 
   const responses = await FormResponse.findAll({
     where: whereCondition,
+    replacements: Object.keys(replacements).length ? replacements : undefined,
     include: [
       { association: "answers", include: [{ association: "field" }] },
       { association: "contact", attributes: ["id", "name", "number", "email"] },
@@ -91,7 +99,7 @@ const isCardapioForm = (form: Form): boolean => {
 
 export const listAllOrders = async (req: Request, res: Response): Promise<Response> => {
   const { companyId } = req.user;
-  const { dateFrom, dateTo, orderStatus, search, formId: formIdFilter, orderType } = req.query;
+  const { dateFrom, dateTo, orderStatus, search, formId: formIdFilter, orderType, tableId } = req.query;
 
   const allForms = await Form.findAll({
     where: { companyId },
@@ -141,9 +149,17 @@ export const listAllOrders = async (req: Request, res: Response): Promise<Respon
       Sequelize.literal("(metadata->>'orderType' IS NULL OR metadata->>'orderType' = 'mesa')")
     );
   }
+  const replacements: Record<string, string> = {};
+  if (tableId != null && String(tableId).trim() !== "") {
+    const tid = String(tableId).trim();
+    whereCondition[Op.and] = whereCondition[Op.and] || [];
+    whereCondition[Op.and].push(Sequelize.literal("metadata->>'tableId' = :tableId"));
+    replacements.tableId = tid;
+  }
 
   const responses = await FormResponse.findAll({
     where: whereCondition,
+    replacements: Object.keys(replacements).length ? replacements : undefined,
     include: [
       { association: "answers", include: [{ association: "field" }] },
       { association: "contact", attributes: ["id", "name", "number", "email"] },
@@ -158,6 +174,44 @@ export const listAllOrders = async (req: Request, res: Response): Promise<Respon
     orders: responses,
     forms: cardapioForms.map((f) => ({ id: f.id, name: f.name })),
   });
+};
+
+export const unconfirmedOrderCounts = async (req: Request, res: Response): Promise<Response> => {
+  const { companyId } = req.user;
+
+  const allForms = await Form.findAll({
+    where: { companyId },
+    attributes: ["id", "settings"],
+  });
+  const cardapioForms = allForms.filter(isCardapioForm);
+  const cardapioFormIds = cardapioForms.map((f) => f.id);
+
+  if (cardapioFormIds.length === 0) {
+    return res.json({ mesa: 0, delivery: 0 });
+  }
+
+  const baseWhere: any = {
+    formId: { [Op.in]: cardapioFormIds },
+    orderStatus: { [Op.ne]: "confirmado" },
+    submittedAt: { [Op.gte]: getResponsesCutoff() } as any,
+  };
+
+  const [mesa, delivery] = await Promise.all([
+    FormResponse.count({
+      where: {
+        ...baseWhere,
+        [Op.and]: [Sequelize.literal("(metadata->>'orderType' IS NULL OR metadata->>'orderType' = 'mesa')")],
+      },
+    }),
+    FormResponse.count({
+      where: {
+        ...baseWhere,
+        [Op.and]: [Sequelize.literal("metadata->>'orderType' = 'delivery'")],
+      },
+    }),
+  ]);
+
+  return res.json({ mesa, delivery });
 };
 
 export const index = async (req: Request, res: Response): Promise<Response> => {
@@ -276,6 +330,7 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
   const response = await ProcessFormResponseService({
     formId: form.id,
     ...data,
+    orderToken: data.orderToken,
     ipAddress: Array.isArray(ipAddress) ? ipAddress[0] : ipAddress,
     userAgent,
   });

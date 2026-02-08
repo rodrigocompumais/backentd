@@ -11,6 +11,7 @@ const DEFAULT_ORDER_STATUSES = [
   "saiu_entrega",
   "entregue",
   "cancelado",
+  "faturado",
 ];
 
 const isValidStatus = (s: string): boolean => {

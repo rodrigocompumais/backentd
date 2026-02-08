@@ -4677,80 +4677,51 @@ const handleMsgAck = async (
   msg: WAMessage,
   chat: number | null | undefined
 ) => {
-  await new Promise(r => setTimeout(r, 500));
   const io = getIO();
 
   try {
-    // LOG: Informação do ACK recebido
-    logger.info('📨 === ACK RECEBIDO ===', {
-      messageId: msg.key.id,
-      ackStatus: chat,
-      fromMe: msg.key.fromMe,
-      remoteJid: msg.key.remoteJid,
-      participant: msg.key.participant
-    });
+    // Busca leve primeiro: só ack para evitar update/emit desnecessários
+    const existing = await Message.findByPk(msg.key.id, { attributes: ["id", "ack"] });
+    if (existing && existing.ack === chat) {
+      return;
+    }
+    if (!existing) {
+      const where: any = { id: msg.key.id };
+      if (msg.key.remoteJid) where.remoteJid = msg.key.remoteJid;
+      if (msg.key.participant) where.participant = msg.key.participant;
+      const alt = await Message.findOne({ where, attributes: ["id", "ack"] });
+      if (!alt) {
+        logger.debug('Mensagem não encontrada para ACK', { messageId: msg.key.id });
+        return;
+      }
+      if (alt.ack === chat) return;
+    }
 
-    // BUSCA 1: Por ID primário (método padrão)
     let messageToUpdate = await Message.findByPk(msg.key.id, {
       include: [
         "contact",
-        {
-          model: Message,
-          as: "quotedMsg",
-          include: ["contact"]
-        }
+        { model: Message, as: "quotedMsg", include: ["contact"] }
       ]
     });
-
-    // BUSCA 2: Se não encontrou por ID, tentar por remoteJid/participant
     if (!messageToUpdate) {
-      logger.warn(`⚠️ Mensagem não encontrada por ID: ${msg.key.id}, tentando busca alternativa...`);
-
-      const where: any = {
-        id: msg.key.id
-      };
-
-      // Adicionar critérios alternativos
-      if (msg.key.remoteJid) {
-        where.remoteJid = msg.key.remoteJid;
-      }
-      if (msg.key.participant) {
-        where.participant = msg.key.participant;
-      }
-
+      const where: any = { id: msg.key.id };
+      if (msg.key.remoteJid) where.remoteJid = msg.key.remoteJid;
+      if (msg.key.participant) where.participant = msg.key.participant;
       messageToUpdate = await Message.findOne({
         where,
         include: [
           "contact",
-          {
-            model: Message,
-            as: "quotedMsg",
-            include: ["contact"]
-          }
+          { model: Message, as: "quotedMsg", include: ["contact"] }
         ]
       });
     }
+    if (!messageToUpdate) return;
 
-    if (!messageToUpdate) {
-      logger.error('❌ MENSAGEM NÃO ENCONTRADA PARA ATUALIZAR ACK', {
-        messageId: msg.key.id,
-        remoteJid: msg.key.remoteJid,
-        participant: msg.key.participant,
-        ackStatus: chat
-      });
-      return;
-    }
+    if (messageToUpdate.ack === chat) return;
 
-    const oldAck = messageToUpdate.ack;
     await messageToUpdate.update({ ack: chat });
 
-    logger.info('✅ ACK ATUALIZADO', {
-      messageId: messageToUpdate.id,
-      ticketId: messageToUpdate.ticketId,
-      oldAck: oldAck,
-      newAck: chat,
-      companyId: messageToUpdate.companyId
-    });
+    logger.debug('ACK atualizado', { messageId: messageToUpdate.id, ticketId: messageToUpdate.ticketId, ack: chat });
 
     // Emitir evento para o frontend
     io.to(messageToUpdate.ticketId.toString()).emit(
@@ -4851,25 +4822,35 @@ const wbotMessageListener = async (
       }
     });
 
+    // Debounce ACK updates para evitar centenas de DB/socket por segundo
+    const pendingAckByKey = new Map<string, { key: WAMessageUpdate["key"]; status: number }>();
+    let ackFlushTimer: NodeJS.Timeout | null = null;
+    const flushAckUpdates = () => {
+      ackFlushTimer = null;
+      if (pendingAckByKey.size === 0) return;
+      const entries = Array.from(pendingAckByKey.entries());
+      pendingAckByKey.clear();
+      const keys = entries.map(([, v]) => v.key);
+      try {
+        (wbot as WASocket)!.readMessages(keys);
+      } catch (_) {}
+      entries.forEach(([, v]) => {
+        handleMsgAck({ key: v.key } as WAMessage, v.status).catch(() => {});
+      });
+    };
+
     wbot.ev.on("messages.update", (messageUpdate: WAMessageUpdate[]) => {
       if (messageUpdate.length === 0) return;
 
-      logger.info(`📬 Recebidos ${messageUpdate.length} eventos de atualização de mensagem`, {
-        count: messageUpdate.length
+      messageUpdate.forEach((message: WAMessageUpdate) => {
+        const id = message.key.id;
+        if (!id) return;
+        pendingAckByKey.set(id, { key: message.key, status: message.update.status });
       });
 
-      messageUpdate.forEach(async (message: WAMessageUpdate) => {
-        logger.debug('📬 Evento messages.update:', {
-          messageId: message.key.id,
-          status: message.update.status,
-          fromMe: message.key.fromMe,
-          remoteJid: message.key.remoteJid
-        });
-
-        (wbot as WASocket)!.readMessages([message.key]);
-
-        handleMsgAck(message, message.update.status);
-      });
+      const debounceMs = 800;
+      if (ackFlushTimer) clearTimeout(ackFlushTimer);
+      ackFlushTimer = setTimeout(flushAckUpdates, debounceMs);
     });
 
     // Handler para atualizações de mapeamento LID/PN (Baileys 7.x)

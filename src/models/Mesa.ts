@@ -56,7 +56,7 @@ class Mesa extends Model<Mesa> {
 
   @ForeignKey(() => Form)
   @Column
-  formId: number;
+  formId: number | null;
 
   @BelongsTo(() => Form)
   form: Form;
@@ -72,6 +72,9 @@ class Mesa extends Model<Mesa> {
 
   @Column
   occupiedAt: Date;
+
+  @Column
+  sessionId: string;
 
   @CreatedAt
   createdAt: Date;

@@ -7,15 +7,19 @@ const routes = express.Router();
 const requireLanchonetes = hasCompanyModule("lanchonetes");
 
 routes.get("/mesas", isAuth, requireLanchonetes, MesaController.index);
+routes.get("/mesas/links-qr", isAuth, requireLanchonetes, MesaController.getMesasLinksQr);
 routes.post("/mesas", isAuth, requireLanchonetes, MesaController.store);
 routes.post("/mesas/bulk", isAuth, requireLanchonetes, MesaController.storeBulk);
+routes.get("/mesas/:id/link-qr", isAuth, requireLanchonetes, MesaController.getMesaLinkQr);
 routes.get("/mesas/:id", isAuth, requireLanchonetes, MesaController.show);
+routes.get("/mesas/:id/resumo-conta", isAuth, requireLanchonetes, MesaController.resumoConta);
 routes.put("/mesas/:id", isAuth, requireLanchonetes, MesaController.update);
 routes.put("/mesas/:id/ocupar", isAuth, requireLanchonetes, MesaController.ocupar);
 routes.put("/mesas/:id/liberar", isAuth, requireLanchonetes, MesaController.liberar);
 routes.delete("/mesas/:id", isAuth, requireLanchonetes, MesaController.destroy);
 
-// Public route (no auth) - for menu form dropdown
+// Public routes (no auth) - cardápio por mesa / QR
 routes.get("/public/forms/:formSlug/mesas", MesaController.getPublicMesas);
+routes.get("/public/forms/:formSlug/mesas/:mesaId", MesaController.getPublicMesaById);
 
 export default routes;

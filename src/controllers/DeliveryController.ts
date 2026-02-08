@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { Op } from "sequelize";
 import Form from "../models/Form";
 import FormResponse from "../models/FormResponse";
+import User from "../models/User";
 import AppError from "../errors/AppError";
 import { getIO } from "../libs/socket";
 import { verifyDeliveryScanToken, createDeliveryScanToken } from "../helpers/MesaLinkSign";
@@ -60,11 +61,14 @@ export const orderByToken = async (req: Request, res: Response): Promise<Respons
 /** POST /delivery/iniciar-rota - Marca pedidos como saiu_entrega e define entregador. */
 export const iniciarRota = async (req: Request, res: Response): Promise<Response> => {
   const { formResponseIds } = req.body;
-  const { companyId, id: userId, name: userName } = req.user;
+  const { companyId, id: userId } = req.user;
 
   if (!Array.isArray(formResponseIds) || formResponseIds.length === 0) {
     throw new AppError("ERR_FORM_RESPONSE_IDS_REQUIRED", 400);
   }
+
+  const user = await User.findByPk(userId, { attributes: ["name"] });
+  const userName = user?.name ?? "";
 
   const ids = formResponseIds.map((id: number) => Number(id)).filter((id: number) => !Number.isNaN(id));
   const responses = await FormResponse.findAll({

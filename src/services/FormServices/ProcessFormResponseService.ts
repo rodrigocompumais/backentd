@@ -16,7 +16,7 @@ import OcuparMesaService from "../MesaServices/OcuparMesaService";
 import Mesa from "../../models/Mesa";
 import Contact from "../../models/Contact";
 import Ticket from "../../models/Ticket";
-import { verifyOrderToken } from "../../helpers/MesaLinkSign";
+import { verifyOrderToken, createDeliveryScanToken } from "../../helpers/MesaLinkSign";
 
 interface Answer {
   fieldId: number;
@@ -188,6 +188,13 @@ const ProcessFormResponseService = async ({
   }
   const response = await FormResponse.create(createPayload);
 
+  // Pedido delivery: gerar token único para QR do entregador
+  if (isMenuForm && responseMetadata.orderType === "delivery") {
+    const scanToken = createDeliveryScanToken(form.companyId, form.id, response.id);
+    const updatedMeta = { ...(response.metadata as object || {}), deliveryScanToken: scanToken };
+    await response.update({ metadata: updatedMeta });
+  }
+
   // Create ResponseAnswers
   const answersToCreate = answers.map((answer) => ({
     responseId: response.id,
@@ -343,7 +350,7 @@ const ProcessFormResponseService = async ({
           const meta = (response.metadata || metadata || {}) as Record<string, unknown>;
           const tableNumber = (meta?.tableNumber as string) || "";
           const garcomName = (meta?.garcomName as string) || "";
-          const conteudo = {
+          const conteudo: Record<string, unknown> = {
             event: "form.submitted",
             formId: form.id,
             formName: form.name,
@@ -367,6 +374,9 @@ const ProcessFormResponseService = async ({
             }),
             menuItems,
           };
+          if (meta?.orderType === "delivery" && meta?.deliveryScanToken) {
+            conteudo.deliveryScanToken = meta.deliveryScanToken;
+          }
 
           await CreateAndDispatchPrintJobService({
             companyId: form.companyId,

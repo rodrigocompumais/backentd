@@ -190,9 +190,10 @@ export const unconfirmedOrderCounts = async (req: Request, res: Response): Promi
     return res.json({ mesa: 0, delivery: 0 });
   }
 
+  // Badge = pedidos ainda em status "novo" (ao sair para qualquer outro status, o badge deve atualizar)
   const baseWhere: any = {
     formId: { [Op.in]: cardapioFormIds },
-    orderStatus: { [Op.ne]: "confirmado" },
+    [Op.or]: [{ orderStatus: "novo" }, { orderStatus: null }],
     submittedAt: { [Op.gte]: getResponsesCutoff() } as any,
   };
 

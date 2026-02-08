@@ -50,6 +50,7 @@ import productRoutes from "./productRoutes";
 import mesaRoutes from "./mesaRoutes";
 import moduleRoutes from "./moduleRoutes";
 import printDeviceRoutes from "./printDeviceRoutes";
+import deliveryRoutes from "./deliveryRoutes";
 
 const routes = Router();
 
@@ -107,5 +108,6 @@ routes.use(productRoutes);
 routes.use(mesaRoutes);
 routes.use(moduleRoutes);
 routes.use(printDeviceRoutes);
+routes.use(deliveryRoutes);
 
 export default routes;

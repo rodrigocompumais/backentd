@@ -61,3 +61,50 @@ export function verifyOrderToken(token: string): DecodedOrderToken | null {
   if (Date.now() / 1000 > payload.exp) return null;
   return { formId: payload.formId, mesaId: payload.mesaId };
 }
+
+// --- Token para scan do entregador (pedido delivery - QR único por pedido) ---
+const DELIVERY_SCAN_TOKEN_EXPIRY_DAYS = 7;
+
+export interface DecodedDeliveryScanToken {
+  companyId: number;
+  formId: number;
+  formResponseId: number;
+}
+
+/** Gera token para o entregador escanear e adicionar pedido à rota. Válido por alguns dias. */
+export function createDeliveryScanToken(companyId: number, formId: number, formResponseId: number): string {
+  const payload = JSON.stringify({
+    companyId,
+    formId,
+    formResponseId,
+    exp: Math.floor(Date.now() / 1000) + DELIVERY_SCAN_TOKEN_EXPIRY_DAYS * 24 * 60 * 60,
+  });
+  const base = Buffer.from(payload, "utf8").toString("base64url");
+  const sig = crypto.createHmac("sha256", getSecret()).update(base).digest("base64url");
+  return `${base}.${sig}`;
+}
+
+/** Valida token de scan do entregador. Retorna { companyId, formId, formResponseId } ou null. */
+export function verifyDeliveryScanToken(token: string): DecodedDeliveryScanToken | null {
+  if (!token || typeof token !== "string") return null;
+  const parts = token.split(".");
+  if (parts.length !== 2) return null;
+  const [base, sig] = parts;
+  const expectedSig = crypto.createHmac("sha256", getSecret()).update(base).digest("base64url");
+  const a = Buffer.from(expectedSig, "utf8");
+  const b = Buffer.from(sig, "utf8");
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  let payload: { companyId: number; formId: number; formResponseId: number; exp: number };
+  try {
+    payload = JSON.parse(Buffer.from(base, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (!payload.companyId || !payload.formId || !payload.formResponseId || !payload.exp) return null;
+  if (Date.now() / 1000 > payload.exp) return null;
+  return {
+    companyId: payload.companyId,
+    formId: payload.formId,
+    formResponseId: payload.formResponseId,
+  };
+}

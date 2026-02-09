@@ -53,6 +53,10 @@ class User extends Model<User> {
   @Column
   profile: string;
 
+  /** Rota para redirecionar após login (ex: cozinha, entregador, garcom). Null = dashboard/tickets. */
+  @Column
+  defaultRoute: string | null;
+
   @Column
   super: boolean;
 

@@ -46,7 +46,8 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
     companyId: bodyCompanyId,
     queueIds,
     whatsappId,
-	allTicket
+    allTicket,
+    defaultRoute,
   } = req.body;
   let userCompanyId: number | null = null;
 
@@ -78,7 +79,8 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
     companyId: newUserCompanyId,
     queueIds,
     whatsappId,
-	allTicket
+    allTicket,
+    defaultRoute,
   });
 
   const io = getIO();

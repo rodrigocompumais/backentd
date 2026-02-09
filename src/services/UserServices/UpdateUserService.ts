@@ -16,6 +16,7 @@ interface UserData {
   allTicket?: string;
   avatar?: string;
   repeatPendingChatSound?: boolean;
+  defaultRoute?: string | null;
 }
 
 interface Request {
@@ -51,10 +52,11 @@ const UpdateUserService = async ({
     email: Yup.string().email(),
     profile: Yup.string(),
     password: Yup.string(),
-	allTicket: Yup.string()
+    allTicket: Yup.string(),
+    defaultRoute: Yup.string().nullable(),
   });
 
-  const { email, password, profile, name, queueIds = [], whatsappId, allTicket, avatar, repeatPendingChatSound } = userData;
+  const { email, password, profile, name, queueIds = [], whatsappId, allTicket, avatar, repeatPendingChatSound, defaultRoute } = userData;
 
   try {
     await schema.validate({ email, password, profile, name, allTicket });
@@ -68,9 +70,10 @@ const UpdateUserService = async ({
     profile,
     name,
     whatsappId: whatsappId || null,
-	allTicket,
+    allTicket,
     avatar: avatar !== undefined ? avatar : user.avatar,
-    repeatPendingChatSound: repeatPendingChatSound !== undefined ? repeatPendingChatSound : user.repeatPendingChatSound
+    repeatPendingChatSound: repeatPendingChatSound !== undefined ? repeatPendingChatSound : user.repeatPendingChatSound,
+    defaultRoute: defaultRoute !== undefined ? (defaultRoute || null) : user.defaultRoute,
   });
 
   await user.$set("queues", queueIds);
@@ -87,7 +90,8 @@ const UpdateUserService = async ({
     companyId: user.companyId,
     company,
     queues: user.queues,
-    avatar: user.avatar
+    avatar: user.avatar,
+    defaultRoute: user.defaultRoute ?? null,
   };
 
   return serializedUser;

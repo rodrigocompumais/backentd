@@ -55,7 +55,10 @@ const ResumoContaMesaService = async (mesaId: number, companyId: number): Promis
   const responses = await FormResponse.findAll({
     where: {
       mesaSessionId: mesa.sessionId,
-      orderStatus: { [Op.ne]: "faturado" },
+      [Op.or]: [
+        { orderStatus: { [Op.notIn]: ["faturado", "cancelado"] } },
+        { orderStatus: null },
+      ],
     },
     order: [["submittedAt", "ASC"]],
     attributes: ["id", "protocol", "submittedAt", "metadata"],

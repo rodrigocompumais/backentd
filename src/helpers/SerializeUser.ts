@@ -15,6 +15,7 @@ interface SerializedUser {
   allTicket: string;
   avatar: string;
   repeatPendingChatSound: boolean;
+  defaultRoute: string | null;
 }
 
 export const SerializeUser = async (user: User): Promise<SerializedUser> => {
@@ -30,5 +31,6 @@ export const SerializeUser = async (user: User): Promise<SerializedUser> => {
 	allTicket: user.allTicket,
     avatar: user.avatar || null,
     repeatPendingChatSound: user.repeatPendingChatSound !== undefined ? user.repeatPendingChatSound : true,
+    defaultRoute: user.defaultRoute ?? null,
   };
 };

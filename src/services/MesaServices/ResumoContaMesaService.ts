@@ -14,7 +14,7 @@ interface PedidoResumo {
 interface Response {
   pedidos: PedidoResumo[];
   total: number;
-  mesa: { id: number; number: string; name: string };
+  mesa: { id: number; number: string; name: string; type?: string };
   cliente?: { id: number; name: string; number: string } | null;
 }
 
@@ -47,7 +47,7 @@ const ResumoContaMesaService = async (mesaId: number, companyId: number): Promis
     return {
       pedidos: [],
       total: 0,
-      mesa: { id: mesa.id, number: mesa.number, name: mesa.name },
+      mesa: { id: mesa.id, number: mesa.number, name: mesa.name, type: (mesa as any).type || "mesa" },
       cliente,
     };
   }
@@ -81,7 +81,7 @@ const ResumoContaMesaService = async (mesaId: number, companyId: number): Promis
   return {
     pedidos,
     total,
-    mesa: { id: mesa.id, number: mesa.number, name: mesa.name },
+    mesa: { id: mesa.id, number: mesa.number, name: mesa.name, type: (mesa as any).type || "mesa" },
     cliente,
   };
 };

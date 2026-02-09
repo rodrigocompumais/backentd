@@ -6,6 +6,7 @@ interface Request {
   companyId: number;
   number?: string;
   name?: string;
+  type?: string;
   formId?: number;
   capacity?: number;
   section?: string;
@@ -17,6 +18,7 @@ const UpdateMesaService = async ({
   companyId,
   number,
   name,
+  type,
   formId,
   capacity,
   section,
@@ -34,8 +36,9 @@ const UpdateMesaService = async ({
     if (!number || number.trim() === "") {
       throw new AppError("ERR_MESA_NUMBER_REQUIRED", 400);
     }
+    const currentType = (mesa as any).type || "mesa";
     const existing = await Mesa.findOne({
-      where: { companyId, number: number.trim() },
+      where: { companyId, number: number.trim(), type: currentType },
     });
     if (existing && existing.id !== mesaId) {
       throw new AppError("ERR_MESA_NUMBER_ALREADY_EXISTS", 400);
@@ -45,6 +48,10 @@ const UpdateMesaService = async ({
 
   if (name !== undefined) {
     mesa.name = name?.trim() || null;
+  }
+
+  if (type !== undefined) {
+    (mesa as any).type = type === "comanda" ? "comanda" : "mesa";
   }
 
   if (formId !== undefined) {

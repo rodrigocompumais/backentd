@@ -5,6 +5,7 @@ interface Request {
   number: string;
   name?: string;
   companyId: number;
+  type?: string;
   formId?: number;
   capacity?: number;
   section?: string;
@@ -15,6 +16,7 @@ const CreateMesaService = async ({
   number,
   name,
   companyId,
+  type = "mesa",
   formId,
   capacity,
   section,
@@ -24,8 +26,10 @@ const CreateMesaService = async ({
     throw new AppError("ERR_MESA_NUMBER_REQUIRED", 400);
   }
 
+  const normalizedType = (type === "comanda" ? "comanda" : "mesa") as string;
+
   const existing = await Mesa.findOne({
-    where: { companyId, number: number.trim() },
+    where: { companyId, number: number.trim(), type: normalizedType },
   });
 
   if (existing) {
@@ -36,6 +40,7 @@ const CreateMesaService = async ({
     number: number.trim(),
     name: name?.trim() || null,
     status: "livre",
+    type: normalizedType,
     companyId,
     formId: formId || null,
     capacity: capacity || null,

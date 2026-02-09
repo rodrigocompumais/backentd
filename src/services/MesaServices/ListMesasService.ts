@@ -4,6 +4,7 @@ import { Op } from "sequelize";
 interface Request {
   companyId: number;
   status?: string;
+  type?: string;
   formId?: number;
   section?: string;
 }
@@ -11,6 +12,7 @@ interface Request {
 const ListMesasService = async ({
   companyId,
   status,
+  type,
   formId,
   section,
 }: Request): Promise<Mesa[]> => {
@@ -18,6 +20,10 @@ const ListMesasService = async ({
 
   if (status) {
     whereCondition.status = status;
+  }
+
+  if (type === "mesa" || type === "comanda") {
+    whereCondition.type = type;
   }
 
   if (formId) {

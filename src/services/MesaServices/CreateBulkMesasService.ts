@@ -23,8 +23,9 @@ const CreateBulkMesasService = async ({
   }
 
   const mesas: Mesa[] = [];
+  const type = "mesa";
   const existingNumbers = new Set(
-    (await Mesa.findAll({ where: { companyId }, attributes: ["number"] })).map(
+    (await Mesa.findAll({ where: { companyId, type }, attributes: ["number"] })).map(
       (m) => m.number
     )
   );
@@ -40,6 +41,7 @@ const CreateBulkMesasService = async ({
       number,
       name: null,
       status: "livre",
+      type,
       companyId,
       displayOrder: num,
       formId: formId || null,

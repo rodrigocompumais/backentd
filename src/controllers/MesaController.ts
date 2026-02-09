@@ -24,11 +24,12 @@ const getFrontendBaseUrl = (): string => {
 
 export const index = async (req: Request, res: Response): Promise<Response> => {
   const { companyId } = req.user;
-  const { status, formId, section } = req.query;
+  const { status, type, formId, section } = req.query;
 
   const mesas = await ListMesasService({
     companyId,
     status: status as string,
+    type: type as string,
     formId: formId ? Number(formId) : undefined,
     section: section as string,
   });
@@ -67,6 +68,34 @@ export const getMesasLinksQr = async (req: Request, res: Response): Promise<Resp
   return res.json({ items });
 };
 
+export const byIdentifier = async (req: Request, res: Response): Promise<Response> => {
+  const { companyId } = req.user;
+  const { number, type } = req.query;
+
+  if (!number || typeof number !== "string" || !number.trim()) {
+    throw new AppError("ERR_MESA_NUMBER_REQUIRED", 400);
+  }
+
+  const normalizedType = type === "comanda" ? "comanda" : "mesa";
+
+  const mesa = await Mesa.findOne({
+    where: {
+      companyId,
+      number: number.trim(),
+      type: normalizedType,
+    },
+    include: [
+      { association: "contact", attributes: ["id", "name", "number"] },
+    ],
+  });
+
+  if (!mesa) {
+    throw new AppError("ERR_MESA_NOT_FOUND", 404);
+  }
+
+  return res.json(mesa);
+};
+
 export const show = async (req: Request, res: Response): Promise<Response> => {
   const { id } = req.params;
   const { companyId } = req.user;
@@ -79,6 +108,7 @@ export const show = async (req: Request, res: Response): Promise<Response> => {
   return res.json(mesa);
 };
 
+/** PDV: localizar mesa/comanda por número e tipo. Query: number, type (mesa | comanda). */
 export const store = async (req: Request, res: Response): Promise<Response> => {
   const { companyId } = req.user;
   const data = req.body;
@@ -86,6 +116,7 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
   const schema = Yup.object().shape({
     number: Yup.string().required("Número da mesa é obrigatório"),
     name: Yup.string().nullable(),
+    type: Yup.string().oneOf(["mesa", "comanda"]).nullable(),
     formId: Yup.number().nullable(),
     capacity: Yup.number().nullable(),
     section: Yup.string().nullable(),
@@ -156,6 +187,7 @@ export const update = async (req: Request, res: Response): Promise<Response> => 
   const schema = Yup.object().shape({
     number: Yup.string().nullable(),
     name: Yup.string().nullable(),
+    type: Yup.string().oneOf(["mesa", "comanda"]).nullable(),
     formId: Yup.number().nullable(),
     capacity: Yup.number().nullable(),
     section: Yup.string().nullable(),

@@ -33,6 +33,10 @@ class Mesa extends Model<Mesa> {
   @Column
   status: string;
 
+  @Default("mesa")
+  @Column
+  type: string;
+
   @ForeignKey(() => Company)
   @Column
   companyId: number;

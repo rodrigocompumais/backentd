@@ -13,6 +13,7 @@ import DeleteMesaService from "../services/MesaServices/DeleteMesaService";
 import { Op } from "sequelize";
 import Form from "../models/Form";
 import Mesa from "../models/Mesa";
+import Product from "../models/Product";
 import AppError from "../errors/AppError";
 import { signMesaLink, verifyMesaLink, signMesaLinkOnly, verifyMesaLinkOnly, createOrderToken } from "../helpers/MesaLinkSign";
 
@@ -334,13 +335,15 @@ export const getPublicMesaByToken = async (req: Request, res: Response): Promise
     });
   }
   if (!form) {
-    const allForms = await Form.findAll({
+    const cardapioForms = await Form.findAll({
       where: { companyId, isActive: true },
       attributes: ["id", "slug", "settings"],
     });
-    form = allForms.find((f) => (f.settings as any)?.formType === "cardapio") || allForms[0] || null;
+    form = cardapioForms.find((f) => (f.settings as any)?.formType === "cardapio") || null;
   }
-  if (!form) throw new AppError("ERR_FORM_NOT_FOUND", 404);
+  if (!form) {
+    throw new AppError("Configure um formulário de cardápio na empresa para usar o link da mesa.", 404);
+  }
 
   const plain = mesa.get({ plain: true }) as any;
   const orderToken = createOrderToken(form.id, mesa.id);
@@ -357,6 +360,38 @@ export const getPublicMesaByToken = async (req: Request, res: Response): Promise
     },
     orderToken,
   });
+};
+
+/** Produtos de cardápio da empresa para o link da mesa (mesa não depende de formulário). */
+export const getPublicMesaProducts = async (req: Request, res: Response): Promise<Response> => {
+  const { mesaId } = req.params;
+  const tokenFromQuery = (req.query.t as string) || "";
+  const mesaIdNum = Number(mesaId);
+  if (!Number.isFinite(mesaIdNum)) throw new AppError("ERR_MESA_NOT_FOUND", 404);
+
+  const mesa = await Mesa.findOne({
+    where: { id: mesaIdNum },
+    attributes: ["id", "companyId"],
+  });
+  if (!mesa) throw new AppError("ERR_MESA_NOT_FOUND", 404);
+  const companyId = mesa.companyId;
+
+  if (process.env.MESA_LINK_SECRET) {
+    if (!tokenFromQuery || !verifyMesaLinkOnly(companyId, mesaIdNum, tokenFromQuery)) {
+      throw new AppError("ERR_MESA_LINK_INVALID", 403);
+    }
+  }
+
+  const products = await Product.findAll({
+    where: { companyId, isMenuProduct: true },
+    order: [
+      ["grupo", "ASC"],
+      ["name", "ASC"],
+    ],
+    attributes: ["id", "name", "description", "value", "grupo", "isMenuProduct", "imageUrl"],
+  });
+
+  return res.json({ products, count: products.length });
 };
 
 /** Mesa por ID para cardápio público (QR da mesa): exige token assinado (t=); retorna orderToken para o submit.

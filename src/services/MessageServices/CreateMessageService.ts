@@ -16,6 +16,7 @@ export interface MessageData {
   ack?: number;
   queueId?: number;
   isInternal?: boolean;
+  isForwarded?: boolean;
 }
 interface Request {
   messageData: MessageData;

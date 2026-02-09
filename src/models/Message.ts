@@ -111,6 +111,10 @@ class Message extends Model<Message> {
 
   @Default(false)
   @Column
+  isForwarded: boolean;
+
+  @Default(false)
+  @Column
   isInternal: boolean;
 }
 

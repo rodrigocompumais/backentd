@@ -107,6 +107,17 @@ const ForwardWhatsAppMessage = async ({
       });
     }
 
+    // Marcar a mensagem no destino como encaminhada (a mensagem é criada pelo listener; atualizar após um curto delay)
+    const sentId = forwardedMessage?.key?.id;
+    if (sentId && targetTicketId) {
+      setTimeout(() => {
+        Message.update(
+          { isForwarded: true },
+          { where: { id: sentId, ticketId: targetTicketId } }
+        ).catch(() => {});
+      }, 2000);
+    }
+
     return forwardedMessage;
   } catch (err) {
     Sentry.captureException(err);

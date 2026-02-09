@@ -347,7 +347,20 @@ const ProcessFormResponseService = async ({
         });
 
         if (printDevice) {
-          const meta = (response.metadata || metadata || {}) as Record<string, unknown>;
+          // Para pedido delivery, recarregar response para ter metadata.deliveryScanToken atualizado
+          let meta = (response.metadata || metadata || {}) as Record<string, unknown>;
+          if (meta?.orderType === "delivery") {
+            const fresh = await FormResponse.findByPk(response.id, { attributes: ["metadata"] });
+            if (fresh?.metadata) meta = fresh.metadata as Record<string, unknown>;
+            let scanToken = meta?.deliveryScanToken as string | undefined;
+            if (!scanToken) {
+              scanToken = createDeliveryScanToken(form.companyId, form.id, response.id);
+              await response.update({
+                metadata: { ...meta, deliveryScanToken: scanToken },
+              });
+              meta = { ...meta, deliveryScanToken: scanToken };
+            }
+          }
           const tableNumber = (meta?.tableNumber as string) || "";
           const garcomName = (meta?.garcomName as string) || "";
           const conteudo: Record<string, unknown> = {
@@ -375,7 +388,12 @@ const ProcessFormResponseService = async ({
             menuItems,
           };
           if (meta?.orderType === "delivery" && meta?.deliveryScanToken) {
-            conteudo.deliveryScanToken = meta.deliveryScanToken;
+            const token = meta.deliveryScanToken as string;
+            conteudo.deliveryScanToken = token;
+            const baseUrl = process.env.FRONTEND_URL || process.env.BACKEND_URL || "";
+            if (baseUrl) {
+              conteudo.deliveryScanUrl = `${baseUrl.replace(/\/$/, "")}/entregador?t=${encodeURIComponent(token)}`;
+            }
           }
 
           await CreateAndDispatchPrintJobService({

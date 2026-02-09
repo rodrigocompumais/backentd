@@ -19,6 +19,7 @@ routes.put("/mesas/:id/liberar", isAuth, requireLanchonetes, MesaController.libe
 routes.delete("/mesas/:id", isAuth, requireLanchonetes, MesaController.destroy);
 
 // Public routes (no auth) - cardápio por mesa / QR
+routes.get("/public/mesas/:mesaId", MesaController.getPublicMesaByToken);
 routes.get("/public/forms/:formSlug/mesas", MesaController.getPublicMesas);
 routes.get("/public/forms/:formSlug/mesas/:mesaId", MesaController.getPublicMesaById);
 

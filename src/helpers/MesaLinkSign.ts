@@ -24,6 +24,22 @@ export function verifyMesaLink(formSlug: string, mesaId: number, token: string):
   return crypto.timingSafeEqual(a, b);
 }
 
+/** Mesa independente do formulário: assinatura só por companyId + mesaId. URL única /mesa/:id?t= */
+export function signMesaLinkOnly(companyId: number, mesaId: number): string {
+  const payload = `mesa:${companyId}:${mesaId}`;
+  return crypto.createHmac("sha256", getSecret()).update(payload).digest("base64url");
+}
+
+/** Verifica token de link só-mesa (mesas independentes de formulário). */
+export function verifyMesaLinkOnly(companyId: number, mesaId: number, token: string): boolean {
+  if (!token || typeof token !== "string") return false;
+  const expected = signMesaLinkOnly(companyId, mesaId);
+  const a = Buffer.from(expected, "utf8");
+  const b = Buffer.from(token, "utf8");
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
 /** Gera token de pedido (sessão) para essa mesa+form. Usado no submit para garantir que o pedido vai para a mesa correta. */
 export function createOrderToken(formId: number, mesaId: number): string {
   const payload = JSON.stringify({

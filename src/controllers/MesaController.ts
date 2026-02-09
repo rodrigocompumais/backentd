@@ -14,7 +14,12 @@ import { Op } from "sequelize";
 import Form from "../models/Form";
 import Mesa from "../models/Mesa";
 import AppError from "../errors/AppError";
-import { signMesaLink, verifyMesaLink, createOrderToken } from "../helpers/MesaLinkSign";
+import { signMesaLink, verifyMesaLink, signMesaLinkOnly, verifyMesaLinkOnly, createOrderToken } from "../helpers/MesaLinkSign";
+
+const getFrontendBaseUrl = (): string => {
+  const baseUrl = process.env.FRONTEND_URL || process.env.BACKEND_URL || "http://localhost:3000";
+  return baseUrl.replace(/\/$/, "");
+};
 
 export const index = async (req: Request, res: Response): Promise<Response> => {
   const { companyId } = req.user;
@@ -27,23 +32,17 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
     section: section as string,
   });
 
-  return res.json(mesas);
+  const base = getFrontendBaseUrl();
+  const list = mesas.map((m) => ({
+    ...m.get({ plain: true }),
+    linkUrl: `${base}/mesa/${m.id}?t=${signMesaLinkOnly(companyId, m.id)}`,
+  }));
+  return res.json(list);
 };
 
-/** Retorna links assinados para QR de todas as mesas da empresa (uso em impressão em lote). */
+/** Retorna links assinados para QR de todas as mesas (mesas independentes do formulário). */
 export const getMesasLinksQr = async (req: Request, res: Response): Promise<Response> => {
-  const { formSlug } = req.query;
   const { companyId } = req.user;
-
-  if (!formSlug || typeof formSlug !== "string") {
-    throw new AppError("formSlug é obrigatório", 400);
-  }
-
-  const form = await Form.findOne({
-    where: { slug: formSlug, isActive: true, companyId },
-    attributes: ["id", "companyId"],
-  });
-  if (!form) throw new AppError("ERR_FORM_NOT_FOUND", 404);
 
   const mesas = await Mesa.findAll({
     where: { companyId },
@@ -51,12 +50,10 @@ export const getMesasLinksQr = async (req: Request, res: Response): Promise<Resp
     order: [["displayOrder", "ASC"], ["number", "ASC"], ["id", "ASC"]],
   });
 
-  const baseUrl = process.env.FRONTEND_URL || process.env.BACKEND_URL || "http://localhost:3000";
-  const base = baseUrl.replace(/\/$/, "");
-
+  const base = getFrontendBaseUrl();
   const items = mesas.map((m) => {
-    const token = signMesaLink(formSlug, m.id);
-    const url = `${base}/f/${formSlug}?mesa=${m.id}&t=${token}`;
+    const token = signMesaLinkOnly(companyId, m.id);
+    const url = `${base}/mesa/${m.id}?t=${token}`;
     return {
       mesaId: m.id,
       number: m.number,
@@ -66,7 +63,7 @@ export const getMesasLinksQr = async (req: Request, res: Response): Promise<Resp
     };
   });
 
-  return res.json({ formSlug, items });
+  return res.json({ items });
 };
 
 export const show = async (req: Request, res: Response): Promise<Response> => {
@@ -288,21 +285,10 @@ export const getPublicMesas = async (req: Request, res: Response): Promise<Respo
   return res.json({ mesas });
 };
 
-/** Gera link assinado para QR da mesa (impede alteração de mesa/empresa na URL). */
+/** Gera link assinado para QR da mesa (mesa independente do formulário). */
 export const getMesaLinkQr = async (req: Request, res: Response): Promise<Response> => {
   const { id } = req.params;
-  const { formSlug } = req.query;
   const { companyId } = req.user;
-
-  if (!formSlug || typeof formSlug !== "string") {
-    throw new AppError("formSlug é obrigatório", 400);
-  }
-
-  const form = await Form.findOne({
-    where: { slug: formSlug, isActive: true, companyId },
-    attributes: ["id", "companyId"],
-  });
-  if (!form) throw new AppError("ERR_FORM_NOT_FOUND", 404);
 
   const mesa = await Mesa.findOne({
     where: { id: Number(id), companyId },
@@ -310,14 +296,71 @@ export const getMesaLinkQr = async (req: Request, res: Response): Promise<Respon
   });
   if (!mesa) throw new AppError("ERR_MESA_NOT_FOUND", 404);
 
-  const token = signMesaLink(formSlug, mesa.id);
-  const baseUrl = process.env.FRONTEND_URL || process.env.BACKEND_URL || "http://localhost:3000";
-  const url = `${baseUrl.replace(/\/$/, "")}/f/${formSlug}?mesa=${mesa.id}&t=${token}`;
+  const token = signMesaLinkOnly(companyId, mesa.id);
+  const base = getFrontendBaseUrl();
+  const url = `${base}/mesa/${mesa.id}?t=${token}`;
 
   return res.json({ url, token });
 };
 
-/** Mesa por ID para cardápio público (QR da mesa): exige token assinado (t=); retorna orderToken para o submit. */
+/** Abertura por mesa apenas (URL /mesa/:id?t=). Redireciona para o cardápio correto. Mesas independentes do formulário. */
+export const getPublicMesaByToken = async (req: Request, res: Response): Promise<Response> => {
+  const { mesaId } = req.params;
+  const tokenFromQuery = (req.query.t as string) || "";
+  const mesaIdNum = Number(mesaId);
+  if (!Number.isFinite(mesaIdNum)) throw new AppError("ERR_MESA_NOT_FOUND", 404);
+
+  const mesa = await Mesa.findOne({
+    where: { id: mesaIdNum },
+    attributes: ["id", "number", "name", "status", "section", "companyId", "formId"],
+    include: [
+      { association: "contact", attributes: ["id", "name", "number"], required: false },
+    ],
+  });
+  if (!mesa) throw new AppError("ERR_MESA_NOT_FOUND", 404);
+  const companyId = mesa.companyId;
+
+  if (process.env.MESA_LINK_SECRET) {
+    if (!tokenFromQuery || !verifyMesaLinkOnly(companyId, mesaIdNum, tokenFromQuery)) {
+      throw new AppError("ERR_MESA_LINK_INVALID", 403);
+    }
+  }
+
+  let form: Form | null = null;
+  if (mesa.formId) {
+    form = await Form.findOne({
+      where: { id: mesa.formId, companyId, isActive: true },
+      attributes: ["id", "slug", "companyId"],
+    });
+  }
+  if (!form) {
+    const allForms = await Form.findAll({
+      where: { companyId, isActive: true },
+      attributes: ["id", "slug", "settings"],
+    });
+    form = allForms.find((f) => (f.settings as any)?.formType === "cardapio") || allForms[0] || null;
+  }
+  if (!form) throw new AppError("ERR_FORM_NOT_FOUND", 404);
+
+  const plain = mesa.get({ plain: true }) as any;
+  const orderToken = createOrderToken(form.id, mesa.id);
+  return res.json({
+    formSlug: form.slug,
+    formId: form.id,
+    mesa: {
+      id: plain.id,
+      number: plain.number,
+      name: plain.name,
+      status: plain.status,
+      section: plain.section,
+      contact: plain.contact ? { name: plain.contact.name, number: plain.contact.number } : null,
+    },
+    orderToken,
+  });
+};
+
+/** Mesa por ID para cardápio público (QR da mesa): exige token assinado (t=); retorna orderToken para o submit.
+ * Aceita token só-mesa (verifyMesaLinkOnly) ou token form+mesa (verifyMesaLink) para compatibilidade. */
 export const getPublicMesaById = async (req: Request, res: Response): Promise<Response> => {
   const { formSlug, mesaId } = req.params;
   const tokenFromQuery = (req.query.t as string) || "";
@@ -336,8 +379,10 @@ export const getPublicMesaById = async (req: Request, res: Response): Promise<Re
     throw new AppError("ERR_MESA_NOT_FOUND", 404);
   }
 
-  if (process.env.MESA_LINK_SECRET) {
-    if (!verifyMesaLink(formSlug, mesaIdNum, tokenFromQuery)) {
+  if (tokenFromQuery && process.env.MESA_LINK_SECRET) {
+    const validByForm = verifyMesaLink(formSlug, mesaIdNum, tokenFromQuery);
+    const validByMesaOnly = verifyMesaLinkOnly(form.companyId, mesaIdNum, tokenFromQuery);
+    if (!validByForm && !validByMesaOnly) {
       throw new AppError("ERR_MESA_LINK_INVALID", 403);
     }
   }

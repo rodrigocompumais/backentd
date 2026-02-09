@@ -73,6 +73,22 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
     halfAndHalfGrupo: Yup.string().nullable(),
     grupo: Yup.string().nullable(),
     imageUrl: Yup.string().nullable(),
+    variations: Yup.array()
+      .of(
+        Yup.object().shape({
+          name: Yup.string().required(),
+          options: Yup.array()
+            .of(
+              Yup.object().shape({
+                label: Yup.string().required(),
+                value: Yup.number().min(0).required(),
+              })
+            )
+            .min(1)
+            .required(),
+        })
+      )
+      .nullable(),
   }).test(
     "halfAndHalfRule",
     "Regra de cobrança é obrigatória quando 'Permitir meio a meio' está ativo",
@@ -138,6 +154,22 @@ export const update = async (
     halfAndHalfGrupo: Yup.string().nullable(),
     grupo: Yup.string().nullable(),
     imageUrl: Yup.string().nullable(),
+    variations: Yup.array()
+      .of(
+        Yup.object().shape({
+          name: Yup.string().required(),
+          options: Yup.array()
+            .of(
+              Yup.object().shape({
+                label: Yup.string().required(),
+                value: Yup.number().min(0).required(),
+              })
+            )
+            .min(1)
+            .required(),
+        })
+      )
+      .nullable(),
   }).test(
     "halfAndHalfRule",
     "Regra de cobrança é obrigatória quando 'Permitir meio a meio' está ativo",
@@ -207,7 +239,7 @@ export const getPublicMenuProducts = async (
     throw new AppError("ERR_FORM_NOT_FOUND", 404);
   }
 
-  // Buscar todos os produtos de cardápio da empresa
+  // Buscar todos os produtos de cardápio da empresa (com variações)
   const products = await Product.findAll({
     where: {
       companyId: form.companyId,
@@ -215,6 +247,9 @@ export const getPublicMenuProducts = async (
     },
     order: [["grupo", "ASC"], ["name", "ASC"]],
     attributes: ["id", "name", "description", "value", "grupo", "isMenuProduct", "variablePrice", "imageUrl", "allowsHalfAndHalf", "halfAndHalfPriceRule", "halfAndHalfGrupo"],
+    include: [
+      { association: "variations", include: [{ association: "options" }] },
+    ],
   });
 
   return res.json({

@@ -12,6 +12,9 @@ const ShowProductService = async ({
 }: Request): Promise<Product> => {
   const product = await Product.findOne({
     where: { id: productId, companyId },
+    include: [
+      { association: "variations", include: [{ association: "options" }] },
+    ],
   });
 
   if (!product) {

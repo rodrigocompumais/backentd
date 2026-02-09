@@ -1,6 +1,10 @@
 import Product from "../../models/Product";
 import { Op } from "sequelize";
 
+const productInclude = [
+  { association: "variations" as const, include: [{ association: "options" as const }] },
+];
+
 interface Request {
   companyId: number;
   searchParam?: string;
@@ -49,6 +53,7 @@ const ListProductsService = async ({
     limit,
     offset,
     order: [["createdAt", "DESC"]],
+    include: productInclude,
   });
 
   const groupsResult = await Product.findAll({

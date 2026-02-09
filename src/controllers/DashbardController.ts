@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import DashboardDataService, { DashboardData, Params } from "../services/ReportService/DashbardDataService";
 import DashboardExtendedService, { ExtendedParams } from "../services/ReportService/DashboardExtendedService";
 import OrdersStatsService from "../services/ReportService/OrdersStatsService";
+import LanchonetesStatsService from "../services/ReportService/LanchonetesStatsService";
 import { TicketsAttendance } from "../services/ReportService/TicketsAttendance";
 import { TicketsDayService } from "../services/ReportService/TicketsDayService";
 
@@ -55,5 +56,11 @@ export const extended = async (req: Request, res: Response): Promise<Response> =
 export const ordersStats = async (req: Request, res: Response): Promise<Response> => {
   const { companyId } = req.user;
   const stats = await OrdersStatsService(companyId);
+  return res.status(200).json(stats);
+};
+
+export const lanchonetesStats = async (req: Request, res: Response): Promise<Response> => {
+  const { companyId } = req.user;
+  const stats = await LanchonetesStatsService(companyId);
   return res.status(200).json(stats);
 };

@@ -10,8 +10,10 @@ import {
   Default,
   ForeignKey,
   BelongsTo,
+  HasMany,
 } from "sequelize-typescript";
 import Company from "./Company";
+import ProductVariation from "./ProductVariation";
 
 @Table
 class Product extends Model<Product> {
@@ -68,6 +70,9 @@ class Product extends Model<Product> {
 
   @BelongsTo(() => Company)
   company: Company;
+
+  @HasMany(() => ProductVariation)
+  variations: ProductVariation[];
 
   @CreatedAt
   createdAt: Date;

@@ -10,6 +10,7 @@ import OcuparMesaService from "../services/MesaServices/OcuparMesaService";
 import LiberarMesaService from "../services/MesaServices/LiberarMesaService";
 import ResumoContaMesaService from "../services/MesaServices/ResumoContaMesaService";
 import DeleteMesaService from "../services/MesaServices/DeleteMesaService";
+import RegisterGourmetVendaService from "../services/GourmetFinanceiroServices/RegisterGourmetVendaService";
 import { Op } from "sequelize";
 import Form from "../models/Form";
 import Mesa from "../models/Mesa";
@@ -260,11 +261,31 @@ export const resumoConta = async (req: Request, res: Response): Promise<Response
 export const liberar = async (req: Request, res: Response): Promise<Response> => {
   const { id } = req.params;
   const { companyId } = req.user;
+  const mesaId = Number(id);
+
+  let resumo: { total: number; mesa?: { number?: string; name?: string } } | null = null;
+  try {
+    resumo = await ResumoContaMesaService(mesaId, companyId);
+  } catch (_) {}
 
   const mesa = await LiberarMesaService({
-    mesaId: Number(id),
+    mesaId,
     companyId,
   });
+
+  if (resumo && Number(resumo.total) > 0) {
+    try {
+      await RegisterGourmetVendaService({
+        companyId,
+        tipo: "mesa",
+        valor: Number(resumo.total),
+        mesaId,
+        mesaNumero: resumo.mesa?.number || resumo.mesa?.name || String(mesaId),
+      });
+    } catch (err) {
+      console.error("RegisterGourmetVendaService (mesa):", err);
+    }
+  }
 
   const io = getIO();
   io.to(`company-${companyId}-mainchannel`).emit(`company-${companyId}-mesa`, {

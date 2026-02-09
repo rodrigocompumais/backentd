@@ -1,5 +1,8 @@
 import Product from "../../models/Product";
+import ProductVariation from "../../models/ProductVariation";
+import ProductVariationOption from "../../models/ProductVariationOption";
 import AppError from "../../errors/AppError";
+import { ProductVariationInput } from "./CreateProductService";
 
 interface Request {
   productId: number;
@@ -15,6 +18,7 @@ interface Request {
   halfAndHalfGrupo?: string | null;
   grupo?: string;
   imageUrl?: string;
+  variations?: ProductVariationInput[];
 }
 
 const UpdateProductService = async ({
@@ -31,6 +35,7 @@ const UpdateProductService = async ({
   halfAndHalfGrupo,
   grupo,
   imageUrl,
+  variations,
 }: Request): Promise<Product> => {
   const product = await Product.findOne({
     where: { id: productId, companyId },
@@ -92,7 +97,32 @@ const UpdateProductService = async ({
 
   await product.save();
 
-  return product;
+  if (variations !== undefined) {
+    await ProductVariation.destroy({ where: { productId: product.id } });
+
+    for (const v of variations) {
+      if (!v.name || !v.options || v.options.length === 0) continue;
+      const variation = await ProductVariation.create({
+        productId: product.id,
+        name: v.name.trim(),
+      });
+      for (const opt of v.options) {
+        if (opt.label == null || opt.label === "" || opt.value == null || Number(opt.value) < 0) continue;
+        await ProductVariationOption.create({
+          productVariationId: variation.id,
+          label: String(opt.label).trim(),
+          value: Number(opt.value),
+        });
+      }
+    }
+  }
+
+  const withVariations = await Product.findByPk(product.id, {
+    include: [
+      { association: "variations", include: [{ association: "options" }] },
+    ],
+  });
+  return withVariations ?? product;
 };
 
 export default UpdateProductService;

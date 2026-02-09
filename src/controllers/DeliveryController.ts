@@ -9,6 +9,17 @@ import { verifyDeliveryScanToken, createDeliveryScanToken } from "../helpers/Mes
 import UpdateOrderStatusService from "../services/OrderServices/UpdateOrderStatusService";
 import SendOrderStatusNotificationService from "../services/OrderServices/SendOrderStatusNotificationService";
 import SendOrderEvaluationService from "../services/OrderServices/SendOrderEvaluationService";
+import RegisterGourmetVendaService from "../services/GourmetFinanceiroServices/RegisterGourmetVendaService";
+
+const calcTotalFromMenuItems = (metadata: any): number => {
+  const items = metadata?.menuItems || [];
+  if (!Array.isArray(items)) return 0;
+  return items.reduce((sum: number, item: any) => {
+    const qty = Number(item.quantity) || 0;
+    const val = Number(item.productValue) ?? 0;
+    return sum + qty * val;
+  }, 0);
+};
 
 /** GET /delivery/order-by-token?t=TOKEN - Valida token de scan e retorna dados do pedido (entregador). */
 export const orderByToken = async (req: Request, res: Response): Promise<Response> => {
@@ -134,6 +145,22 @@ export const finalizarRota = async (req: Request, res: Response): Promise<Respon
     if (meta?.orderType !== "delivery") continue;
 
     await r.update({ orderStatus: "entregue" });
+    const valor = calcTotalFromMenuItems(r.metadata);
+    if (valor > 0) {
+      try {
+        await RegisterGourmetVendaService({
+          companyId: form.companyId,
+          tipo: "delivery",
+          valor,
+          formResponseId: r.id,
+          protocol: (r as any).protocol ?? null,
+          entregadorUserId: (meta.entregadorUserId as number) ?? null,
+          entregadorNome: (meta.entregadorName as string) ?? null,
+        });
+      } catch (err) {
+        console.error("RegisterGourmetVendaService (delivery finalizarRota):", err);
+      }
+    }
     await SendOrderStatusNotificationService({
       form,
       response: r,

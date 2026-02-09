@@ -50,11 +50,14 @@ import FormResponse from "../models/FormResponse";
 import ResponseAnswer from "../models/ResponseAnswer";
 import UserAppointment from "../models/UserAppointment";
 import Product from "../models/Product";
+import ProductVariation from "../models/ProductVariation";
+import ProductVariationOption from "../models/ProductVariationOption";
 import PrintDevice from "../models/PrintDevice";
 import PrintPedido from "../models/PrintPedido";
 import Module from "../models/Module";
 import CompanyModule from "../models/CompanyModule";
 import Mesa from "../models/Mesa";
+import GourmetFinanceiro from "../models/GourmetFinanceiro";
 
 // eslint-disable-next-line
 const dbConfig = require("../config/database");
@@ -114,11 +117,14 @@ const models = [
   ResponseAnswer,
   UserAppointment,
   Product,
+  ProductVariation,
+  ProductVariationOption,
   PrintDevice,
   PrintPedido,
   Module,
   CompanyModule,
   Mesa,
+  GourmetFinanceiro,
 ];
 
 sequelize.addModels(models);

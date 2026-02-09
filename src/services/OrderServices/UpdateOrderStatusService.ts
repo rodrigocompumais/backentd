@@ -2,6 +2,17 @@ import Form from "../../models/Form";
 import FormResponse from "../../models/FormResponse";
 import AppError from "../../errors/AppError";
 import SendOrderStatusNotificationService from "./SendOrderStatusNotificationService";
+import RegisterGourmetVendaService from "../GourmetFinanceiroServices/RegisterGourmetVendaService";
+
+const calcTotalFromMenuItems = (metadata: any): number => {
+  const items = metadata?.menuItems || [];
+  if (!Array.isArray(items)) return 0;
+  return items.reduce((sum: number, item: any) => {
+    const qty = Number(item.quantity) || 0;
+    const val = Number(item.productValue) ?? 0;
+    return sum + qty * val;
+  }, 0);
+};
 
 const DEFAULT_ORDER_STATUSES = [
   "novo",
@@ -67,6 +78,28 @@ const UpdateOrderStatusService = async ({
   }
 
   await response.update({ orderStatus: normalizedStatus });
+
+  if (normalizedStatus === "entregue") {
+    const meta = (response.metadata || {}) as Record<string, unknown>;
+    if (meta?.orderType === "delivery") {
+      const valor = calcTotalFromMenuItems(response.metadata);
+      if (valor > 0 && (form as any).companyId) {
+        try {
+          await RegisterGourmetVendaService({
+            companyId: (form as any).companyId,
+            tipo: "delivery",
+            valor,
+            formResponseId: response.id,
+            protocol: (response as any).protocol ?? null,
+            entregadorUserId: meta.entregadorUserId as number | undefined,
+            entregadorNome: (meta.entregadorName as string) ?? null,
+          });
+        } catch (err) {
+          console.error("RegisterGourmetVendaService (delivery):", err);
+        }
+      }
+    }
+  }
 
   // Enviar notificação WhatsApp para status pronto, saiu_entrega, entregue
   try {

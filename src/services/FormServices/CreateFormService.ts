@@ -60,21 +60,46 @@ const CreateFormService = async ({
   }
 
   // Generate unique slug from name
-  const slug = name
+  const baseSlug = name
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
 
-  // Check if slug already exists
-  const existingForm = await Form.findOne({
-    where: { slug, companyId },
-  });
+  // Função para gerar hash único curto usando crypto
+  const generateUniqueHash = (): string => {
+    // Usar timestamp + random para garantir unicidade
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substring(2, 8);
+    return `${timestamp}-${random}`;
+  };
 
-  let finalSlug = slug;
-  if (existingForm) {
-    finalSlug = `${slug}-${Date.now()}`;
+  // Verificar se slug já existe globalmente (sem filtro de companyId, pois a constraint é global)
+  let finalSlug = baseSlug;
+  let attempts = 0;
+  const maxAttempts = 10;
+  
+  while (attempts < maxAttempts) {
+    const existingForm = await Form.findOne({
+      where: { slug: finalSlug },
+    });
+    
+    if (!existingForm) {
+      break; // Slug é único, pode usar
+    }
+    
+    // Gerar novo slug com hash único
+    const hash = generateUniqueHash();
+    finalSlug = `${baseSlug}-${hash}`;
+    attempts++;
+  }
+  
+  // Se ainda não encontrou um único após várias tentativas, usar timestamp + random mais longo
+  if (attempts >= maxAttempts) {
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2, 12);
+    finalSlug = `${baseSlug}-${timestamp}-${random}`;
   }
 
   const form = await Form.create({

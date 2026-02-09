@@ -18,6 +18,8 @@ import Contact from "../../models/Contact";
 import Ticket from "../../models/Ticket";
 import { verifyOrderToken, createDeliveryScanToken } from "../../helpers/MesaLinkSign";
 import Product from "../../models/Product";
+import ProductVariation from "../../models/ProductVariation";
+import ProductVariationOption from "../../models/ProductVariationOption";
 
 interface Answer {
   fieldId: number;
@@ -56,6 +58,8 @@ type MenuItemInput = {
   type?: string;
   half1ProductId?: number;
   half2ProductId?: number;
+  half1OptionId?: number | null;
+  half2OptionId?: number | null;
 };
 
 /** Normaliza menuItems: para itens tipo halfAndHalf, calcula productValue e productName no backend. */
@@ -67,20 +71,82 @@ const normalizeMenuItems = async (
   for (const item of items) {
     if ((item as any).type === "halfAndHalf" && item.productId && item.half1ProductId && item.half2ProductId) {
       const [base, half1, half2] = await Promise.all([
-        Product.findOne({ where: { id: item.productId, companyId }, attributes: ["id", "name", "value", "halfAndHalfPriceRule"] }),
-        Product.findOne({ where: { id: item.half1ProductId, companyId }, attributes: ["id", "name", "value"] }),
-        Product.findOne({ where: { id: item.half2ProductId, companyId }, attributes: ["id", "name", "value"] }),
+        Product.findOne({ 
+          where: { id: item.productId, companyId }, 
+          attributes: ["id", "name", "value", "halfAndHalfPriceRule"],
+          include: [{
+            model: ProductVariation,
+            as: "variations",
+            include: [{
+              model: ProductVariationOption,
+              as: "options"
+            }]
+          }]
+        }),
+        Product.findOne({ 
+          where: { id: item.half1ProductId, companyId }, 
+          attributes: ["id", "name", "value"],
+          include: [{
+            model: ProductVariation,
+            as: "variations",
+            include: [{
+              model: ProductVariationOption,
+              as: "options"
+            }]
+          }]
+        }),
+        Product.findOne({ 
+          where: { id: item.half2ProductId, companyId }, 
+          attributes: ["id", "name", "value"],
+          include: [{
+            model: ProductVariation,
+            as: "variations",
+            include: [{
+              model: ProductVariationOption,
+              as: "options"
+            }]
+          }]
+        }),
       ]);
       if (!base || !half1 || !half2) {
         result.push({ ...item, productName: item.productName || "Meio a meio (produto não encontrado)", productValue: 0 });
         continue;
       }
-      const v1 = Number((half1 as any).value) || 0;
-      const v2 = Number((half2 as any).value) || 0;
+      
+      // Obter valores das variações se disponíveis
+      let v1 = Number((half1 as any).value) || 0;
+      let v2 = Number((half2 as any).value) || 0;
+      
+      if ((item as any).half1OptionId && (half1 as any).variations && (half1 as any).variations.length > 0) {
+        const firstVariation = (half1 as any).variations[0];
+        const option = firstVariation?.options?.find((o: any) => o.id === (item as any).half1OptionId);
+        if (option) v1 = Number(option.value) || 0;
+      }
+      
+      if ((item as any).half2OptionId && (half2 as any).variations && (half2 as any).variations.length > 0) {
+        const firstVariation = (half2 as any).variations[0];
+        const option = firstVariation?.options?.find((o: any) => o.id === (item as any).half2OptionId);
+        if (option) v2 = Number(option.value) || 0;
+      }
+      
       const rule = (base as any).halfAndHalfPriceRule || "max";
       let productValue = 0;
       if (rule === "max") productValue = Math.max(v1, v2);
-      else if (rule === "fixed") productValue = Number((base as any).value) || 0;
+      else if (rule === "fixed") {
+        // Para fixed, usar a variação selecionada do produto base se disponível
+        const baseOptionId = (item as any).baseOptionId;
+        if (baseOptionId && (base as any).variations && (base as any).variations.length > 0) {
+          const firstVariation = (base as any).variations[0];
+          const option = firstVariation?.options?.find((o: any) => o.id === baseOptionId);
+          if (option) {
+            productValue = Number(option.value) || 0;
+          } else {
+            productValue = Number((base as any).value) || 0;
+          }
+        } else {
+          productValue = Number((base as any).value) || 0;
+        }
+      }
       else if (rule === "average") productValue = (v1 + v2) / 2;
       else productValue = Math.max(v1, v2);
       const productName =
@@ -92,6 +158,8 @@ const normalizeMenuItems = async (
         quantity: item.quantity,
         half1ProductId: item.half1ProductId,
         half2ProductId: item.half2ProductId,
+        half1OptionId: (item as any).half1OptionId || null,
+        half2OptionId: (item as any).half2OptionId || null,
         productName,
         productValue: Math.round(productValue * 100) / 100,
         grupo: item.grupo || (base as any).grupo,

@@ -44,6 +44,11 @@ export const listOrders = async (req: Request, res: Response): Promise<Response>
   }
   if (orderStatus && typeof orderStatus === "string") {
     whereCondition.orderStatus = orderStatus;
+  } else {
+    whereCondition[Op.and] = whereCondition[Op.and] || [];
+    whereCondition[Op.and].push({
+      [Op.or]: [{ orderStatus: { [Op.ne]: "faturado" } }, { orderStatus: null }],
+    });
   }
   if (search && typeof search === "string" && search.trim()) {
     const searchTerm = `%${search.trim()}%`;
@@ -129,6 +134,11 @@ export const listAllOrders = async (req: Request, res: Response): Promise<Respon
   }
   if (orderStatus && typeof orderStatus === "string") {
     whereCondition.orderStatus = orderStatus;
+  } else {
+    whereCondition[Op.and] = whereCondition[Op.and] || [];
+    whereCondition[Op.and].push({
+      [Op.or]: [{ orderStatus: { [Op.ne]: "faturado" } }, { orderStatus: null }],
+    });
   }
   if (search && typeof search === "string" && search.trim()) {
     const searchTerm = `%${search.trim()}%`;

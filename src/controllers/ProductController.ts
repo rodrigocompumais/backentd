@@ -44,7 +44,10 @@ export const show = async (req: Request, res: Response): Promise<Response> => {
 
 export const store = async (req: Request, res: Response): Promise<Response> => {
   const { companyId } = req.user;
-  const data = req.body;
+  const data = { ...req.body };
+  if (!data.allowsHalfAndHalf || data.halfAndHalfPriceRule === "" || data.halfAndHalfPriceRule === "null" || data.halfAndHalfPriceRule == null) {
+    data.halfAndHalfPriceRule = null;
+  }
 
   const schema = Yup.object().shape({
     name: Yup.string().required("Nome do produto é obrigatório"),
@@ -59,7 +62,14 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
     isMenuProduct: Yup.boolean().nullable(),
     variablePrice: Yup.boolean().nullable(),
     allowsHalfAndHalf: Yup.boolean().nullable(),
-    halfAndHalfPriceRule: Yup.string().oneOf(["max", "fixed", "average"]).nullable(),
+    halfAndHalfPriceRule: Yup.string()
+      .transform((v) => (v === "" || v == null || v === "null" ? null : v))
+      .nullable()
+      .test(
+        "oneOfOrNull",
+        "halfAndHalfPriceRule must be one of the following values: max, fixed, average",
+        (v) => v == null || v === "" || v === "null" || ["max", "fixed", "average"].includes(String(v))
+      ),
     halfAndHalfGrupo: Yup.string().nullable(),
     grupo: Yup.string().nullable(),
     imageUrl: Yup.string().nullable(),
@@ -100,7 +110,10 @@ export const update = async (
 ): Promise<Response> => {
   const { id } = req.params;
   const { companyId } = req.user;
-  const data = req.body;
+  const data = { ...req.body };
+  if (!data.allowsHalfAndHalf || data.halfAndHalfPriceRule === "" || data.halfAndHalfPriceRule === "null" || data.halfAndHalfPriceRule == null) {
+    data.halfAndHalfPriceRule = null;
+  }
 
   const schema = Yup.object().shape({
     name: Yup.string().nullable(),
@@ -114,7 +127,14 @@ export const update = async (
       .nullable(),
     isMenuProduct: Yup.boolean().nullable(),
     allowsHalfAndHalf: Yup.boolean().nullable(),
-    halfAndHalfPriceRule: Yup.string().oneOf(["max", "fixed", "average"]).nullable(),
+    halfAndHalfPriceRule: Yup.string()
+      .transform((v) => (v === "" || v == null || v === "null" ? null : v))
+      .nullable()
+      .test(
+        "oneOfOrNull",
+        "halfAndHalfPriceRule must be one of the following values: max, fixed, average",
+        (v) => v == null || v === "" || v === "null" || ["max", "fixed", "average"].includes(String(v))
+      ),
     halfAndHalfGrupo: Yup.string().nullable(),
     grupo: Yup.string().nullable(),
     imageUrl: Yup.string().nullable(),

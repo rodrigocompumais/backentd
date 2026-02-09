@@ -42,6 +42,10 @@ class Product extends Model<Product> {
   @Column
   isMenuProduct: boolean;
 
+  @Default(false)
+  @Column
+  variablePrice: boolean;
+
   @Column
   grupo: string;
 

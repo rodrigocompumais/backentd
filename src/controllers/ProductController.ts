@@ -56,6 +56,7 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
       .min(0, "Quantidade deve ser maior ou igual a zero")
       .nullable(),
     isMenuProduct: Yup.boolean().nullable(),
+    variablePrice: Yup.boolean().nullable(),
     grupo: Yup.string().nullable(),
     imageUrl: Yup.string().nullable(),
   });
@@ -168,7 +169,7 @@ export const getPublicMenuProducts = async (
       isMenuProduct: true,
     },
     order: [["grupo", "ASC"], ["name", "ASC"]],
-    attributes: ["id", "name", "description", "value", "grupo", "isMenuProduct", "imageUrl"],
+    attributes: ["id", "name", "description", "value", "grupo", "isMenuProduct", "variablePrice", "imageUrl"],
   });
 
   return res.json({

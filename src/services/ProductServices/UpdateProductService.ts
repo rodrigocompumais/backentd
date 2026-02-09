@@ -9,6 +9,7 @@ interface Request {
   value?: number;
   quantity?: number;
   isMenuProduct?: boolean;
+  variablePrice?: boolean;
   grupo?: string;
   imageUrl?: string;
 }
@@ -21,6 +22,7 @@ const UpdateProductService = async ({
   value,
   quantity,
   isMenuProduct,
+  variablePrice,
   grupo,
   imageUrl,
 }: Request): Promise<Product> => {
@@ -56,6 +58,10 @@ const UpdateProductService = async ({
 
   if (isMenuProduct !== undefined) {
     product.isMenuProduct = isMenuProduct;
+  }
+
+  if (variablePrice !== undefined) {
+    product.variablePrice = variablePrice;
   }
 
   if (grupo !== undefined) {

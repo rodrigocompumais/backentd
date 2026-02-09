@@ -7,6 +7,7 @@ interface Request {
   value: number;
   quantity?: number;
   isMenuProduct?: boolean;
+  variablePrice?: boolean;
   grupo?: string;
   imageUrl?: string;
   companyId: number;
@@ -18,6 +19,7 @@ const CreateProductService = async ({
   value,
   quantity = 0,
   isMenuProduct = false,
+  variablePrice = false,
   grupo,
   imageUrl,
   companyId,
@@ -36,6 +38,7 @@ const CreateProductService = async ({
     value,
     quantity: quantity || 0,
     isMenuProduct: isMenuProduct || false,
+    variablePrice: variablePrice || false,
     grupo: grupo?.trim() || null,
     imageUrl: imageUrl?.trim() || null,
     companyId,

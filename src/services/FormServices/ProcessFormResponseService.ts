@@ -196,8 +196,10 @@ const ProcessFormResponseService = async ({
     console.log("ProcessFormResponseService: Form is quotation but no quotationItems received");
   }
   
+  let normalizedMenuItems: any[] | null = null;
   if (isMenuForm && menuItems && menuItems.length > 0) {
-    responseMetadata.menuItems = await normalizeMenuItems(menuItems, form.companyId);
+    normalizedMenuItems = await normalizeMenuItems(menuItems, form.companyId);
+    responseMetadata.menuItems = normalizedMenuItems;
     console.log("ProcessFormResponseService: Saving menuItems:", responseMetadata.menuItems);
   } else if (isMenuForm) {
     console.log("ProcessFormResponseService: Form is menu but no menuItems received");
@@ -442,7 +444,7 @@ const ProcessFormResponseService = async ({
                 answer: answer.answer,
               };
             }),
-            menuItems,
+            menuItems: normalizedMenuItems && normalizedMenuItems.length > 0 ? normalizedMenuItems : menuItems,
           };
           if (meta?.orderType === "delivery" && meta?.deliveryScanToken) {
             const token = meta.deliveryScanToken as string;
@@ -533,7 +535,7 @@ const ProcessFormResponseService = async ({
         const tableNumberMsg = (meta?.tableNumber as string) || undefined;
         const garcomNameMsg = (meta?.garcomName as string) || undefined;
         const orderMessage = await FormatMenuOrderMessage({
-          menuItems,
+          menuItems: normalizedMenuItems && normalizedMenuItems.length > 0 ? normalizedMenuItems : menuItems,
           customerName: contactName || "Cliente",
           customerPhone: contactPhone,
           customFields,

@@ -18,15 +18,19 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
 
   SendRefreshToken(res, refreshToken);
 
-  const io = getIO();
-  io.to(`user-${serializedUser.id}`).emit(`company-${serializedUser.companyId}-auth`, {
-    action: "update",
-    user: {
-      id: serializedUser.id,
-      email: serializedUser.email,
-      companyId: serializedUser.companyId
-    }
-  });
+  try {
+    const io = getIO();
+    io.to(`user-${serializedUser.id}`).emit(`company-${serializedUser.companyId}-auth`, {
+      action: "update",
+      user: {
+        id: serializedUser.id,
+        email: serializedUser.email,
+        companyId: serializedUser.companyId
+      }
+    });
+  } catch (err) {
+    // Não falhar o login se o Socket.IO não estiver inicializado ou emitir falhar
+  }
 
   return res.status(200).json({
     token,

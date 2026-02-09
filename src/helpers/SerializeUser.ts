@@ -19,6 +19,7 @@ interface SerializedUser {
 }
 
 export const SerializeUser = async (user: User): Promise<SerializedUser> => {
+  const u = user as any;
   return {
     id: user.id,
     name: user.name,
@@ -27,10 +28,10 @@ export const SerializeUser = async (user: User): Promise<SerializedUser> => {
     companyId: user.companyId,
     company: user.company,
     super: user.super,
-    queues: user.queues,
-	allTicket: user.allTicket,
-    avatar: user.avatar || null,
-    repeatPendingChatSound: user.repeatPendingChatSound !== undefined ? user.repeatPendingChatSound : true,
-    defaultRoute: user.defaultRoute ?? null,
+    queues: user.queues || [],
+    allTicket: u.allTicket ?? "",
+    avatar: u.avatar ?? null,
+    repeatPendingChatSound: u.repeatPendingChatSound !== undefined ? u.repeatPendingChatSound : true,
+    defaultRoute: u.defaultRoute ?? null,
   };
 };

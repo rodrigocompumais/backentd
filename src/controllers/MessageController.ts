@@ -20,6 +20,7 @@ import EditWhatsAppMessage from "../services/WbotServices/EditWhatsAppMessage";
 import SendWhatsAppMedia from "../services/WbotServices/SendWhatsAppMedia";
 import SendWhatsAppMessage from "../services/WbotServices/SendWhatsAppMessage";
 import SendWhatsAppReaction from "../services/WbotServices/SendWhatsAppReaction";
+import ForwardWhatsAppMessage from "../services/WbotServices/ForwardWhatsAppMessage";
 import CreateMessageService from "../services/MessageServices/CreateMessageService";
 import CheckContactNumber from "../services/WbotServices/CheckNumber";
 import CheckIsValidContact from "../services/WbotServices/CheckIsValidContact";
@@ -193,6 +194,24 @@ export const react = async (req: Request, res: Response): Promise<Response> => {
   await SendWhatsAppReaction({
     messageId,
     emoji: emoji || "👍"
+  });
+
+  return res.send();
+};
+
+export const forward = async (req: Request, res: Response): Promise<Response> => {
+  const { messageId } = req.params;
+  const { targetTicketId } = req.body as { targetTicketId?: number };
+  const { companyId } = req.user;
+
+  if (!targetTicketId) {
+    return res.status(400).json({ error: "Conversa de destino é obrigatória" });
+  }
+
+  await ForwardWhatsAppMessage({
+    messageId,
+    targetTicketId,
+    companyId
   });
 
   return res.send();

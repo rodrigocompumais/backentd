@@ -17,6 +17,7 @@ import Mesa from "../../models/Mesa";
 import Contact from "../../models/Contact";
 import Ticket from "../../models/Ticket";
 import { verifyOrderToken, createDeliveryScanToken } from "../../helpers/MesaLinkSign";
+import Product from "../../models/Product";
 
 interface Answer {
   fieldId: number;
@@ -45,6 +46,62 @@ interface Request {
   /** Token de sessão da mesa (retornado ao abrir link assinado). Garante que o pedido vá para a mesa correta. */
   orderToken?: string;
 }
+
+type MenuItemInput = {
+  productId?: number;
+  quantity: number;
+  productName?: string;
+  productValue?: number;
+  grupo?: string;
+  type?: string;
+  half1ProductId?: number;
+  half2ProductId?: number;
+};
+
+/** Normaliza menuItems: para itens tipo halfAndHalf, calcula productValue e productName no backend. */
+const normalizeMenuItems = async (
+  items: MenuItemInput[],
+  companyId: number
+): Promise<any[]> => {
+  const result: any[] = [];
+  for (const item of items) {
+    if ((item as any).type === "halfAndHalf" && item.productId && item.half1ProductId && item.half2ProductId) {
+      const [base, half1, half2] = await Promise.all([
+        Product.findOne({ where: { id: item.productId, companyId }, attributes: ["id", "name", "value", "halfAndHalfPriceRule"] }),
+        Product.findOne({ where: { id: item.half1ProductId, companyId }, attributes: ["id", "name", "value"] }),
+        Product.findOne({ where: { id: item.half2ProductId, companyId }, attributes: ["id", "name", "value"] }),
+      ]);
+      if (!base || !half1 || !half2) {
+        result.push({ ...item, productName: item.productName || "Meio a meio (produto não encontrado)", productValue: 0 });
+        continue;
+      }
+      const v1 = Number((half1 as any).value) || 0;
+      const v2 = Number((half2 as any).value) || 0;
+      const rule = (base as any).halfAndHalfPriceRule || "max";
+      let productValue = 0;
+      if (rule === "max") productValue = Math.max(v1, v2);
+      else if (rule === "fixed") productValue = Number((base as any).value) || 0;
+      else if (rule === "average") productValue = (v1 + v2) / 2;
+      else productValue = Math.max(v1, v2);
+      const productName =
+        item.productName ||
+        `${(base as any).name} - Metade ${(half1 as any).name} / Metade ${(half2 as any).name}`;
+      result.push({
+        type: "halfAndHalf",
+        productId: item.productId,
+        quantity: item.quantity,
+        half1ProductId: item.half1ProductId,
+        half2ProductId: item.half2ProductId,
+        productName,
+        productValue: Math.round(productValue * 100) / 100,
+        grupo: item.grupo || (base as any).grupo,
+      });
+    } else {
+      result.push(item);
+    }
+  }
+  return result;
+};
 
 const ProcessFormResponseService = async ({
   formId,
@@ -140,8 +197,8 @@ const ProcessFormResponseService = async ({
   }
   
   if (isMenuForm && menuItems && menuItems.length > 0) {
-    responseMetadata.menuItems = menuItems;
-    console.log("ProcessFormResponseService: Saving menuItems:", menuItems);
+    responseMetadata.menuItems = await normalizeMenuItems(menuItems, form.companyId);
+    console.log("ProcessFormResponseService: Saving menuItems:", responseMetadata.menuItems);
   } else if (isMenuForm) {
     console.log("ProcessFormResponseService: Form is menu but no menuItems received");
   }

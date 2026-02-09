@@ -46,6 +46,16 @@ class Product extends Model<Product> {
   @Column
   variablePrice: boolean;
 
+  @Default(false)
+  @Column
+  allowsHalfAndHalf: boolean;
+
+  @Column(DataType.STRING)
+  halfAndHalfPriceRule: string | null;
+
+  @Column(DataType.STRING)
+  halfAndHalfGrupo: string | null;
+
   @Column
   grupo: string;
 

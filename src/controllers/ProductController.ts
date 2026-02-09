@@ -57,9 +57,21 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
       .nullable(),
     isMenuProduct: Yup.boolean().nullable(),
     variablePrice: Yup.boolean().nullable(),
+    allowsHalfAndHalf: Yup.boolean().nullable(),
+    halfAndHalfPriceRule: Yup.string().oneOf(["max", "fixed", "average"]).nullable(),
+    halfAndHalfGrupo: Yup.string().nullable(),
     grupo: Yup.string().nullable(),
     imageUrl: Yup.string().nullable(),
-  });
+  }).test(
+    "halfAndHalfRule",
+    "Regra de cobrança é obrigatória quando 'Permitir meio a meio' está ativo",
+    (obj: any) => {
+      if (obj?.allowsHalfAndHalf === true) {
+        return obj?.halfAndHalfPriceRule != null && ["max", "fixed", "average"].includes(obj.halfAndHalfPriceRule);
+      }
+      return true;
+    }
+  );
 
   try {
     await schema.validate(data);
@@ -100,9 +112,21 @@ export const update = async (
       .min(0, "Quantidade deve ser maior ou igual a zero")
       .nullable(),
     isMenuProduct: Yup.boolean().nullable(),
+    allowsHalfAndHalf: Yup.boolean().nullable(),
+    halfAndHalfPriceRule: Yup.string().oneOf(["max", "fixed", "average"]).nullable(),
+    halfAndHalfGrupo: Yup.string().nullable(),
     grupo: Yup.string().nullable(),
     imageUrl: Yup.string().nullable(),
-  });
+  }).test(
+    "halfAndHalfRule",
+    "Regra de cobrança é obrigatória quando 'Permitir meio a meio' está ativo",
+    (obj: any) => {
+      if (obj?.allowsHalfAndHalf === true) {
+        return obj?.halfAndHalfPriceRule != null && ["max", "fixed", "average"].includes(obj.halfAndHalfPriceRule);
+      }
+      return true;
+    }
+  );
 
   try {
     await schema.validate(data);
@@ -169,7 +193,7 @@ export const getPublicMenuProducts = async (
       isMenuProduct: true,
     },
     order: [["grupo", "ASC"], ["name", "ASC"]],
-    attributes: ["id", "name", "description", "value", "grupo", "isMenuProduct", "variablePrice", "imageUrl"],
+    attributes: ["id", "name", "description", "value", "grupo", "isMenuProduct", "variablePrice", "imageUrl", "allowsHalfAndHalf", "halfAndHalfPriceRule", "halfAndHalfGrupo"],
   });
 
   return res.json({

@@ -10,6 +10,9 @@ interface Request {
   quantity?: number;
   isMenuProduct?: boolean;
   variablePrice?: boolean;
+  allowsHalfAndHalf?: boolean;
+  halfAndHalfPriceRule?: string | null;
+  halfAndHalfGrupo?: string | null;
   grupo?: string;
   imageUrl?: string;
 }
@@ -23,6 +26,9 @@ const UpdateProductService = async ({
   quantity,
   isMenuProduct,
   variablePrice,
+  allowsHalfAndHalf,
+  halfAndHalfPriceRule,
+  halfAndHalfGrupo,
   grupo,
   imageUrl,
 }: Request): Promise<Product> => {
@@ -62,6 +68,18 @@ const UpdateProductService = async ({
 
   if (variablePrice !== undefined) {
     product.variablePrice = variablePrice;
+  }
+
+  if (allowsHalfAndHalf !== undefined) {
+    product.allowsHalfAndHalf = allowsHalfAndHalf;
+  }
+
+  if (halfAndHalfPriceRule !== undefined) {
+    product.halfAndHalfPriceRule = halfAndHalfPriceRule?.trim() || null;
+  }
+
+  if (halfAndHalfGrupo !== undefined) {
+    product.halfAndHalfGrupo = halfAndHalfGrupo?.trim() || null;
   }
 
   if (grupo !== undefined) {

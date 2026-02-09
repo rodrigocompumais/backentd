@@ -11,6 +11,9 @@ interface Request {
   grupo?: string;
   imageUrl?: string;
   companyId: number;
+  allowsHalfAndHalf?: boolean;
+  halfAndHalfPriceRule?: string | null;
+  halfAndHalfGrupo?: string | null;
 }
 
 const CreateProductService = async ({
@@ -20,6 +23,9 @@ const CreateProductService = async ({
   quantity = 0,
   isMenuProduct = false,
   variablePrice = false,
+  allowsHalfAndHalf = false,
+  halfAndHalfPriceRule,
+  halfAndHalfGrupo,
   grupo,
   imageUrl,
   companyId,
@@ -39,6 +45,9 @@ const CreateProductService = async ({
     quantity: quantity || 0,
     isMenuProduct: isMenuProduct || false,
     variablePrice: variablePrice || false,
+    allowsHalfAndHalf: allowsHalfAndHalf || false,
+    halfAndHalfPriceRule: halfAndHalfPriceRule?.trim() || null,
+    halfAndHalfGrupo: halfAndHalfGrupo?.trim() || null,
     grupo: grupo?.trim() || null,
     imageUrl: imageUrl?.trim() || null,
     companyId,

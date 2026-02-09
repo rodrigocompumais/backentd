@@ -462,73 +462,121 @@ const ProcessFormResponseService = async ({
     }
   }
 
-  // Create print job for menu form if print device configured
+  // Create print job(s) for menu form according to mesaPrintConfig / deliveryPrintDeviceIds
   if (isMenuForm && menuItems && menuItems.length > 0) {
     try {
       const formSettings = form.settings as any;
-      const printDeviceId = formSettings?.printDeviceId;
+      const printDeviceId = formSettings?.printDeviceId as number | undefined;
+      const mesaPrintConfig = formSettings?.mesaPrintConfig as Array<{ printDeviceId: number; groupNames: string[] }> | undefined;
+      const deliveryPrintDeviceIds = formSettings?.deliveryPrintDeviceIds as number[] | undefined;
 
-      if (printDeviceId) {
-        const printDevice = await PrintDevice.findOne({
-          where: { id: printDeviceId, companyId: form.companyId }
-        });
+      let meta = (response.metadata || metadata || {}) as Record<string, unknown>;
+      if (meta?.orderType === "delivery") {
+        const fresh = await FormResponse.findByPk(response.id, { attributes: ["metadata"] });
+        if (fresh?.metadata) meta = fresh.metadata as Record<string, unknown>;
+        let scanToken = meta?.deliveryScanToken as string | undefined;
+        if (!scanToken) {
+          scanToken = createDeliveryScanToken(form.companyId, form.id, response.id);
+          await response.update({
+            metadata: { ...meta, deliveryScanToken: scanToken },
+          });
+          meta = { ...meta, deliveryScanToken: scanToken };
+        }
+      }
 
-        if (printDevice) {
-          // Para pedido delivery, recarregar response para ter metadata.deliveryScanToken atualizado
-          let meta = (response.metadata || metadata || {}) as Record<string, unknown>;
-          if (meta?.orderType === "delivery") {
-            const fresh = await FormResponse.findByPk(response.id, { attributes: ["metadata"] });
-            if (fresh?.metadata) meta = fresh.metadata as Record<string, unknown>;
-            let scanToken = meta?.deliveryScanToken as string | undefined;
-            if (!scanToken) {
-              scanToken = createDeliveryScanToken(form.companyId, form.id, response.id);
-              await response.update({
-                metadata: { ...meta, deliveryScanToken: scanToken },
-              });
-              meta = { ...meta, deliveryScanToken: scanToken };
-            }
+      const tableNumber = (meta?.tableNumber as string) || "";
+      const garcomName = (meta?.garcomName as string) || "";
+      const allMenuItems = normalizedMenuItems && normalizedMenuItems.length > 0 ? normalizedMenuItems : menuItems;
+      const orderType = meta?.orderType === "delivery" ? "delivery" : "mesa";
+
+      const buildConteudo = (menuItemsForJob: typeof allMenuItems): Record<string, unknown> => {
+        const conteudo: Record<string, unknown> = {
+          event: "form.submitted",
+          formId: form.id,
+          formName: form.name,
+          responseId: response.id,
+          protocol: response.protocol,
+          submittedAt: response.submittedAt,
+          tableNumber,
+          garcomName,
+          responder: {
+            name: contactName,
+            phone: contactPhone,
+            email: contactEmail,
+          },
+          answers: answers.map((answer) => {
+            const field = fields.find((f) => f.id === answer.fieldId);
+            return {
+              fieldId: answer.fieldId,
+              label: field?.label || "",
+              answer: answer.answer,
+            };
+          }),
+          menuItems: menuItemsForJob,
+        };
+        if (orderType === "delivery" && meta?.deliveryScanToken) {
+          const token = meta.deliveryScanToken as string;
+          conteudo.deliveryScanToken = token;
+          const baseUrl = process.env.FRONTEND_URL || process.env.BACKEND_URL || "";
+          if (baseUrl) {
+            conteudo.deliveryScanUrl = `${baseUrl.replace(/\/$/, "")}/entregador?t=${encodeURIComponent(token)}`;
           }
-          const tableNumber = (meta?.tableNumber as string) || "";
-          const garcomName = (meta?.garcomName as string) || "";
-          const conteudo: Record<string, unknown> = {
-            event: "form.submitted",
-            formId: form.id,
-            formName: form.name,
-            responseId: response.id,
-            protocol: response.protocol,
-            submittedAt: response.submittedAt,
-            tableNumber,
-            garcomName,
-            responder: {
-              name: contactName,
-              phone: contactPhone,
-              email: contactEmail,
-            },
-            answers: answers.map((answer) => {
-              const field = fields.find((f) => f.id === answer.fieldId);
-              return {
-                fieldId: answer.fieldId,
-                label: field?.label || "",
-                answer: answer.answer,
-              };
-            }),
-            menuItems: normalizedMenuItems && normalizedMenuItems.length > 0 ? normalizedMenuItems : menuItems,
-          };
-          if (meta?.orderType === "delivery" && meta?.deliveryScanToken) {
-            const token = meta.deliveryScanToken as string;
-            conteudo.deliveryScanToken = token;
-            const baseUrl = process.env.FRONTEND_URL || process.env.BACKEND_URL || "";
-            if (baseUrl) {
-              conteudo.deliveryScanUrl = `${baseUrl.replace(/\/$/, "")}/entregador?t=${encodeURIComponent(token)}`;
-            }
-          }
+        }
+        return conteudo;
+      };
 
+      if (orderType === "delivery") {
+        const deviceIds: number[] = deliveryPrintDeviceIds?.length
+          ? deliveryPrintDeviceIds
+          : printDeviceId
+            ? [printDeviceId]
+            : [];
+        for (const id of deviceIds) {
+          const printDevice = await PrintDevice.findOne({
+            where: { id, companyId: form.companyId },
+          });
+          if (printDevice) {
+            await CreateAndDispatchPrintJobService({
+              companyId: form.companyId,
+              deviceId: printDevice.deviceId,
+              formId: form.id,
+              formResponseId: response.id,
+              conteudo: buildConteudo(allMenuItems),
+            });
+          }
+        }
+      } else {
+        const config: Array<{ printDeviceId: number; groupNames: string[] }> =
+          mesaPrintConfig?.length
+            ? mesaPrintConfig
+            : printDeviceId
+              ? [{ printDeviceId, groupNames: ["*"] }]
+              : [];
+        const byDevice = new Map<number, Set<string>>();
+        for (const row of config) {
+          if (!byDevice.has(row.printDeviceId)) {
+            byDevice.set(row.printDeviceId, new Set());
+          }
+          row.groupNames.forEach((g) => byDevice.get(row.printDeviceId)!.add(g));
+        }
+        for (const [devId, groupNames] of byDevice.entries()) {
+          const printDevice = await PrintDevice.findOne({
+            where: { id: devId, companyId: form.companyId },
+          });
+          if (!printDevice) continue;
+          const names = Array.from(groupNames);
+          const allGroups = names.includes("*");
+          const filtered = allMenuItems.filter((item: any) => {
+            const grupo = (item.grupo || "Outros").trim() || "Outros";
+            return allGroups || names.includes(grupo);
+          });
+          if (filtered.length === 0) continue;
           await CreateAndDispatchPrintJobService({
             companyId: form.companyId,
             deviceId: printDevice.deviceId,
             formId: form.id,
             formResponseId: response.id,
-            conteudo,
+            conteudo: buildConteudo(filtered),
           });
         }
       }

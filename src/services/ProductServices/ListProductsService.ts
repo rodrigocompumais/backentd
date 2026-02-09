@@ -6,12 +6,14 @@ interface Request {
   searchParam?: string;
   pageNumber?: number;
   isMenuProduct?: boolean;
+  grupo?: string;
 }
 
 interface Response {
   products: Product[];
   count: number;
   hasMore: boolean;
+  groups?: string[];
 }
 
 const ListProductsService = async ({
@@ -19,6 +21,7 @@ const ListProductsService = async ({
   searchParam,
   pageNumber = 1,
   isMenuProduct,
+  grupo,
 }: Request): Promise<Response> => {
   const whereCondition: any = { companyId };
 
@@ -34,6 +37,10 @@ const ListProductsService = async ({
     whereCondition.isMenuProduct = isMenuProduct;
   }
 
+  if (grupo !== undefined && grupo !== null && grupo !== "") {
+    whereCondition.grupo = grupo;
+  }
+
   const limit = 20;
   const offset = (pageNumber - 1) * limit;
 
@@ -44,10 +51,18 @@ const ListProductsService = async ({
     order: [["createdAt", "DESC"]],
   });
 
+  const groupsResult = await Product.findAll({
+    where: { companyId },
+    attributes: ["grupo"],
+    raw: true,
+  });
+  const groups = [...new Set((groupsResult.map((r) => r.grupo).filter((g) => g != null && g.trim() !== "")))].sort();
+
   return {
     products,
     count,
     hasMore: count > offset + limit,
+    groups,
   };
 };
 

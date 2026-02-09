@@ -12,13 +12,14 @@ import AppError from "../errors/AppError";
 
 export const index = async (req: Request, res: Response): Promise<Response> => {
   const { companyId } = req.user;
-  const { searchParam, pageNumber, isMenuProduct } = req.query;
+  const { searchParam, pageNumber, isMenuProduct, grupo } = req.query;
 
   const result = await ListProductsService({
     companyId,
     searchParam: searchParam as string,
     pageNumber: pageNumber ? Number(pageNumber) : 1,
     isMenuProduct: isMenuProduct !== undefined ? isMenuProduct === "true" : undefined,
+    grupo: grupo as string,
   });
 
   return res.json(result);

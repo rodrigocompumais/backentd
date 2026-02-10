@@ -67,15 +67,19 @@ export async function dispatchJob(job: PrintPedido): Promise<boolean> {
     return false;
   }
 
-  if (!isAgentConnected(job.companyId, job.deviceId)) {
+  const isConnected = isAgentConnected(job.companyId, job.deviceId);
+  logger.info(`Print job ${job.id}: checking agent connection - companyId=${job.companyId}, deviceId=${job.deviceId}, connected=${isConnected}`);
+  
+  if (!isConnected) {
     await job.update({
       status: "pending",
       tentativas: job.tentativas
     });
-    logger.info(`Print job ${job.id}: no agent connected, will retry later`);
+    logger.warn(`Print job ${job.id}: no agent connected for deviceId=${job.deviceId}, will retry later`);
     return false;
   }
 
+  logger.info(`Print job ${job.id}: sending to deviceId=${job.deviceId}, companyId=${job.companyId}`);
   const sent = sendPrintJob(job.companyId, job.deviceId, {
     id: job.id,
     conteudo: job.conteudo || {}
@@ -86,11 +90,11 @@ export async function dispatchJob(job: PrintPedido): Promise<boolean> {
       status: "pending",
       tentativas: job.tentativas
     });
-    logger.warn(`Print job ${job.id}: failed to send via WebSocket`);
+    logger.warn(`Print job ${job.id}: failed to send via WebSocket to deviceId=${job.deviceId}`);
     return false;
   }
 
-  logger.info(`Print job ${job.id} dispatched to agent`);
+  logger.info(`Print job ${job.id} dispatched successfully to agent (deviceId=${job.deviceId})`);
   return true;
 }
 

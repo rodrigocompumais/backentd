@@ -131,20 +131,83 @@ export function initPrintWebSocket(httpServer: HttpServer): void {
     const { token, deviceId } = extractAuthFromRequest(request);
 
     if (!token || !deviceId) {
-      logger.warn("Print WS upgrade rejected: missing token or X-Device-Id");
+      logger.warn("Print WS upgrade rejected: missing token or X-Device-Id", {
+        hasToken: !!token,
+        hasDeviceId: !!deviceId,
+        tokenLength: token?.length || 0,
+        deviceIdLength: deviceId?.length || 0
+      });
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();
       return;
     }
 
+    // Buscar dispositivo com token e deviceId
+    // extractAuthFromRequest já faz trim, então usamos os valores diretamente
+    logger.info("Print WS auth attempt:", {
+      deviceId: deviceId || "null",
+      tokenLength: token?.length || 0,
+      tokenPreview: token ? token.substring(0, 20) + "..." : "null"
+    });
+    
     PrintDevice.findOne({
-      where: { token, deviceId }
+      where: { 
+        token: token,
+        deviceId: deviceId
+      }
     })
       .then((device) => {
         if (!device) {
-          logger.warn("Print WS upgrade rejected: invalid token or deviceId");
-          socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
-          socket.destroy();
+          // Tentar buscar apenas por deviceId para ver se existe
+          return PrintDevice.findOne({
+            where: { deviceId: deviceId }
+          }).then((deviceByDeviceId) => {
+            if (deviceByDeviceId) {
+              logger.warn("Print WS upgrade rejected: token mismatch", {
+                deviceId: deviceId || "null",
+                tokenReceivedPreview: token ? token.substring(0, 20) + "..." : "null",
+                tokenExpectedPreview: deviceByDeviceId.token.substring(0, 20) + "...",
+                tokenReceivedLength: token?.length || 0,
+                tokenExpectedLength: deviceByDeviceId.token.length,
+                hint: `O token no agente não corresponde ao token no banco. DeviceId "${deviceId}" existe, mas o token está incorreto. Copie o token correto do PrintDevice no banco de dados.`
+              });
+            } else {
+              logger.warn("Print WS upgrade rejected: deviceId not found", {
+                deviceId: deviceId || "null",
+                tokenPreview: token ? token.substring(0, 20) + "..." : "null",
+                hint: `DeviceId "${deviceId}" não existe no banco de dados. Crie um PrintDevice com este deviceId primeiro.`
+              });
+            }
+            
+            // Listar alguns dispositivos disponíveis para debug (sem expor tokens completos)
+            return PrintDevice.findAll({
+              attributes: ['id', 'deviceId', 'name', 'companyId', 'token'],
+              limit: 10
+            }).then((devices) => {
+              logger.debug("Available devices:", devices.map(d => ({
+                id: d.id,
+                deviceId: d.deviceId,
+                name: d.name,
+                companyId: d.companyId,
+                tokenPreview: d.token.substring(0, 20) + "...",
+                tokenLength: d.token.length
+              })));
+              
+              socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+              socket.destroy();
+              return null;
+            });
+          });
+        }
+        logger.info("Print WS auth successful:", {
+          deviceId: device.deviceId,
+          companyId: device.companyId,
+          name: device.name
+        });
+        return device;
+      })
+      .then((device) => {
+        if (!device) {
           return;
         }
 
@@ -182,21 +245,30 @@ export function sendPrintJob(
   const key = getConnectionKey(companyId, deviceId);
   const conn = connections.get(key);
 
-  if (!conn || conn.ws.readyState !== WebSocket.OPEN) {
+  logger.info(`sendPrintJob: Looking for connection with key=${key} (companyId=${companyId}, deviceId=${deviceId})`);
+  logger.info(`sendPrintJob: Available connections: ${Array.from(connections.keys()).join(", ")}`);
+
+  if (!conn) {
+    logger.warn(`sendPrintJob: No connection found for key=${key} (companyId=${companyId}, deviceId=${deviceId})`);
+    return false;
+  }
+
+  if (conn.ws.readyState !== WebSocket.OPEN) {
+    logger.warn(`sendPrintJob: Connection exists but WebSocket is not OPEN (state=${conn.ws.readyState}) for key=${key}`);
     return false;
   }
 
   try {
-    conn.ws.send(
-      JSON.stringify({
-        event: "print_job",
-        job_id: job.id,
-        conteudo: job.conteudo
-      })
-    );
+    const message = JSON.stringify({
+      event: "print_job",
+      job_id: job.id,
+      conteudo: job.conteudo
+    });
+    logger.info(`sendPrintJob: Sending job ${job.id} to deviceId=${deviceId} via WebSocket (key=${key})`);
+    conn.ws.send(message);
     return true;
   } catch (err) {
-    logger.error("Error sending print job via WebSocket:", err);
+    logger.error(`sendPrintJob: Error sending print job ${job.id} via WebSocket to deviceId=${deviceId}:`, err);
     return false;
   }
 }

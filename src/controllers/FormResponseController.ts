@@ -9,6 +9,7 @@ import ResponseAnswer from "../models/ResponseAnswer";
 import ProcessFormResponseService from "../services/FormServices/ProcessFormResponseService";
 import UpdateOrderStatusService from "../services/OrderServices/UpdateOrderStatusService";
 import AppError from "../errors/AppError";
+import { verifyOrderToken } from "../helpers/MesaLinkSign";
 
 const RESPONSES_MAX_AGE_HOURS = 24;
 
@@ -327,16 +328,38 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
   const data = req.body;
 
   // Get form by slug (public endpoint)
-  const form = await Form.findOne({
-    where: { slug, isActive: true },
-  });
+  // Se houver orderToken, verificar e usar o formId do token (garante que pedido de mesa use o formulário correto)
+  let formIdToUse: number | null = null;
+  if (data.orderToken) {
+    const decoded = verifyOrderToken(data.orderToken);
+    if (decoded && decoded.formId) {
+      formIdToUse = decoded.formId;
+      console.log(`FormResponseController: Using formId from orderToken: ${formIdToUse} (slug received: ${slug})`);
+    }
+  }
+
+  // Buscar formulário pelo slug ou pelo formId do orderToken
+  const form = formIdToUse
+    ? await Form.findOne({
+        where: { id: formIdToUse, isActive: true },
+      })
+    : await Form.findOne({
+        where: { slug, isActive: true },
+      });
 
   if (!form) {
     throw new AppError("ERR_FORM_NOT_FOUND", 404);
   }
 
+  // Se orderToken foi fornecido, validar que o formId corresponde
+  if (data.orderToken && formIdToUse && form.id !== formIdToUse) {
+    throw new AppError("ERR_MESA_LINK_INVALID", 403);
+  }
+
   const ipAddress = req.ip || req.headers["x-forwarded-for"] || req.connection.remoteAddress;
   const userAgent = req.headers["user-agent"] || "";
+
+  console.log(`FormResponseController: Processing response for formId=${form.id}, slug=${slug}, hasOrderToken=${!!data.orderToken}`);
 
   const response = await ProcessFormResponseService({
     formId: form.id,

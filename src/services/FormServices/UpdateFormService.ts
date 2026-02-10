@@ -2,6 +2,8 @@ import Form from "../../models/Form";
 import FormField from "../../models/FormField";
 import AppError from "../../errors/AppError";
 import HasCompanyModuleService, { MODULE_LANCHONETES } from "../CompanyModuleServices/HasCompanyModuleService";
+import sequelize from "../../database";
+import { QueryTypes } from "sequelize";
 
 interface Field {
   id?: number;
@@ -69,8 +71,112 @@ const UpdateFormService = async ({
   const oldIsMenuForm = (form.settings as any)?.formType === "cardapio";
   const oldIsAnonymous = form.isAnonymous;
 
-  await form.update(formData);
-  await form.reload();
+  // Log para debug - verificar o que está sendo recebido
+  if (formData.settings) {
+    const settings = formData.settings as any;
+    console.log("UpdateFormService: Received settings with mesaPrintConfig:", settings.mesaPrintConfig);
+    console.log("UpdateFormService: Received settings with deliveryPrintDeviceIds:", settings.deliveryPrintDeviceIds);
+    console.log("UpdateFormService: Full received settings:", JSON.stringify(settings, null, 2));
+  }
+
+  // Se settings foi fornecido, fazer merge com settings existente para preservar outros campos
+  // IMPORTANTE: Arrays vazios devem ser substituídos, não preservados
+  if (formData.settings) {
+    const currentSettings = (form.settings as any) || {};
+    const newSettingsData = formData.settings as any;
+    
+    // Fazer merge, mas substituir arrays vazios explicitamente
+    const newSettings: any = {
+      ...currentSettings,
+      ...newSettingsData,
+    };
+    
+    // Se mesaPrintConfig foi fornecido (mesmo que vazio), usar o valor fornecido
+    if (newSettingsData.hasOwnProperty('mesaPrintConfig')) {
+      newSettings.mesaPrintConfig = newSettingsData.mesaPrintConfig;
+    }
+    
+    // Se deliveryPrintDeviceIds foi fornecido (mesmo que vazio), usar o valor fornecido
+    if (newSettingsData.hasOwnProperty('deliveryPrintDeviceIds')) {
+      newSettings.deliveryPrintDeviceIds = newSettingsData.deliveryPrintDeviceIds;
+    }
+    
+    formData.settings = newSettings;
+    console.log("UpdateFormService: Merged settings:", JSON.stringify(newSettings, null, 2));
+    console.log("UpdateFormService: mesaPrintConfig in merged settings:", newSettings.mesaPrintConfig);
+  }
+
+  // Se settings foi fornecido, garantir que seja salvo completamente (não fazer merge parcial)
+  if (formData.settings) {
+    // Usar query SQL direta para substituir completamente o JSONB (evita merge parcial do Sequelize)
+    const settingsJson = JSON.stringify(formData.settings);
+    console.log("UpdateFormService: Updating settings with SQL query");
+    console.log("UpdateFormService: mesaPrintConfig being saved:", (formData.settings as any).mesaPrintConfig);
+    console.log("UpdateFormService: Full settings JSON:", settingsJson.substring(0, 500) + "...");
+    
+    // Executar query SQL para substituir completamente o settings
+    await sequelize.query(
+      `UPDATE "Forms" SET "settings" = :settings::jsonb, "updatedAt" = NOW() WHERE "id" = :formId AND "companyId" = :companyId`,
+      {
+        replacements: {
+          settings: settingsJson,
+          formId: form.id,
+          companyId: form.companyId
+        }
+      }
+    );
+    
+    // Verificar diretamente no banco se foi salvo corretamente
+    const [verifyResult]: any = await sequelize.query(
+      `SELECT "settings" FROM "Forms" WHERE "id" = :formId AND "companyId" = :companyId`,
+      {
+        replacements: {
+          formId: form.id,
+          companyId: form.companyId
+        },
+        type: QueryTypes.SELECT
+      }
+    );
+    
+    if (verifyResult && verifyResult.settings) {
+      const savedSettings = verifyResult.settings;
+      console.log("UpdateFormService: Verified settings from DB after SQL update:", JSON.stringify(savedSettings, null, 2).substring(0, 1000));
+      console.log("UpdateFormService: mesaPrintConfig in verified settings:", savedSettings?.mesaPrintConfig);
+    }
+    
+    // Atualizar outros campos normalmente
+    const { settings, ...otherFields } = formData;
+    if (Object.keys(otherFields).length > 0) {
+      await form.update(otherFields);
+    }
+    
+    // Fazer reload explícito ANTES de verificar
+    await form.reload();
+    
+    // Verificar imediatamente após reload
+    const immediateSettings = form.settings as any;
+    console.log("UpdateFormService: Settings immediately after reload:", JSON.stringify(immediateSettings, null, 2).substring(0, 1000));
+    console.log("UpdateFormService: mesaPrintConfig immediately after reload:", immediateSettings?.mesaPrintConfig);
+  } else {
+    await form.update(formData);
+    await form.reload();
+  }
+  
+  // Log para debug - verificar o que foi salvo
+  const savedSettings = form.settings as any;
+  console.log("UpdateFormService: Saved settings with mesaPrintConfig:", savedSettings?.mesaPrintConfig);
+  console.log("UpdateFormService: Saved settings with deliveryPrintDeviceIds:", savedSettings?.deliveryPrintDeviceIds);
+  
+  // Verificar diretamente no banco se necessário
+  const rawForm = await Form.findByPk(formId, { 
+    attributes: ['id', 'settings'],
+    raw: false 
+  });
+  if (rawForm) {
+    const rawSettings = (rawForm as any).settings;
+    console.log("UpdateFormService: Raw settings from DB after save:", JSON.stringify(rawSettings, null, 2));
+    console.log("UpdateFormService: mesaPrintConfig in raw settings:", rawSettings?.mesaPrintConfig);
+  }
 
   // Verificar se é formulário de cotação ou cardápio (após atualização)
   const formSettings = form.settings as any;

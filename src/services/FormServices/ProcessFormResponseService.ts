@@ -198,6 +198,12 @@ const ProcessFormResponseService = async ({
     throw new AppError("ERR_FORM_NOT_FOUND", 404);
   }
 
+  // Log para debug - verificar o que foi carregado do banco
+  const loadedSettings = form.settings as any;
+  console.log("ProcessFormResponseService: Loaded form settings from DB:", JSON.stringify(loadedSettings, null, 2));
+  console.log("ProcessFormResponseService: Loaded mesaPrintConfig from DB:", loadedSettings?.mesaPrintConfig);
+  console.log("ProcessFormResponseService: Loaded deliveryPrintDeviceIds from DB:", loadedSettings?.deliveryPrintDeviceIds);
+
   if (!form.isActive) {
     throw new AppError("ERR_FORM_INACTIVE", 400);
   }
@@ -466,9 +472,13 @@ const ProcessFormResponseService = async ({
   if (isMenuForm && menuItems && menuItems.length > 0) {
     try {
       const formSettings = form.settings as any;
+      console.log("ProcessFormResponseService: formSettings at print job creation:", JSON.stringify(formSettings, null, 2));
+      
       const printDeviceId = formSettings?.printDeviceId as number | undefined;
       const mesaPrintConfig = formSettings?.mesaPrintConfig as Array<{ printDeviceId: number; groupNames: string[] }> | undefined;
       const deliveryPrintDeviceIds = formSettings?.deliveryPrintDeviceIds as number[] | undefined;
+      
+      console.log("ProcessFormResponseService: Extracted values - printDeviceId:", printDeviceId, "mesaPrintConfig:", mesaPrintConfig, "deliveryPrintDeviceIds:", deliveryPrintDeviceIds);
 
       let meta = (response.metadata || metadata || {}) as Record<string, unknown>;
       if (meta?.orderType === "delivery") {
@@ -526,16 +536,26 @@ const ProcessFormResponseService = async ({
       };
 
       if (orderType === "delivery") {
+        // Configuração de impressão para pedidos de delivery
         const deviceIds: number[] = deliveryPrintDeviceIds?.length
           ? deliveryPrintDeviceIds
           : printDeviceId
             ? [printDeviceId]
             : [];
+        
+        console.log(`ProcessFormResponseService: Delivery order - printing to ${deviceIds.length} device(s): ${deviceIds.join(", ")}`);
+        
         for (const id of deviceIds) {
+          if (!id || id <= 0) {
+            console.warn(`ProcessFormResponseService: Invalid device ID for delivery: ${id}`);
+            continue;
+          }
+          
           const printDevice = await PrintDevice.findOne({
             where: { id, companyId: form.companyId },
           });
           if (printDevice) {
+            console.log(`ProcessFormResponseService: Creating delivery print job for device ${printDevice.deviceId} (deviceId: ${printDevice.deviceId})`);
             await CreateAndDispatchPrintJobService({
               companyId: form.companyId,
               deviceId: printDevice.deviceId,
@@ -543,34 +563,90 @@ const ProcessFormResponseService = async ({
               formResponseId: response.id,
               conteudo: buildConteudo(allMenuItems),
             });
+          } else {
+            console.warn(`ProcessFormResponseService: PrintDevice not found for delivery: id=${id}, companyId=${form.companyId}`);
           }
         }
       } else {
+        // Configuração de impressão para pedidos de mesa/garçom
+        console.log(`ProcessFormResponseService: Raw mesaPrintConfig:`, JSON.stringify(mesaPrintConfig, null, 2));
+        
         const config: Array<{ printDeviceId: number; groupNames: string[] }> =
           mesaPrintConfig?.length
             ? mesaPrintConfig
             : printDeviceId
               ? [{ printDeviceId, groupNames: ["*"] }]
               : [];
+        
+        console.log(`ProcessFormResponseService: Parsed config has ${config.length} row(s):`, config);
+        
+        // Agrupar grupos por dispositivo (evita duplicação se mesma impressora tem múltiplas linhas)
         const byDevice = new Map<number, Set<string>>();
         for (const row of config) {
+          // Validar que printDeviceId existe e é válido
+          if (!row.printDeviceId || row.printDeviceId <= 0) {
+            console.warn(`ProcessFormResponseService: Invalid printDeviceId in config: ${row.printDeviceId}`);
+            continue;
+          }
           if (!byDevice.has(row.printDeviceId)) {
             byDevice.set(row.printDeviceId, new Set());
           }
-          row.groupNames.forEach((g) => byDevice.get(row.printDeviceId)!.add(g));
+          // Garantir que groupNames é um array
+          const groupNamesArray = Array.isArray(row.groupNames) ? row.groupNames : [];
+          groupNamesArray.forEach((g) => {
+            if (g && g.trim()) {
+              byDevice.get(row.printDeviceId)!.add(g.trim());
+            }
+          });
+          console.log(`ProcessFormResponseService: Device ${row.printDeviceId} configured with groups: ${groupNamesArray.join(", ")}`);
         }
+        
+        // Log dos grupos de cada item do menu para debug
+        console.log(`ProcessFormResponseService: Menu items and their groups:`, 
+          allMenuItems.map((item: any) => ({
+            name: item.productName || item.name,
+            grupo: (item.grupo || "Outros").trim() || "Outros"
+          }))
+        );
+
+        // Processar cada dispositivo configurado
+        console.log(`ProcessFormResponseService: Processing mesa order with ${allMenuItems.length} total items`);
+        console.log(`ProcessFormResponseService: Config has ${byDevice.size} device(s) configured`);
+        
         for (const [devId, groupNames] of byDevice.entries()) {
           const printDevice = await PrintDevice.findOne({
             where: { id: devId, companyId: form.companyId },
           });
-          if (!printDevice) continue;
+          if (!printDevice) {
+            console.warn(`ProcessFormResponseService: PrintDevice not found: id=${devId}, companyId=${form.companyId}`);
+            continue;
+          }
+          
           const names = Array.from(groupNames);
           const allGroups = names.includes("*");
+          
+          console.log(`ProcessFormResponseService: Processing device ${printDevice.deviceId} (id=${devId}) with groups: ${names.join(", ")} (allGroups=${allGroups})`);
+          
+          // Filtrar itens do menu que pertencem aos grupos configurados para esta impressora
           const filtered = allMenuItems.filter((item: any) => {
-            const grupo = (item.grupo || "Outros").trim() || "Outros";
-            return allGroups || names.includes(grupo);
+            const itemGrupo = (item.grupo || "Outros").trim() || "Outros";
+            const matches = allGroups || names.some(g => g.trim().toLowerCase() === itemGrupo.toLowerCase());
+            
+            if (matches) {
+              console.log(`ProcessFormResponseService: Item "${item.productName || item.name}" (grupo="${itemGrupo}") matches device ${printDevice.deviceId}`);
+            }
+            
+            return matches;
           });
-          if (filtered.length === 0) continue;
+          
+          if (filtered.length === 0) {
+            console.log(`ProcessFormResponseService: No items to print for device ${printDevice.deviceId} (groups: ${names.join(", ")})`);
+            continue;
+          }
+          
+          console.log(`ProcessFormResponseService: Creating print job for device ${printDevice.deviceId} (deviceId: ${printDevice.deviceId}) with ${filtered.length} items out of ${allMenuItems.length} total (groups: ${names.join(", ")})`);
+          console.log(`ProcessFormResponseService: Filtered items: ${filtered.map((item: any) => `${item.productName || item.name} (${(item.grupo || "Outros").trim()})`).join(", ")}`);
+          
           await CreateAndDispatchPrintJobService({
             companyId: form.companyId,
             deviceId: printDevice.deviceId,

@@ -2236,6 +2236,16 @@ export const verifyMediaMessage = async (
   if (initialAck === undefined || initialAck === null) {
     initialAck = msg.key.fromMe ? 1 : 0;
   }
+  
+  // Para mensagens enviadas em grupos, sempre marcar como enviada (ACK = 1)
+  // pois o WhatsApp não retorna confirmações de entrega/visualização para grupos
+  if (msg.key.fromMe && ticket.isGroup) {
+    initialAck = 1;
+    logger.debug('ACK forçado para 1 (enviada) - mensagem de mídia em grupo na criação', {
+      messageId: msg.key.id,
+      ticketId: ticket.id
+    });
+  }
 
   const messageData = {
     id: msg.key.id,
@@ -2344,6 +2354,16 @@ export const verifyMessage = async (
     // fromMe: começa em 1 (pendente/enviando)
     // !fromMe: começa em 0 (recebida)
     initialAck = msg.key.fromMe ? 1 : 0;
+  }
+  
+  // Para mensagens enviadas em grupos, sempre marcar como enviada (ACK = 1)
+  // pois o WhatsApp não retorna confirmações de entrega/visualização para grupos
+  if (msg.key.fromMe && ticket.isGroup) {
+    initialAck = 1;
+    logger.debug('ACK forçado para 1 (enviada) - mensagem em grupo na criação', {
+      messageId: msg.key.id,
+      ticketId: ticket.id
+    });
   }
 
   const messageData = {
@@ -4717,9 +4737,26 @@ const handleMsgAck = async (
     }
     if (!messageToUpdate) return;
 
-    if (messageToUpdate.ack === chat) return;
+    // Para mensagens em grupos, sempre marcar como enviada (ACK = 1)
+    // pois o WhatsApp não retorna confirmações de entrega/visualização para grupos
+    let ackToSet = chat;
+    if (messageToUpdate.fromMe) {
+      const ticket = await Ticket.findByPk(messageToUpdate.ticketId, {
+        attributes: ["id", "isGroup"]
+      });
+      if (ticket && ticket.isGroup) {
+        // Forçar ACK = 1 (enviada) para grupos
+        ackToSet = 1;
+        logger.debug('ACK forçado para 1 (enviada) - mensagem em grupo', {
+          messageId: messageToUpdate.id,
+          ticketId: messageToUpdate.ticketId
+        });
+      }
+    }
 
-    await messageToUpdate.update({ ack: chat });
+    if (messageToUpdate.ack === ackToSet) return;
+
+    await messageToUpdate.update({ ack: ackToSet });
 
     logger.debug('ACK atualizado', { messageId: messageToUpdate.id, ticketId: messageToUpdate.ticketId, ack: chat });
 

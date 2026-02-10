@@ -19,8 +19,15 @@ const ListContactsService = async ({
   pageNumber = "1",
   companyId
 }: Request): Promise<Response> => {
-  const whereCondition = {
-    [Op.or]: [
+  const whereCondition: any = {
+    companyId: {
+      [Op.eq]: companyId
+    }
+  };
+
+  // Adicionar busca apenas se searchParam não estiver vazio
+  if (searchParam && searchParam.trim()) {
+    whereCondition[Op.or] = [
       {
         name: Sequelize.where(
           Sequelize.fn("LOWER", Sequelize.col("Contact.name")),
@@ -29,11 +36,8 @@ const ListContactsService = async ({
         )
       },
       { number: { [Op.like]: `%${searchParam.toLowerCase().trim()}%` } }
-    ],
-    companyId: {
-      [Op.eq]: companyId
-    }
-  };
+    ];
+  }
   const limit = 30;
   const offset = limit * (+pageNumber - 1);
 
@@ -53,10 +57,12 @@ const ListContactsService = async ({
       ]
     });
 
+    const hasMore = count > offset + contacts.length;
+
     return {
       contacts,
       count,
-      hasMore: count > offset + contacts.length
+      hasMore
     };
   } catch (error: any) {
     // Se houver erro com o include (coluna userId pode não existir ainda), tentar sem o include
@@ -68,10 +74,12 @@ const ListContactsService = async ({
       order: [[Sequelize.col("Contact.name"), "ASC"]]
     });
 
+    const hasMore = count > offset + contacts.length;
+
     return {
       contacts,
       count,
-      hasMore: count > offset + contacts.length
+      hasMore
     };
   }
 

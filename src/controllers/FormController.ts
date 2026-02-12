@@ -24,7 +24,8 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
   }
 
   const isCardapioOnly = formType === "cardapio";
-  const limit = isCardapioOnly ? 100 : 20;
+  const isAgendamentoOnly = formType === "agendamento";
+  const limit = isCardapioOnly || isAgendamentoOnly ? 100 : 20;
   const offset = pageNumber ? (Number(pageNumber) - 1) * limit : 0;
 
   const findOptions: any = {
@@ -48,6 +49,8 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
   const { count, rows: formsRaw } = await Form.findAndCountAll(findOptions);
   const forms = isCardapioOnly
     ? formsRaw.filter((f) => (f.settings as any)?.formType === "cardapio")
+    : isAgendamentoOnly
+    ? formsRaw.filter((f) => (f.settings as any)?.formType === "agendamento")
     : formsRaw;
 
   const formsWithStats = forms.map((form) => {
@@ -64,8 +67,8 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
 
   return res.json({
     forms: formsWithStats,
-    count: isCardapioOnly ? formsWithStats.length : count,
-    hasMore: isCardapioOnly ? false : count > offset + limit,
+    count: isCardapioOnly || isAgendamentoOnly ? formsWithStats.length : count,
+    hasMore: isCardapioOnly || isAgendamentoOnly ? false : count > offset + limit,
   });
 };
 

@@ -11,6 +11,8 @@ import cron from "node-cron";
 import TestAllGeminiApiKeysService from "./services/AiServices/TestAllGeminiApiKeysService";
 import RenewSubscriptionService, { findCompaniesNeedingRenewal } from "./services/SubscriptionService/RenewSubscriptionService";
 import CheckRemindersService from "./services/ReminderServices/CheckRemindersService";
+import CheckAgendamentoRemindersService from "./services/AppointmentServices/CheckAgendamentoRemindersService";
+import CheckWaitlistAndNotifyService from "./services/AppointmentServices/CheckWaitlistAndNotifyService";
 import CheckOrderAutoConfirmService from "./services/OrderServices/CheckOrderAutoConfirmService";
 import { Op } from "sequelize";
 import PrintPedido from "./models/PrintPedido";
@@ -88,6 +90,24 @@ cron.schedule("* * * * *", async () => {
     await CheckRemindersService();
   } catch (error: any) {
     logger.error("Erro ao processar lembretes:", error);
+  }
+});
+
+// Job para lembretes de agendamento (formulário público) — reminderHours por form
+cron.schedule("* * * * *", async () => {
+  try {
+    await CheckAgendamentoRemindersService();
+  } catch (error: any) {
+    logger.error("Erro ao processar lembretes de agendamento:", error);
+  }
+});
+
+// Job para lista de espera: verificar vagas e notificar por WhatsApp
+cron.schedule("* * * * *", async () => {
+  try {
+    await CheckWaitlistAndNotifyService();
+  } catch (error: any) {
+    logger.error("Erro ao processar lista de espera:", error);
   }
 });
 

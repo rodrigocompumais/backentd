@@ -58,6 +58,9 @@ import Module from "../models/Module";
 import CompanyModule from "../models/CompanyModule";
 import Mesa from "../models/Mesa";
 import GourmetFinanceiro from "../models/GourmetFinanceiro";
+import AppointmentService from "../models/AppointmentService";
+import Appointment from "../models/Appointment";
+import AppointmentWaitlist from "../models/AppointmentWaitlist";
 
 // eslint-disable-next-line
 const dbConfig = require("../config/database");
@@ -125,6 +128,9 @@ const models = [
   CompanyModule,
   Mesa,
   GourmetFinanceiro,
+  AppointmentService,
+  Appointment,
+  AppointmentWaitlist,
 ];
 
 sequelize.addModels(models);

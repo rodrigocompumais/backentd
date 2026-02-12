@@ -124,3 +124,42 @@ export function verifyDeliveryScanToken(token: string): DecodedDeliveryScanToken
     formResponseId: payload.formResponseId,
   };
 }
+
+// --- Token para cancelar/reagendar agendamento (link no WhatsApp) ---
+const APPOINTMENT_TOKEN_EXPIRY_DAYS = 365;
+
+export interface DecodedAppointmentToken {
+  appointmentId: number;
+}
+
+/** Gera token para link público de cancelar/reagendar agendamento. */
+export function createAppointmentToken(appointmentId: number): string {
+  const payload = JSON.stringify({
+    appointmentId,
+    exp: Math.floor(Date.now() / 1000) + APPOINTMENT_TOKEN_EXPIRY_DAYS * 24 * 60 * 60,
+  });
+  const base = Buffer.from(payload, "utf8").toString("base64url");
+  const sig = crypto.createHmac("sha256", getSecret()).update(base).digest("base64url");
+  return `${base}.${sig}`;
+}
+
+/** Valida token de agendamento. Retorna { appointmentId } ou null. */
+export function verifyAppointmentToken(token: string): DecodedAppointmentToken | null {
+  if (!token || typeof token !== "string") return null;
+  const parts = token.split(".");
+  if (parts.length !== 2) return null;
+  const [base, sig] = parts;
+  const expectedSig = crypto.createHmac("sha256", getSecret()).update(base).digest("base64url");
+  const a = Buffer.from(expectedSig, "utf8");
+  const b = Buffer.from(sig, "utf8");
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  let payload: { appointmentId: number; exp: number };
+  try {
+    payload = JSON.parse(Buffer.from(base, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (!payload.appointmentId || !payload.exp) return null;
+  if (Date.now() / 1000 > payload.exp) return null;
+  return { appointmentId: payload.appointmentId };
+}

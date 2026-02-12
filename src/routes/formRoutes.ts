@@ -3,6 +3,7 @@ import isAuth from "../middleware/isAuth";
 
 import * as FormController from "../controllers/FormController";
 import * as FormResponseController from "../controllers/FormResponseController";
+import * as AppointmentController from "../controllers/AppointmentController";
 
 const routes = express.Router();
 
@@ -33,6 +34,13 @@ routes.get("/forms/:formId/analytics", isAuth, FormResponseController.getAnalyti
 routes.get("/forms/:formId/export", isAuth, FormResponseController.exportData);
 
 // Public routes (no auth)
+routes.get("/public/forms/:slug/appointment-services", AppointmentController.getPublicAppointmentServices);
+routes.get("/public/forms/:slug/availability", AppointmentController.getAvailability);
+routes.get("/public/forms/:slug/appointments/by-token", AppointmentController.getByToken);
+routes.get("/public/forms/:slug/appointments/ical", AppointmentController.getIcalByToken);
+routes.put("/public/forms/:slug/appointments/cancel", AppointmentController.cancelByToken);
+routes.put("/public/forms/:slug/appointments/reschedule", AppointmentController.rescheduleByToken);
+routes.post("/public/forms/:slug/waitlist", AppointmentController.addToWaitlist);
 routes.get("/public/forms/:slug", FormController.getPublicForm);
 routes.post("/public/forms/:slug/submit", FormResponseController.store);
 

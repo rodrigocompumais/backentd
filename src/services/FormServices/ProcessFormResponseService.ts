@@ -18,6 +18,10 @@ import Contact from "../../models/Contact";
 import Ticket from "../../models/Ticket";
 import { verifyOrderToken, createDeliveryScanToken } from "../../helpers/MesaLinkSign";
 import Product from "../../models/Product";
+import Appointment from "../../models/Appointment";
+import AppointmentService from "../../models/AppointmentService";
+import FormatAppointmentConfirmationMessage from "./FormatAppointmentConfirmationMessage";
+import { createAppointmentToken } from "../../helpers/MesaLinkSign";
 import ProductVariation from "../../models/ProductVariation";
 import ProductVariationOption from "../../models/ProductVariationOption";
 
@@ -260,9 +264,17 @@ const ProcessFormResponseService = async ({
   const formSettings = form.settings as any;
   const isQuotationForm = formSettings?.formType === "quotation";
   const isMenuForm = formSettings?.formType === "cardapio";
-  
+  const isAgendamentoForm = formSettings?.formType === "agendamento";
+
   // Prepare metadata with quotationItems or menuItems if applicable
   const responseMetadata: any = metadata || {};
+  if (isAgendamentoForm && metadata) {
+    const meta = metadata as any;
+    if (meta.appointmentServiceId != null) responseMetadata.appointmentServiceId = meta.appointmentServiceId;
+    if (meta.assignedUserId != null) responseMetadata.assignedUserId = meta.assignedUserId;
+    if (meta.startTime != null) responseMetadata.startTime = meta.startTime;
+    if (meta.endTime != null) responseMetadata.endTime = meta.endTime;
+  }
   if (isQuotationForm && quotationItems && quotationItems.length > 0) {
     responseMetadata.quotationItems = quotationItems;
     console.log("ProcessFormResponseService: Saving quotationItems:", quotationItems);
@@ -412,6 +424,55 @@ const ProcessFormResponseService = async ({
     } catch (err) {
       console.error("Error creating ticket from form:", err);
     }
+  }
+
+  // Agendamento: criar Appointment e validar slot
+  if (isAgendamentoForm) {
+    const meta = (response.metadata || responseMetadata) as any;
+    const appointmentServiceId = meta?.appointmentServiceId != null ? Number(meta.appointmentServiceId) : null;
+    const assignedUserId = meta?.assignedUserId != null ? Number(meta.assignedUserId) : null;
+    const startTime = meta?.startTime ? new Date(meta.startTime) : null;
+    const endTime = meta?.endTime ? new Date(meta.endTime) : null;
+
+    if (!appointmentServiceId || !assignedUserId || !startTime || !endTime) {
+      throw new AppError("ERR_AGENDAMENTO_METADATA_REQUIRED", 400);
+    }
+
+    const overlapping = await Appointment.count({
+      where: {
+        companyId: form.companyId,
+        assignedUserId,
+        status: { [Op.in]: ["pending", "confirmed"] },
+        startTime: { [Op.lt]: endTime },
+        endTime: { [Op.gt]: startTime },
+      },
+    });
+    if (overlapping > 0) {
+      throw new AppError("ERR_AGENDAMENTO_SLOT_CONFLICT", 409);
+    }
+
+    const service = await AppointmentService.findOne({
+      where: { id: appointmentServiceId, companyId: form.companyId },
+      include: [{ association: "user", attributes: ["id", "name"] }],
+    });
+    if (!service) {
+      throw new AppError("ERR_APPOINTMENT_SERVICE_NOT_FOUND", 404);
+    }
+
+    await Appointment.create({
+      companyId: form.companyId,
+      formId: form.id,
+      formResponseId: response.id,
+      contactId: contact?.id ?? null,
+      appointmentServiceId,
+      assignedUserId,
+      startTime,
+      endTime,
+      status: "pending",
+      responderName: contactName || null,
+      responderPhone: contactPhone || null,
+      metadata: responseMetadata,
+    });
   }
 
   // Para cardápio com mesa: garantir contact antes do auto-ocupar (mesmo se createContact estiver desligado)
@@ -745,6 +806,71 @@ const ProcessFormResponseService = async ({
     })();
   }
 
+  if (isAgendamentoForm && contactPhone) {
+    (async () => {
+      try {
+        const { getIO } = await import("../../libs/socket");
+        const appointment = await Appointment.findOne({
+          where: { formResponseId: response.id, companyId: form.companyId },
+          include: [
+            { association: "appointmentService", attributes: ["id", "name"] },
+            { association: "assignedUser", attributes: ["id", "name"] },
+          ],
+        });
+        if (!appointment) return;
+        const formSettings = form.settings as any;
+        const selectedWhatsappId = formSettings?.whatsappId;
+        let whatsappToUse;
+        if (selectedWhatsappId) {
+          const Whatsapp = (await import("../../models/Whatsapp")).default;
+          whatsappToUse = await Whatsapp.findOne({
+            where: { id: selectedWhatsappId, companyId: form.companyId, status: "CONNECTED" },
+          });
+          if (!whatsappToUse) whatsappToUse = await GetDefaultWhatsApp(form.companyId);
+        } else {
+          whatsappToUse = await GetDefaultWhatsApp(form.companyId);
+        }
+        if (!whatsappToUse) return;
+        let contactForSend = contact;
+        if (!contactForSend && contactPhone) {
+          contactForSend = await CreateOrUpdateContactService({
+            name: contactName || "Sem nome",
+            number: contactPhone,
+            email: contactEmail,
+            isGroup: false,
+            companyId: form.companyId,
+          });
+        }
+        if (!contactForSend) return;
+        const ticket = await FindOrCreateTicketService(
+          contactForSend,
+          whatsappToUse.id,
+          0,
+          form.companyId
+        );
+        const serviceName = (appointment as any).appointmentService?.name || "Serviço";
+        const professionalName = (appointment as any).assignedUser?.name || "Profissional";
+        const baseUrl = process.env.FRONTEND_URL || process.env.PUBLIC_APP_URL || "";
+        const token = createAppointmentToken(appointment.id);
+        const cancelUrl = baseUrl ? `${baseUrl}/f/${form.slug}/cancelar?token=${token}` : undefined;
+        const rescheduleUrl = baseUrl ? `${baseUrl}/f/${form.slug}/reagendar?token=${token}` : undefined;
+        const msg = FormatAppointmentConfirmationMessage({
+          serviceName,
+          professionalName,
+          startTime: appointment.startTime,
+          endTime: appointment.endTime,
+          customerName: contactName || "Cliente",
+          cancelUrl,
+          rescheduleUrl,
+        });
+        await SendWhatsAppMessage({ body: msg, ticket });
+        getIO().to(`company-${form.companyId}-mainchannel`).emit(`company-${form.companyId}-appointment`, { action: "create" });
+      } catch (err: any) {
+        console.error("ProcessFormResponseService (background) - Agendamento WhatsApp:", err?.message);
+      }
+    })();
+  }
+
   await response.reload({
     include: [
       { association: "answers", include: [{ association: "field" }] },
@@ -756,6 +882,17 @@ const ProcessFormResponseService = async ({
   // Envio WhatsApp é em segundo plano; frontend não deve bloquear
   if (isMenuForm) {
     (response as any).whatsappSent = "pending";
+  }
+
+  // For agendamento form, attach token so frontend can show success page links (reagendar, ical)
+  if (isAgendamentoForm) {
+    const apt = await Appointment.findOne({
+      where: { formResponseId: response.id, companyId: form.companyId },
+    });
+    if (apt) {
+      (response as any).appointmentToken = createAppointmentToken(apt.id);
+      (response as any).appointmentId = apt.id;
+    }
   }
 
   return response;

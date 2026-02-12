@@ -3,13 +3,14 @@ import DashboardDataService, { DashboardData, Params } from "../services/ReportS
 import DashboardExtendedService, { ExtendedParams } from "../services/ReportService/DashboardExtendedService";
 import OrdersStatsService from "../services/ReportService/OrdersStatsService";
 import LanchonetesStatsService from "../services/ReportService/LanchonetesStatsService";
+import AgendamentoStatsService from "../services/ReportService/AgendamentoStatsService";
 import { TicketsAttendance } from "../services/ReportService/TicketsAttendance";
 import { TicketsDayService } from "../services/ReportService/TicketsDayService";
+import DashboardFinancialService from "../services/ReportService/DashboardFinancialService";
 
 type IndexQuery = {
   initialDate: string;
   finalDate: string;
-  companyId: number | any;
 };
 
 export const index = async (req: Request, res: Response): Promise<Response> => {
@@ -25,23 +26,39 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
 };
 
 export const reportsUsers = async (req: Request, res: Response): Promise<Response> => {
-
-  const { initialDate, finalDate, companyId } = req.query as IndexQuery
-
+  const { companyId } = req.user;
+  const { initialDate, finalDate } = req.query as IndexQuery;
+  if (!initialDate || !finalDate) {
+    const to = new Date();
+    const from = new Date();
+    from.setDate(from.getDate() - 7);
+    const { data } = await TicketsAttendance({
+      initialDate: from.toISOString().slice(0, 10),
+      finalDate: to.toISOString().slice(0, 10),
+      companyId,
+    });
+    return res.json({ data });
+  }
   const { data } = await TicketsAttendance({ initialDate, finalDate, companyId });
-
   return res.json({ data });
-
 }
 
 export const reportsDay = async (req: Request, res: Response): Promise<Response> => {
-
-  const { initialDate, finalDate, companyId } = req.query as IndexQuery
-
+  const { companyId } = req.user;
+  const { initialDate, finalDate } = req.query as IndexQuery;
+  if (!initialDate || !finalDate) {
+    const to = new Date();
+    const from = new Date();
+    from.setDate(from.getDate() - 7);
+    const result = await TicketsDayService({
+      initialDate: from.toISOString().slice(0, 10),
+      finalDate: to.toISOString().slice(0, 10),
+      companyId,
+    });
+    return res.json(result);
+  }
   const { count, data } = await TicketsDayService({ initialDate, finalDate, companyId });
-
   return res.json({ count, data });
-
 }
 
 export const extended = async (req: Request, res: Response): Promise<Response> => {
@@ -63,4 +80,16 @@ export const lanchonetesStats = async (req: Request, res: Response): Promise<Res
   const { companyId } = req.user;
   const stats = await LanchonetesStatsService(companyId);
   return res.status(200).json(stats);
+};
+
+export const agendamentoStats = async (req: Request, res: Response): Promise<Response> => {
+  const { companyId } = req.user;
+  const stats = await AgendamentoStatsService(companyId);
+  return res.status(200).json(stats);
+};
+
+export const financialSummary = async (req: Request, res: Response): Promise<Response> => {
+  const { companyId } = req.user;
+  const data = await DashboardFinancialService(companyId);
+  return res.status(200).json(data);
 };

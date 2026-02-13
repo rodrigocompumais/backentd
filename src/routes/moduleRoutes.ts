@@ -5,6 +5,8 @@ import * as ModuleController from "../controllers/ModuleController";
 
 const routes = express.Router();
 
+// Público: listagem de módulos para a Landing Page (sem auth)
+routes.get("/modules/public", ModuleController.available);
 routes.get("/modules", isAuth, ModuleController.index);
 routes.get("/modules/available", isAuth, ModuleController.available);
 routes.post("/modules", isAuth, isSuper, ModuleController.store);

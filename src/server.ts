@@ -14,6 +14,7 @@ import CheckRemindersService from "./services/ReminderServices/CheckRemindersSer
 import CheckAgendamentoRemindersService from "./services/AppointmentServices/CheckAgendamentoRemindersService";
 import CheckWaitlistAndNotifyService from "./services/AppointmentServices/CheckWaitlistAndNotifyService";
 import CheckOrderAutoConfirmService from "./services/OrderServices/CheckOrderAutoConfirmService";
+import CloseStuckTicketsFromDisconnectedWhatsAppService from "./services/TicketServices/CloseStuckTicketsFromDisconnectedWhatsAppService";
 import { Op } from "sequelize";
 import PrintPedido from "./models/PrintPedido";
 import FormResponse from "./models/FormResponse";
@@ -34,7 +35,19 @@ const server = app.listen(process.env.PORT, async () => {
   setTimeout(async () => {
     await TestAllGeminiApiKeysService();
   }, 5000); // Aguardar 5 segundos após o servidor iniciar
-  
+
+  // Fechar tickets travados por conexões WhatsApp desconectadas ou excluídas
+  setTimeout(async () => {
+    try {
+      const result = await CloseStuckTicketsFromDisconnectedWhatsAppService();
+      if (result.total > 0) {
+        logger.info(`Inicialização: ${result.total} ticket(s) travado(s) foram fechados.`);
+      }
+    } catch (err: any) {
+      logger.error("Erro ao fechar tickets travados na inicialização:", err);
+    }
+  }, 3000);
+
   logger.info(`Server started on port: ${process.env.PORT}`);
 });
 
@@ -170,6 +183,21 @@ cron.schedule("0 3 * * *", async () => {
     }
   } catch (error: any) {
     logger.error("Erro no cleanup de respostas de formulário:", error);
+  }
+});
+
+// Fechar tickets travados por conexão WhatsApp desconectada ou excluída — diariamente às 00:00
+cron.schedule("0 0 * * *", async () => {
+  try {
+    logger.info("Iniciando verificação diária de tickets travados (conexões desconectadas/excluídas)...");
+    const result = await CloseStuckTicketsFromDisconnectedWhatsAppService();
+    if (result.total > 0) {
+      logger.info(`Verificação diária: ${result.total} ticket(s) travado(s) foram fechados.`);
+    } else {
+      logger.info("Verificação diária de tickets travados concluída (nenhum ticket para fechar).");
+    }
+  } catch (error: any) {
+    logger.error("Erro no job de fechamento de tickets travados:", error);
   }
 });
 

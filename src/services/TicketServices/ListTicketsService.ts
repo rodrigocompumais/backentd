@@ -168,43 +168,69 @@ const ListTicketsService = async ({
   if (Array.isArray(tags) && tags.length > 0) {
     const ticketsTagFilter: any[] | null = [];
     for (let tag of tags) {
+      // Buscar apenas IDs para economizar memória
       const ticketTags = await TicketTag.findAll({
-        where: { tagId: tag }
+        where: { tagId: tag },
+        attributes: ['ticketId'], // Apenas o campo necessário
+        limit: 10000 // Limite de segurança para evitar sobrecarga
       });
-      if (ticketTags) {
+      if (ticketTags && ticketTags.length > 0) {
         ticketsTagFilter.push(ticketTags.map(t => t.ticketId));
       }
     }
 
-    const ticketsIntersection: number[] = intersection(...ticketsTagFilter);
+    if (ticketsTagFilter.length > 0) {
+      const ticketsIntersection: number[] = intersection(...ticketsTagFilter);
 
-    whereCondition = {
-      ...whereCondition,
-      id: {
-        [Op.in]: ticketsIntersection
+      if (ticketsIntersection.length > 0) {
+        whereCondition = {
+          ...whereCondition,
+          id: {
+            [Op.in]: ticketsIntersection
+          }
+        };
+      } else {
+        // Se não há interseção, retornar vazio
+        return { tickets: [], count: 0, hasMore: false };
       }
-    };
+    } else {
+      // Se não há tickets com as tags, retornar vazio
+      return { tickets: [], count: 0, hasMore: false };
+    }
   }
 
   if (Array.isArray(users) && users.length > 0) {
     const ticketsUserFilter: any[] | null = [];
     for (let user of users) {
+      // Buscar apenas IDs para economizar memória
       const ticketUsers = await Ticket.findAll({
-        where: { userId: user }
+        where: { userId: user, companyId },
+        attributes: ['id'], // Apenas o campo necessário
+        limit: 10000 // Limite de segurança para evitar sobrecarga
       });
-      if (ticketUsers) {
+      if (ticketUsers && ticketUsers.length > 0) {
         ticketsUserFilter.push(ticketUsers.map(t => t.id));
       }
     }
 
-    const ticketsIntersection: number[] = intersection(...ticketsUserFilter);
+    if (ticketsUserFilter.length > 0) {
+      const ticketsIntersection: number[] = intersection(...ticketsUserFilter);
 
-    whereCondition = {
-      ...whereCondition,
-      id: {
-        [Op.in]: ticketsIntersection
+      if (ticketsIntersection.length > 0) {
+        whereCondition = {
+          ...whereCondition,
+          id: {
+            [Op.in]: ticketsIntersection
+          }
+        };
+      } else {
+        // Se não há interseção, retornar vazio
+        return { tickets: [], count: 0, hasMore: false };
       }
-    };
+    } else {
+      // Se não há tickets dos usuários, retornar vazio
+      return { tickets: [], count: 0, hasMore: false };
+    }
   }
 
   const limit = 40;

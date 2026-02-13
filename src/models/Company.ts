@@ -70,7 +70,10 @@ class Company extends Model<Company> {
   @Column({
     type: DataType.JSONB
   })
-  schedules: [];
+  schedules: any[];
+
+  @Column({ defaultValue: false })
+  campaignRunning: boolean;
 
   @ForeignKey(() => Plan)
   @Column

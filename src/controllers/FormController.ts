@@ -6,6 +6,8 @@ import { Op } from "sequelize";
 import Form from "../models/Form";
 import FormField from "../models/FormField";
 import FormResponse from "../models/FormResponse";
+import Company from "../models/Company";
+import Setting from "../models/Setting";
 import CreateFormService from "../services/FormServices/CreateFormService";
 import UpdateFormService from "../services/FormServices/UpdateFormService";
 import DeleteFormService from "../services/FormServices/DeleteFormService";
@@ -256,6 +258,26 @@ export const getPublicForm = async (
 
   const formData: any = form.toJSON();
   console.log(`[PublicForm] Formulário encontrado: ${formData.name} (${formData.fields?.length || 0} campos)`);
+  
+  // Se for formulário de agendamento, incluir horários da empresa se scheduleType for "company"
+  const formSettings = formData.settings || {};
+  if (formSettings.formType === "agendamento") {
+    const scheduleTypeSetting = await Setting.findOne({
+      where: { companyId: form.companyId, key: "scheduleType" },
+    });
+    const scheduleType = scheduleTypeSetting?.value || "disabled";
+    
+    if (scheduleType === "company") {
+      const company = await Company.findByPk(form.companyId, {
+        attributes: ["schedules"],
+      });
+      if (company?.schedules) {
+        formData.companySchedules = company.schedules;
+      }
+    }
+    formData.scheduleType = scheduleType;
+  }
+  
   return res.json(formData);
 };
 

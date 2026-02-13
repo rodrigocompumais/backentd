@@ -217,29 +217,55 @@ async function handleCloseTicketsAutomatic() {
 
 async function handleVerifySchedules(job) {
   try {
-    const { count, rows: schedules } = await Schedule.findAndCountAll({
-      where: {
-        status: "PENDENTE",
-        sentAt: null,
-        sendAt: {
-          [Op.gte]: moment().format("YYYY-MM-DD HH:mm:ss"),
-          [Op.lte]: moment().add("300", "seconds").format("YYYY-MM-DD HH:mm:ss")
-        }
-      },
-      include: [{ model: Contact, as: "contact" }]
-    });
-    if (count > 0) {
-      schedules.map(async schedule => {
-        await schedule.update({
-          status: "AGENDADA"
-        });
-        sendScheduledMessages.add(
-          "SendMessage",
-          { schedule },
-          { delay: 40000 }
-        );
-        logger.info(`[🧵] Disparo agendado para: ${schedule.contact.name}`);
+    const batchSize = 50; // Processa schedules em lotes de 50
+    let offset = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { count, rows: schedules } = await Schedule.findAndCountAll({
+        where: {
+          status: "PENDENTE",
+          sentAt: null,
+          sendAt: {
+            [Op.gte]: moment().format("YYYY-MM-DD HH:mm:ss"),
+            [Op.lte]: moment().add("300", "seconds").format("YYYY-MM-DD HH:mm:ss")
+          }
+        },
+        include: [{ model: Contact, as: "contact", attributes: ["id", "name", "number"] }],
+        limit: batchSize,
+        offset: offset
       });
+
+      if (schedules.length === 0) {
+        hasMore = false;
+        continue;
+      }
+
+      // Processa schedules em paralelo, mas com controle de concorrência
+      const schedulePromises = schedules.map(async schedule => {
+        try {
+          await schedule.update({
+            status: "AGENDADA"
+          });
+          await sendScheduledMessages.add(
+            "SendMessage",
+            { schedule },
+            { delay: 40000 }
+          );
+          logger.info(`[🧵] Disparo agendado para: ${schedule.contact?.name || 'N/A'}`);
+        } catch (err: any) {
+          logger.error(`[🚨] - Erro ao processar schedule ${schedule.id}:`, err.message);
+        }
+      });
+
+      await Promise.allSettled(schedulePromises);
+
+      offset += schedules.length;
+      
+      // Se retornou menos que o batchSize, chegamos ao fim
+      if (schedules.length < batchSize) {
+        hasMore = false;
+      }
     }
   } catch (e: any) {
     Sentry.captureException(e);
@@ -366,6 +392,42 @@ async function getCampaign(id) {
   });
 }
 
+// Versão otimizada que carrega apenas dados essenciais da campanha (sem contatos e shippings)
+async function getCampaignBasic(id) {
+  return await Campaign.findByPk(id, {
+    attributes: [
+      'id', 'companyId', 'scheduledAt', 'status', 'contactListId',
+      'message1', 'message2', 'message3', 'message4', 'message5',
+      'mediaPath', 'mediaName', 'fileListId'
+    ],
+    include: [
+      {
+        model: Whatsapp,
+        as: "whatsapp",
+        attributes: ["id", "name"]
+      }
+    ]
+  });
+}
+
+// Versão otimizada para dispatch que carrega apenas dados necessários para envio
+async function getCampaignForDispatch(id) {
+  return await Campaign.findByPk(id, {
+    attributes: [
+      'id', 'companyId', 'scheduledAt', 'status', 'contactListId',
+      'message1', 'message2', 'message3', 'message4', 'message5',
+      'mediaPath', 'mediaName', 'fileListId'
+    ],
+    include: [
+      {
+        model: Whatsapp,
+        as: "whatsapp",
+        attributes: ["id", "name"]
+      }
+    ]
+  });
+}
+
 async function getContact(id) {
   return await ContactListItem.findByPk(id, {
     attributes: ["id", "name", "number", "email"]
@@ -482,11 +544,16 @@ export function randomValue(min, max) {
 }
 
 async function verifyAndFinalizeCampaign(campaign) {
-
   logger.info("[🚨] - Verificando se o envio de campanhas finalizou");
-  const { contacts } = campaign.contactList;
-
-  const count1 = contacts.length;
+  
+  // Usa query de contagem direta ao invés de carregar todos os contatos na memória
+  const count1 = await ContactListItem.count({
+    where: {
+      contactListId: campaign.contactListId,
+      isWhatsappValid: true
+    }
+  });
+  
   const count2 = await CampaignShipping.count({
     where: {
       campaignId: campaign.id,
@@ -496,15 +563,33 @@ async function verifyAndFinalizeCampaign(campaign) {
     }
   });
 
-  if (count1 === count2) {
-    await campaign.update({ status: "FINALIZADA", completedAt: moment() });
+  if (count1 === count2 && count1 > 0) {
+    // Busca o modelo da campanha para atualizar
+    const campaignRecord = await Campaign.findByPk(campaign.id);
+    if (campaignRecord) {
+      await campaignRecord.update({ status: "FINALIZADA", completedAt: moment() });
+      
+      // Libera o lock da empresa após finalizar a campanha
+      const company = await Company.findByPk(campaign.companyId);
+      if (company) {
+        await company.update({ campaignRunning: false });
+        logger.info(`[📊] - Campanha finalizada. Lock liberado para empresa: ${campaign.companyId}`);
+      }
+      
+      // Recarrega a campanha para emitir atualização
+      const updatedCampaign = await Campaign.findByPk(campaign.id, {
+        attributes: ['id', 'companyId', 'status', 'completedAt']
+      });
+      
+      if (updatedCampaign) {
+        const io = getIO();
+        io.to(`company-${campaign.companyId}-mainchannel`).emit(`company-${campaign.companyId}-campaign`, {
+          action: "update",
+          record: updatedCampaign
+        });
+      }
+    }
   }
-
-  const io = getIO();
-  io.to(`company-${campaign.companyId}-mainchannel`).emit(`company-${campaign.companyId}-campaign`, {
-    action: "update",
-    record: campaign
-  });
 
   logger.info("[🚨] - Fim da verificação de finalização de campanhas");
 }
@@ -568,8 +653,19 @@ async function handleProcessCampaign(job) {
     }
 
     const settings = await getSettings(campaign);
-    const batchSize = process.env.CAMPAIGN_BATCH_SIZE ? parseInt(process.env.CAMPAIGN_BATCH_SIZE) : 30;
+    const batchSize = process.env.CAMPAIGN_BATCH_SIZE ? parseInt(process.env.CAMPAIGN_BATCH_SIZE) : 20;
     const rateLimit = process.env.CAMPAIGN_RATE_LIMIT ? parseInt(process.env.CAMPAIGN_RATE_LIMIT) : 5000;
+
+    // Verifica se a empresa já está rodando uma campanha para evitar sobrecarga
+    const company = await Company.findByPk(campaign.companyId);
+    if (company?.campaignRunning) {
+      logger.info(`[📊] - Empresa ${campaign.companyId} já possui uma campanha em execução. Adiado para próxima verificação.`);
+      return; // Sai silenciosamente para tentar novamente na próxima verificação de agendamento
+    }
+
+    // Ativa o lock por empresa
+    await company?.update({ campaignRunning: true });
+
     let offset = 0;
     let hasMoreContacts = true;
     let totalProcessed = 0;
@@ -592,35 +688,59 @@ async function handleProcessCampaign(job) {
       const greaterInterval = parseToMilliseconds(settings.greaterInterval);
       const messageInterval = settings.messageInterval;
 
-      const queuePromises = contacts.map((contact, index) => {
-        const delay = calculateDelay(
-          offset + index,
-          baseDelay,
-          longerIntervalAfter,
-          greaterInterval,
-          messageInterval
-        );
+      // Processa jobs em sub-lotes menores para evitar sobrecarga de memória e Redis
+      const subBatchSize = 10; // Processa 10 jobs por vez
+      const subBatches: any[][] = [];
+      
+      for (let i = 0; i < contacts.length; i += subBatchSize) {
+        subBatches.push(contacts.slice(i, i + subBatchSize));
+      }
 
-        return campaignQueue.add(
-          "PrepareContact",
-          {
-            contactId: contact.id,
-            campaignId: campaign.id,
-            variables: settings.variables,
-            delay
-          },
-          { 
-            removeOnComplete: true,
-            attempts: 3,
-            backoff: {
-              type: 'exponential',
-              delay: 1000
+      for (const subBatch of subBatches) {
+        const queuePromises = subBatch.map((contact, subIndex) => {
+          const globalIndex = subBatches.indexOf(subBatch) * subBatchSize + subIndex;
+          const delay = calculateDelay(
+            offset + globalIndex,
+            baseDelay,
+            longerIntervalAfter,
+            greaterInterval,
+            messageInterval
+          );
+
+          return campaignQueue.add(
+            "PrepareContact",
+            {
+              contactId: contact.id,
+              campaignId: campaign.id,
+              variables: settings.variables,
+              delay
+            },
+            { 
+              removeOnComplete: true,
+              attempts: 3,
+              backoff: {
+                type: 'exponential',
+                delay: 1000
+              }
             }
-          }
-        );
-      });
+          );
+        });
 
-      await Promise.all(queuePromises);
+        // Usa Promise.allSettled() para melhor tratamento de erros
+        const results = await Promise.allSettled(queuePromises);
+        
+        // Log de erros se houver
+        results.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            logger.error(`[🚨] - Erro ao adicionar job para contato ${subBatch[index].id}:`, result.reason);
+          }
+        });
+
+        // Pequena pausa entre sub-lotes para não sobrecarregar o Redis
+        if (subBatches.indexOf(subBatch) < subBatches.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
       totalProcessed += contacts.length;
       offset += contacts.length;
 
@@ -659,6 +779,20 @@ async function handleProcessCampaign(job) {
       memoryUsage: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB'
     });
 
+    // Libera o lock da empresa em caso de erro crítico no processamento inicial
+    try {
+      const campaign = await Campaign.findByPk(job.data.id, { attributes: ['companyId'] });
+      if (campaign) {
+        const company = await Company.findByPk(campaign.companyId);
+        if (company) {
+          await company.update({ campaignRunning: false });
+          logger.info(`[📊] - Erro no processamento. Lock liberado para empresa: ${campaign.companyId}`);
+        }
+      }
+    } catch (e) {
+      logger.error(`[🚨] - Erro ao liberar lock após falha: ${e.message}`);
+    }
+
     // Tenta reprocessar o job em caso de erro
     if (job.attemptsMade < 3) {
       logger.info(`[🔄] - Tentativa ${job.attemptsMade + 1} de 3 para campanha ${job.data.id}`);
@@ -677,7 +811,8 @@ async function handlePrepareContact(job) {
     
     logger.info(`[🏁] - Iniciou a preparação do contato | contatoId: ${contactId} CampanhaID: ${campaignId}`);
 
-    const campaign = await getCampaign(campaignId);
+    // Usa getCampaignBasic() para evitar carregar todos os contatos e shippings
+    const campaign = await getCampaignBasic(campaignId);
     if (!campaign) {
       logger.error(`[🚨] - Campanha ${campaignId} não encontrada`);
       return;
@@ -754,7 +889,8 @@ async function handlePrepareContact(job) {
       await record.update({ jobId: nextJob.id });
     }
 
-    await verifyAndFinalizeCampaign(campaign);
+    // Passa apenas o ID e contactListId para verificação, evitando carregar dados desnecessários
+    await verifyAndFinalizeCampaign({ id: campaign.id, companyId: campaign.companyId, contactListId: campaign.contactListId });
     logger.info(`[🏁] - Finalizado a preparação do contato | contatoId: ${contactId} CampanhaID: ${campaignId}`);
   } catch (err: any) {
     Sentry.captureException(err);
@@ -774,7 +910,8 @@ async function handleDispatchCampaign(job) {
     
     logger.info(`[🏁] - Disparando campanha | CampaignShippingId: ${campaignShippingId} CampanhaID: ${campaignId}`);
 
-    const campaign = await getCampaign(campaignId);
+    // Usa getCampaignForDispatch() para evitar carregar todos os contatos e shippings
+    const campaign = await getCampaignForDispatch(campaignId);
     if (!campaign) {
       logger.error(`[🚨] - Campanha ${campaignId} não encontrada`);
       return;
@@ -856,13 +993,8 @@ async function handleDispatchCampaign(job) {
 
     await campaignShipping.update({ deliveredAt: moment() });
 
-    await verifyAndFinalizeCampaign(campaign);
-
-    const io = getIO();
-    io.to(`company-${campaign.companyId}-mainchannel`).emit(`company-${campaign.companyId}-campaign`, {
-      action: "update",
-      record: campaign
-    });
+    // Passa apenas dados necessários para verificação
+    await verifyAndFinalizeCampaign({ id: campaign.id, companyId: campaign.companyId, contactListId: campaign.contactListId });
 
     logger.info(
       `[🏁] - Campanha enviada para: Campanha=${campaignId};Contato=${campaignShipping.contact.name}`

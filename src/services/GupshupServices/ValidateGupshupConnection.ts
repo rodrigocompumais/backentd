@@ -4,6 +4,7 @@ import Whatsapp from "../../models/Whatsapp";
 import GupshupApiClient from "./GupshupApiClient";
 import { getIO } from "../../libs/socket";
 import AppError from "../../errors/AppError";
+import CloseTicketsByWhatsAppIdService from "../TicketServices/CloseTicketsByWhatsAppIdService";
 
 /**
  * Valida a conexão Gupshup testando as credenciais
@@ -16,7 +17,8 @@ export const ValidateGupshupConnection = async (
     if (!whatsapp.gupshupApiKey || !whatsapp.gupshupAppName) {
       logger.warn(`Gupshup validation: Credenciais não configuradas para ${whatsapp.name}`);
       await whatsapp.update({ status: "DISCONNECTED" });
-      
+      await CloseTicketsByWhatsAppIdService(whatsapp.id);
+
       const io = getIO();
       io.to(`company-${whatsapp.companyId}-mainchannel`).emit("whatsappSession", {
         action: "update",
@@ -54,7 +56,8 @@ export const ValidateGupshupConnection = async (
         };
       } else {
         await whatsapp.update({ status: "DISCONNECTED" });
-        
+        await CloseTicketsByWhatsAppIdService(whatsapp.id);
+
         const io = getIO();
         io.to(`company-${whatsapp.companyId}-mainchannel`).emit("whatsappSession", {
           action: "update",
@@ -72,7 +75,8 @@ export const ValidateGupshupConnection = async (
       // Se for erro de autenticação, marcar como desconectado
       if (error.response?.status === 401 || error.response?.status === 403) {
         await whatsapp.update({ status: "DISCONNECTED" });
-        
+        await CloseTicketsByWhatsAppIdService(whatsapp.id);
+
         const io = getIO();
         io.to(`company-${whatsapp.companyId}-mainchannel`).emit("whatsappSession", {
           action: "update",
@@ -92,7 +96,8 @@ export const ValidateGupshupConnection = async (
     logger.error(`Erro ao validar conexão Gupshup: ${error.message}`);
     
     await whatsapp.update({ status: "DISCONNECTED" });
-    
+    await CloseTicketsByWhatsAppIdService(whatsapp.id);
+
     const io = getIO();
     io.to(`company-${whatsapp.companyId}-mainchannel`).emit("whatsappSession", {
       action: "update",

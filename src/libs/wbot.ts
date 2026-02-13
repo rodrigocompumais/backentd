@@ -19,6 +19,7 @@ import { getIO } from "./socket";
 import { Store } from "./store";
 import { StartWhatsAppSession } from "../services/WbotServices/StartWhatsAppSession";
 import DeleteBaileysService from "../services/BaileysServices/DeleteBaileysService";
+import CloseTicketsByWhatsAppIdService from "../services/TicketServices/CloseTicketsByWhatsAppIdService";
 import NodeCache from 'node-cache';
 
 // Usar pino diretamente ao invés de path interno do Baileys (compatível com Baileys 7.x)
@@ -268,6 +269,7 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
                   status: "DISCONNECTED",
                   qrcode: ""
                 });
+                await CloseTicketsByWhatsAppIdService(whatsappUpdate.id);
                 await DeleteBaileysService(whatsappUpdate.id);
                 io.to(`company-${whatsapp.companyId}-mainchannel`).emit("whatsappSession", {
                   action: "update",

@@ -6,6 +6,7 @@ import FindOrCreateTicketService from "../TicketServices/FindOrCreateTicketServi
 import SendWhatsAppMessage from "../WbotServices/SendWhatsAppMessage";
 
 const DEFAULT_MESSAGES: Record<string, string> = {
+  em_preparo: "👨‍🍳 Seu pedido está em preparo! Em breve estará pronto.",
   pronto: "✅ Seu pedido está pronto para retirada!",
   saiu_entrega: "🚚 Seu pedido saiu para entrega! Em breve chegaremos.",
   entregue: "✅ Obrigado! Seu pedido foi entregue. Bom apetite!",
@@ -22,7 +23,7 @@ const SendOrderStatusNotificationService = async ({
   response,
   newStatus,
 }: Request): Promise<boolean> => {
-  const statusesToNotify = ["pronto", "saiu_entrega", "entregue"];
+  const statusesToNotify = ["em_preparo", "pronto", "saiu_entrega", "entregue"];
   if (!statusesToNotify.includes(newStatus)) {
     return false;
   }

@@ -9,6 +9,7 @@ const requireLanchonetes = hasCompanyModule("lanchonetes");
 routes.get("/mesas", isAuth, requireLanchonetes, MesaController.index);
 routes.get("/mesas/links-qr", isAuth, requireLanchonetes, MesaController.getMesasLinksQr);
 routes.get("/mesas/by-identifier", isAuth, requireLanchonetes, MesaController.byIdentifier);
+routes.get("/mesas/default-cardapio-form", isAuth, requireLanchonetes, MesaController.getDefaultCardapioForm);
 routes.post("/mesas", isAuth, requireLanchonetes, MesaController.store);
 routes.post("/mesas/bulk", isAuth, requireLanchonetes, MesaController.storeBulk);
 routes.get("/mesas/:id/link-qr", isAuth, requireLanchonetes, MesaController.getMesaLinkQr);

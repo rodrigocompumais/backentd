@@ -11,6 +11,7 @@ import LiberarMesaService from "../services/MesaServices/LiberarMesaService";
 import ResumoContaMesaService from "../services/MesaServices/ResumoContaMesaService";
 import DeleteMesaService from "../services/MesaServices/DeleteMesaService";
 import RegisterGourmetVendaService from "../services/GourmetFinanceiroServices/RegisterGourmetVendaService";
+import GetOrCreateDefaultCardapioFormService from "../services/FormServices/GetOrCreateDefaultCardapioFormService";
 import { Op } from "sequelize";
 import Form from "../models/Form";
 import Mesa from "../models/Mesa";
@@ -386,16 +387,15 @@ export const getPublicMesaByToken = async (req: Request, res: Response): Promise
       where: { id: mesa.formId, companyId, isActive: true },
       attributes: ["id", "slug", "companyId"],
     });
+    if (!form) {
+      throw new AppError(
+        "Formulário vinculado a esta mesa não está disponível. Atualize o vínculo da mesa ou reative o formulário.",
+        404
+      );
+    }
   }
   if (!form) {
-    const cardapioForms = await Form.findAll({
-      where: { companyId, isActive: true },
-      attributes: ["id", "slug", "settings"],
-    });
-    form = cardapioForms.find((f) => (f.settings as any)?.formType === "cardapio") || null;
-  }
-  if (!form) {
-    throw new AppError("Configure um formulário de cardápio na empresa para usar o link da mesa.", 404);
+    form = await GetOrCreateDefaultCardapioFormService({ companyId });
   }
 
   const plain = mesa.get({ plain: true }) as any;
@@ -503,4 +503,16 @@ export const getPublicMesaById = async (req: Request, res: Response): Promise<Re
   };
 
   return res.json(payload);
+};
+
+/** Retorna o formulário cardápio padrão da empresa (obtido ou criado). Usado pelo painel quando a mesa não tem cardápio vinculado. */
+export const getDefaultCardapioForm = async (req: Request, res: Response): Promise<Response> => {
+  const { companyId } = req.user;
+  const form = await GetOrCreateDefaultCardapioFormService({ companyId });
+  const plain = form.get({ plain: true }) as any;
+  return res.json({
+    formId: plain.id,
+    slug: plain.slug,
+    name: plain.name,
+  });
 };

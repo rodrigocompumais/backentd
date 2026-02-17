@@ -18,6 +18,6 @@ routes.put("/products/:id", isAuth, requireLanchonetes, ProductController.update
 routes.delete("/products/:id", isAuth, requireLanchonetes, ProductController.destroy);
 
 // Public route for menu products (no auth required)
-routes.get("/public/forms/:formSlug/products", ProductController.getPublicMenuProducts);
+routes.get("/public/forms/:publicId/products", ProductController.getPublicMenuProducts);
 
 export default routes;

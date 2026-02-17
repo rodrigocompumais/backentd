@@ -185,7 +185,7 @@ export const remove = async (
 
   await ShowContactService(contactId, companyId);
 
-  await DeleteContactService(contactId);
+  await DeleteContactService(contactId, companyId);
 
   const io = getIO();
   io.to(`company-${companyId}-mainchannel`).emit(`company-${companyId}-contact`, {

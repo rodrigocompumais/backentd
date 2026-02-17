@@ -2,6 +2,7 @@ import Form from "../../models/Form";
 import FormField from "../../models/FormField";
 import AppError from "../../errors/AppError";
 import HasCompanyModuleService, { MODULE_LANCHONETES } from "../CompanyModuleServices/HasCompanyModuleService";
+import crypto from "crypto";
 
 interface Field {
   id?: number;
@@ -54,6 +55,11 @@ const UpdateFormService = async ({
 
   if (!form) {
     throw new AppError("ERR_FORM_NOT_FOUND", 404);
+  }
+
+  // Garantir publicId para URLs públicas (segurança). Se por algum motivo estiver vazio, gerar.
+  if (!(form as any).publicId) {
+    (formData as any).publicId = crypto.randomBytes(16).toString("hex");
   }
 
   const newFormType = (formData.settings as any)?.formType ?? (form.settings as any)?.formType;
@@ -149,6 +155,10 @@ const UpdateFormService = async ({
     });
 
     const fieldsToCreate: Field[] = [];
+    // Mapear IDs antigos -> novos quando recriar campos.
+    // Isso é importante porque settings (ex.: deliveryFeeCondition.fieldId) pode referenciar IDs
+    // que serão invalidados após destroy + bulkCreate.
+    const oldToNewFieldId: Record<number, number> = {};
 
     if (isQuotationForm) {
       // Para formulários de cotação, criar campos automáticos: Nome do Fornecedor, Telefone, Nome do Vendedor
@@ -249,6 +259,19 @@ const UpdateFormService = async ({
         return { ...rest, formId: form.id };
       });
       const created = await FormField.bulkCreate(fieldsToInsert);
+
+      // Construir mapa old->new apenas para os campos "custom" vindos do payload (não automáticos).
+      // A posição no array 'created' é estável: [autoFields..., payloadFields...]
+      if (fields && fields.length > 0) {
+        for (let i = 0; i < fields.length; i++) {
+          const oldId = fields[i]?.id;
+          const newId = created[baseIndex + i]?.id;
+          if (oldId && newId) {
+            oldToNewFieldId[Number(oldId)] = Number(newId);
+          }
+        }
+      }
+
       for (let i = 0; i < fieldsToCreate.length; i++) {
         const field = fieldsToCreate[i] as any;
         if (typeof field.conditionalFieldIndex === "number" && field.hasConditional) {
@@ -257,6 +280,23 @@ const UpdateFormService = async ({
             await created[i].update({ conditionalFieldId: created[sourceIdx].id });
           }
         }
+      }
+
+      // Remapear settings.deliveryFeeCondition.fieldId para o novo ID, se necessário.
+      const currentSettings: any = (form.settings as any) || {};
+      const cond = currentSettings?.deliveryFeeCondition;
+      const condFieldId = cond?.fieldId;
+      const mapped = condFieldId != null ? oldToNewFieldId[Number(condFieldId)] : undefined;
+      if (mapped) {
+        const nextSettings = {
+          ...currentSettings,
+          deliveryFeeCondition: {
+            ...(cond || {}),
+            fieldId: mapped,
+          },
+        };
+        await form.update({ settings: nextSettings });
+        await form.reload();
       }
     }
   }

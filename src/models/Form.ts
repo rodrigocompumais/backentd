@@ -33,6 +33,9 @@ class Form extends Model<Form> {
   @Column
   slug: string; // URL-friendly unique identifier
 
+  @Column
+  publicId: string; // Public unguessable identifier (used in public URLs)
+
   @Default(true)
   @Column
   isActive: boolean;

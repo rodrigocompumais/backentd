@@ -2,6 +2,7 @@ import Form from "../../models/Form";
 import FormField from "../../models/FormField";
 import AppError from "../../errors/AppError";
 import HasCompanyModuleService, { MODULE_LANCHONETES } from "../CompanyModuleServices/HasCompanyModuleService";
+import crypto from "crypto";
 
 interface Field {
   label: string;
@@ -75,16 +76,16 @@ const CreateFormService = async ({
     return `${timestamp}-${random}`;
   };
 
-  // Verificar se slug já existe globalmente (sem filtro de companyId, pois a constraint é global)
+  // Slug único global (necessário para URL pública /public/forms/:slug sem companyId)
   let finalSlug = baseSlug;
   let attempts = 0;
   const maxAttempts = 10;
-  
+
   while (attempts < maxAttempts) {
     const existingForm = await Form.findOne({
       where: { slug: finalSlug },
     });
-    
+
     if (!existingForm) {
       break; // Slug é único, pode usar
     }
@@ -102,10 +103,20 @@ const CreateFormService = async ({
     finalSlug = `${baseSlug}-${timestamp}-${random}`;
   }
 
+  // publicId (token público não adivinhável, usado em URLs públicas)
+  const generatePublicId = (): string => crypto.randomBytes(16).toString("hex"); // 32 chars
+  let publicId = generatePublicId();
+  for (let i = 0; i < 5; i++) {
+    const exists = await Form.findOne({ where: { publicId }, attributes: ["id"] });
+    if (!exists) break;
+    publicId = generatePublicId();
+  }
+
   const form = await Form.create({
     name,
     description,
     slug: finalSlug,
+    publicId,
     companyId,
     createdBy,
     settings,

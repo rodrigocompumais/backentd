@@ -324,7 +324,7 @@ export const show = async (req: Request, res: Response): Promise<Response> => {
 };
 
 export const store = async (req: Request, res: Response): Promise<Response> => {
-  const { slug } = req.params;
+  const { publicId } = req.params as any;
   const data = req.body;
 
   // Get form by slug (public endpoint)
@@ -334,7 +334,7 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
     const decoded = verifyOrderToken(data.orderToken);
     if (decoded && decoded.formId) {
       formIdToUse = decoded.formId;
-      console.log(`FormResponseController: Using formId from orderToken: ${formIdToUse} (slug received: ${slug})`);
+      console.log(`FormResponseController: Using formId from orderToken: ${formIdToUse} (publicId received: ${publicId})`);
     }
   }
 
@@ -344,7 +344,7 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
         where: { id: formIdToUse, isActive: true },
       })
     : await Form.findOne({
-        where: { slug, isActive: true },
+        where: { publicId, isActive: true },
       });
 
   if (!form) {
@@ -359,7 +359,7 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
   const ipAddress = req.ip || req.headers["x-forwarded-for"] || req.connection.remoteAddress;
   const userAgent = req.headers["user-agent"] || "";
 
-  console.log(`FormResponseController: Processing response for formId=${form.id}, slug=${slug}, hasOrderToken=${!!data.orderToken}`);
+  console.log(`FormResponseController: Processing response for formId=${form.id}, publicId=${publicId}, hasOrderToken=${!!data.orderToken}`);
 
   const response = await ProcessFormResponseService({
     formId: form.id,

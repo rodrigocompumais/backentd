@@ -35,7 +35,7 @@ const GetAvailabilityService = async ({
   excludeAppointmentId,
 }: Request): Promise<{ slots: Slot[] }> => {
   const form = await Form.findOne({
-    where: { slug: formSlug, isActive: true },
+    where: { publicId: formSlug, isActive: true },
     attributes: ["id", "companyId", "settings"],
   });
 

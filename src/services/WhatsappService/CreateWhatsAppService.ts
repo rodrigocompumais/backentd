@@ -117,7 +117,7 @@ const CreateWhatsAppService = async ({
         async value => {
           if (!value) return false;
           const nameExists = await Whatsapp.findOne({
-            where: { name: value }
+            where: { name: value, companyId }
           });
           return !nameExists;
         }
@@ -201,7 +201,7 @@ const CreateWhatsAppService = async ({
           async value => {
             if (!value) return false;
             const tokenExists = await Whatsapp.findOne({
-              where: { token: value }
+              where: { token: value, companyId }
             });
             return !tokenExists;
           }

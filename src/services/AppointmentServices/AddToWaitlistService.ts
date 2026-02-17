@@ -23,7 +23,7 @@ const AddToWaitlistService = async ({
   responderEmail,
 }: Request): Promise<AppointmentWaitlist> => {
   const form = await Form.findOne({
-    where: { slug, isActive: true },
+    where: { publicId: slug, isActive: true },
     attributes: ["id", "companyId", "settings"],
   });
 

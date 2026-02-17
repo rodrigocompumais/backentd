@@ -10,7 +10,6 @@ import {
   Default,
   AllowNull,
   HasMany,
-  Unique,
   BelongsToMany,
   ForeignKey,
   BelongsTo
@@ -23,7 +22,11 @@ import Prompt from "./Prompt";
 import QueueIntegrations from "./QueueIntegrations";
 import { FlowBuilderModel } from "./FlowBuilder";
 
-@Table
+@Table({
+  indexes: [
+    { unique: true, name: "Whatsapps_companyId_name_unique", fields: ["companyId", "name"] }
+  ]
+})
 class Whatsapp extends Model<Whatsapp> {
   @PrimaryKey
   @AutoIncrement
@@ -31,7 +34,6 @@ class Whatsapp extends Model<Whatsapp> {
   id: number;
 
   @AllowNull
-  @Unique
   @Column(DataType.TEXT)
   name: string;
 

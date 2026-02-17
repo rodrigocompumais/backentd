@@ -89,10 +89,10 @@ export const update = async (req: Request, res: Response): Promise<Response> => 
 
 /** Public: list appointment services for a form (by slug). Used by public agendamento form. */
 export const getPublicAppointmentServices = async (req: Request, res: Response): Promise<Response> => {
-  const { slug } = req.params;
+  const { publicId } = req.params as any;
 
   const form = await Form.findOne({
-    where: { slug, isActive: true },
+    where: { publicId, isActive: true },
     attributes: ["id", "companyId", "settings"],
   });
 
@@ -120,7 +120,7 @@ export const getPublicAppointmentServices = async (req: Request, res: Response):
 
 /** Public: get available slots for a service and professional on a date. */
 export const getAvailability = async (req: Request, res: Response): Promise<Response> => {
-  const { slug } = req.params;
+  const { publicId } = req.params as any;
   const { serviceId, userId, date } = req.query;
 
   if (!serviceId || !userId || !date || typeof date !== "string") {
@@ -128,7 +128,7 @@ export const getAvailability = async (req: Request, res: Response): Promise<Resp
   }
 
   const result = await GetAvailabilityService({
-    formSlug: slug,
+    formSlug: publicId,
     serviceId: Number(serviceId),
     userId: Number(userId),
     date: String(date),
@@ -139,7 +139,7 @@ export const getAvailability = async (req: Request, res: Response): Promise<Resp
 
 /** Public: add to waitlist (service + professional + preferred date + contact). */
 export const addToWaitlist = async (req: Request, res: Response): Promise<Response> => {
-  const { slug } = req.params;
+  const { publicId } = req.params as any;
   const { appointmentServiceId, assignedUserId, preferredDate, responderName, responderPhone, responderEmail } = req.body;
 
   if (!appointmentServiceId || !assignedUserId || !preferredDate || !responderPhone) {
@@ -147,7 +147,7 @@ export const addToWaitlist = async (req: Request, res: Response): Promise<Respon
   }
 
   const entry = await AddToWaitlistService({
-    slug,
+    slug: publicId,
     appointmentServiceId: Number(appointmentServiceId),
     assignedUserId: Number(assignedUserId),
     preferredDate: String(preferredDate),
@@ -161,12 +161,12 @@ export const addToWaitlist = async (req: Request, res: Response): Promise<Respon
 
 /** Public: get appointment by token (for cancel/reschedule pages). Slug must match appointment form. */
 export const getByToken = async (req: Request, res: Response): Promise<Response> => {
-  const { slug } = req.params;
+  const { publicId } = req.params as any;
   const { token } = req.query;
   if (!token || typeof token !== "string") {
     throw new AppError("Token é obrigatório", 400);
   }
-  const { appointment, form } = await GetAppointmentByTokenService({ token, formSlug: slug });
+  const { appointment, form } = await GetAppointmentByTokenService({ token, formSlug: publicId });
   const agendamento = (form.settings as any)?.agendamento || {};
   return res.json({
     appointment: {
@@ -189,25 +189,25 @@ export const getByToken = async (req: Request, res: Response): Promise<Response>
 
 /** Public: cancel appointment by token. */
 export const cancelByToken = async (req: Request, res: Response): Promise<Response> => {
-  const { slug } = req.params;
+  const { publicId } = req.params as any;
   const { token } = req.body;
   if (!token || typeof token !== "string") {
     throw new AppError("Token é obrigatório", 400);
   }
-  await CancelAppointmentByTokenService({ token, formSlug: slug });
+  await CancelAppointmentByTokenService({ token, formSlug: publicId });
   return res.json({ success: true, message: "Agendamento cancelado com sucesso." });
 };
 
 /** Public: reschedule appointment by token. */
 export const rescheduleByToken = async (req: Request, res: Response): Promise<Response> => {
-  const { slug } = req.params;
+  const { publicId } = req.params as any;
   const { token, startTime, endTime } = req.body;
   if (!token || typeof token !== "string" || !startTime || !endTime) {
     throw new AppError("Token, startTime e endTime são obrigatórios", 400);
   }
   const appointment = await RescheduleAppointmentByTokenService({
     token,
-    formSlug: slug,
+    formSlug: publicId,
     startTime: String(startTime),
     endTime: String(endTime),
   });
@@ -216,13 +216,13 @@ export const rescheduleByToken = async (req: Request, res: Response): Promise<Re
 
 /** Public: get iCal file for appointment (add to calendar). */
 export const getIcalByToken = async (req: Request, res: Response): Promise<void> => {
-  const { slug } = req.params;
+  const { publicId } = req.params as any;
   const { token } = req.query;
   if (!token || typeof token !== "string") {
     res.status(400).send("Token é obrigatório");
     return;
   }
-  const ical = await GenerateAppointmentIcalService(token, slug);
+  const ical = await GenerateAppointmentIcalService(token, publicId);
   res.setHeader("Content-Type", "text/calendar; charset=utf-8");
   res.setHeader("Content-Disposition", 'attachment; filename="agendamento.ics"');
   res.send(ical);

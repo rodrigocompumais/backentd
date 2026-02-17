@@ -317,10 +317,10 @@ export const destroy = async (req: Request, res: Response): Promise<Response> =>
 
 /** Lista mesas da empresa para o cardápio público. Não filtra por formId: todas as mesas da empresa. */
 export const getPublicMesas = async (req: Request, res: Response): Promise<Response> => {
-  const { formSlug } = req.params;
+  const { publicId } = req.params as any;
 
   const form = await Form.findOne({
-    where: { slug: formSlug, isActive: true },
+    where: { publicId, isActive: true },
     attributes: ["companyId"],
   });
 
@@ -385,7 +385,7 @@ export const getPublicMesaByToken = async (req: Request, res: Response): Promise
   if (mesa.formId) {
     form = await Form.findOne({
       where: { id: mesa.formId, companyId, isActive: true },
-      attributes: ["id", "slug", "companyId"],
+      attributes: ["id", "slug", "publicId", "companyId"],
     });
     if (!form) {
       throw new AppError(
@@ -401,7 +401,7 @@ export const getPublicMesaByToken = async (req: Request, res: Response): Promise
   const plain = mesa.get({ plain: true }) as any;
   const orderToken = createOrderToken(form.id, mesa.id);
   return res.json({
-    formSlug: form.slug,
+    formPublicId: (form as any).publicId,
     formId: form.id,
     mesa: {
       id: plain.id,
@@ -450,11 +450,11 @@ export const getPublicMesaProducts = async (req: Request, res: Response): Promis
 /** Mesa por ID para cardápio público (QR da mesa): exige token assinado (t=); retorna orderToken para o submit.
  * Aceita token só-mesa (verifyMesaLinkOnly) ou token form+mesa (verifyMesaLink) para compatibilidade. */
 export const getPublicMesaById = async (req: Request, res: Response): Promise<Response> => {
-  const { formSlug, mesaId } = req.params;
+  const { publicId, mesaId } = req.params as any;
   const tokenFromQuery = (req.query.t as string) || "";
 
   const form = await Form.findOne({
-    where: { slug: formSlug, isActive: true },
+    where: { publicId, isActive: true },
     attributes: ["id", "companyId"],
   });
 
@@ -468,7 +468,7 @@ export const getPublicMesaById = async (req: Request, res: Response): Promise<Re
   }
 
   if (tokenFromQuery && process.env.MESA_LINK_SECRET) {
-    const validByForm = verifyMesaLink(formSlug, mesaIdNum, tokenFromQuery);
+    const validByForm = verifyMesaLink(publicId, mesaIdNum, tokenFromQuery);
     const validByMesaOnly = verifyMesaLinkOnly(form.companyId, mesaIdNum, tokenFromQuery);
     if (!validByForm && !validByMesaOnly) {
       throw new AppError("ERR_MESA_LINK_INVALID", 403);
@@ -512,6 +512,7 @@ export const getDefaultCardapioForm = async (req: Request, res: Response): Promi
   const plain = form.get({ plain: true }) as any;
   return res.json({
     formId: plain.id,
+    publicId: plain.publicId,
     slug: plain.slug,
     name: plain.name,
   });

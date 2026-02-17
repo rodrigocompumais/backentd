@@ -7,12 +7,12 @@ const ShowContactService = async (
 ): Promise<Contact> => {
   const contact = await Contact.findByPk(id, { include: ["extraInfo", "whatsapp", "user"] });
 
-  if (contact?.companyId !== companyId) {
-    throw new AppError("Não é possível excluir registro de outra empresa");
-  }
-
   if (!contact) {
     throw new AppError("ERR_NO_CONTACT_FOUND", 404);
+  }
+
+  if (contact.companyId !== companyId) {
+    throw new AppError("Não é possível acessar registro de outra empresa");
   }
 
   return contact;

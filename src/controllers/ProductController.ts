@@ -227,11 +227,11 @@ export const getPublicMenuProducts = async (
   req: Request,
   res: Response
 ): Promise<Response> => {
-  const { formSlug } = req.params;
+  const { publicId } = req.params as any;
 
-  // Buscar formulário pelo slug para obter companyId
+  // Buscar formulário pelo publicId para obter companyId
   const form = await Form.findOne({
-    where: { slug: formSlug, isActive: true },
+    where: { publicId, isActive: true },
     attributes: ["id", "companyId"],
   });
 

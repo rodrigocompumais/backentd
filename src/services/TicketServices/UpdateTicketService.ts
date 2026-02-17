@@ -108,7 +108,7 @@ const UpdateTicketService = async ({
 
       //     return { ticket: otherTicket, oldStatus, oldUserId }
       // }
-      await CheckContactOpenTickets(ticket.contact.id, whatsappId);
+      await CheckContactOpenTickets(ticket.contact.id, companyId, whatsappId);
       chatbot = null;
       queueOptionId = null;
     }

@@ -18,8 +18,8 @@ const GetAppointmentByTokenService = async ({
   }
 
   const form = await Form.findOne({
-    where: { slug: formSlug, isActive: true },
-    attributes: ["id", "companyId", "name", "slug", "settings"],
+    where: { publicId: formSlug, isActive: true },
+    attributes: ["id", "companyId", "name", "slug", "publicId", "settings"],
   });
 
   if (!form) {
@@ -31,7 +31,7 @@ const GetAppointmentByTokenService = async ({
     include: [
       { association: "appointmentService", attributes: ["id", "name", "durationMinutes", "value"] },
       { association: "assignedUser", attributes: ["id", "name"] },
-      { association: "form", attributes: ["id", "slug"] },
+      { association: "form", attributes: ["id", "slug", "publicId"] },
     ],
   });
 

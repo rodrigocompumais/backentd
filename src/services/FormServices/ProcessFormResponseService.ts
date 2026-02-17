@@ -15,6 +15,7 @@ import CreateAndDispatchPrintJobService from "../PrintJobService/CreateAndDispat
 import OcuparMesaService from "../MesaServices/OcuparMesaService";
 import Mesa from "../../models/Mesa";
 import Contact from "../../models/Contact";
+import ContactCustomField from "../../models/ContactCustomField";
 import Ticket from "../../models/Ticket";
 import { verifyOrderToken, createDeliveryScanToken } from "../../helpers/MesaLinkSign";
 import Product from "../../models/Product";
@@ -24,6 +25,7 @@ import FormatAppointmentConfirmationMessage from "./FormatAppointmentConfirmatio
 import { createAppointmentToken } from "../../helpers/MesaLinkSign";
 import ProductVariation from "../../models/ProductVariation";
 import ProductVariationOption from "../../models/ProductVariationOption";
+import { normalizeBrazilPhoneForWhatsapp } from "../../helpers/NormalizeBrazilPhone";
 
 interface Answer {
   fieldId: number;
@@ -254,10 +256,7 @@ const ProcessFormResponseService = async ({
 
   // Normalizar telefone: só dígitos, garantir 55 para Brasil se tiver 10+ dígitos
   if (contactPhone) {
-    const digits = contactPhone.replace(/\D/g, "");
-    if (digits.length >= 10) {
-      contactPhone = digits.startsWith("55") ? digits : "55" + digits;
-    }
+    contactPhone = normalizeBrazilPhoneForWhatsapp(contactPhone);
   }
 
   // Check if form is quotation or menu type and process items
@@ -405,6 +404,67 @@ const ProcessFormResponseService = async ({
       await response.update({ contactId: contact.id });
     } catch (err) {
       console.error("Error creating contact from form:", err);
+    }
+  }
+
+  // "Peça de novo" / Auto-preenchimento: persistir respostas no contato (ContactCustomFields)
+  // Guardamos por label (name = field.label) e deduplicamos removendo os registros anteriores do mesmo name.
+  // Apenas quando habilitado em settings.enablePieceAgain e para formType=cardapio.
+  const enablePieceAgain = formSettings?.enablePieceAgain === true;
+  if (enablePieceAgain && isMenuForm && contact) {
+    try {
+      const isSensitiveLabel = (label: string) =>
+        /cpf|cart[aã]o|card|senha|password|cvv|cvc|token|c[oó]digo|pin/i.test(label || "");
+
+      const toValueString = (val: any) => {
+        if (val === undefined || val === null) return "";
+        if (Array.isArray(val)) return "__json__:" + JSON.stringify(val);
+        return String(val);
+      };
+
+      const entries = answers
+        .map((answer) => {
+          const field = fields.find((f) => f.id === answer.fieldId);
+          if (!field) return null;
+          const meta = field.metadata as any;
+          const label = String(field.label || "").trim();
+          if (!label) return null;
+
+          // Não salvar campos automáticos e dados de contato
+          if (
+            meta?.autoFieldType === "name" ||
+            meta?.autoFieldType === "phone" ||
+            meta?.autoFieldType === "supplierName" ||
+            meta?.autoFieldType === "sellerName"
+          ) return null;
+          if (field.fieldType === "phone" || field.fieldType === "email") return null;
+          if (field.fieldType === "file") return null;
+          if (isSensitiveLabel(label)) return null;
+
+          const valueStr = toValueString(answer.answer);
+          if (!valueStr || valueStr.trim() === "") return null;
+          return { name: label, value: valueStr };
+        })
+        .filter((x): x is { name: string; value: string } => x !== null);
+
+      if (entries.length > 0) {
+        const names = Array.from(new Set(entries.map((e) => e.name)));
+        await ContactCustomField.destroy({
+          where: {
+            contactId: contact.id,
+            name: { [Op.in]: names } as any,
+          },
+        });
+        await ContactCustomField.bulkCreate(
+          entries.map((e) => ({
+            contactId: contact!.id,
+            name: e.name,
+            value: e.value,
+          }))
+        );
+      }
+    } catch (err: any) {
+      console.warn("ProcessFormResponseService - Falha ao salvar ContactCustomFields:", err?.message || err);
     }
   }
 

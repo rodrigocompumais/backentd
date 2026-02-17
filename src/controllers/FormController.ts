@@ -6,12 +6,14 @@ import { Op } from "sequelize";
 import Form from "../models/Form";
 import FormField from "../models/FormField";
 import FormResponse from "../models/FormResponse";
+import Contact from "../models/Contact";
 import Company from "../models/Company";
 import Setting from "../models/Setting";
 import CreateFormService from "../services/FormServices/CreateFormService";
 import UpdateFormService from "../services/FormServices/UpdateFormService";
 import DeleteFormService from "../services/FormServices/DeleteFormService";
 import AppError from "../errors/AppError";
+import { normalizeBrazilPhoneForWhatsapp } from "../helpers/NormalizeBrazilPhone";
 
 export const index = async (req: Request, res: Response): Promise<Response> => {
   const { companyId } = req.user;
@@ -236,12 +238,12 @@ export const getPublicForm = async (
   req: Request,
   res: Response
 ): Promise<Response> => {
-  const { slug } = req.params;
+  const { publicId } = req.params as any;
 
-  console.log(`[PublicForm] Buscando formulário com slug: ${slug}`);
+  console.log(`[PublicForm] Buscando formulário com publicId: ${publicId}`);
 
   const form = await Form.findOne({
-    where: { slug, isActive: true },
+    where: { publicId, isActive: true },
     include: [
       {
         association: "fields",
@@ -252,7 +254,7 @@ export const getPublicForm = async (
   });
 
   if (!form) {
-    console.log(`[PublicForm] Formulário não encontrado: ${slug}`);
+    console.log(`[PublicForm] Formulário não encontrado: ${publicId}`);
     throw new AppError("ERR_FORM_NOT_FOUND", 404);
   }
 
@@ -396,4 +398,136 @@ export const importForm = async (
   });
 
   return res.status(201).json(form);
+};
+
+/** Upload logo do formulário (imagem). Retorna a URL da logo. */
+export const uploadLogo = async (req: Request, res: Response): Promise<Response> => {
+  const file = req.file as Express.Multer.File;
+  if (!file || !file.filename) {
+    throw new AppError("Selecione uma imagem para a logo (JPEG, PNG, GIF ou WEBP).", 400);
+  }
+  const baseUrl = process.env.BACKEND_URL || "http://localhost:3333";
+  const logoUrl = `${baseUrl.replace(/\/$/, "")}/public/form-logos/${file.filename}`;
+  return res.json({ logoUrl });
+};
+
+/** GET /public/forms/:slug/most-ordered - Retorna IDs dos produtos mais pedidos (para seção "Os mais pedidos"). */
+export const getPublicMostOrdered = async (req: Request, res: Response): Promise<Response> => {
+  const { publicId } = req.params as any;
+  const form = await Form.findOne({
+    where: { publicId, isActive: true },
+    attributes: ["id"],
+  });
+  if (!form) {
+    throw new AppError("ERR_FORM_NOT_FOUND", 404);
+  }
+  const responses = await FormResponse.findAll({
+    where: { formId: form.id },
+    attributes: ["metadata"],
+  });
+  const countByProduct: Record<number, number> = {};
+  responses.forEach((r) => {
+    const meta = (r.metadata || {}) as { menuItems?: Array<{ productId: number; quantity?: number }> };
+    const items = meta.menuItems || [];
+    items.forEach((item) => {
+      const id = item.productId;
+      if (id) {
+        countByProduct[id] = (countByProduct[id] || 0) + (item.quantity || 1);
+      }
+    });
+  });
+  const productIds = Object.entries(countByProduct)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 12)
+    .map(([id]) => Number(id));
+  return res.json({ productIds });
+};
+
+/** GET /public/forms/:slug/repeat-data?phone=... - Retorna dados para "Peça de novo" e pré-preenchimento por telefone. */
+export const getPublicRepeatData = async (req: Request, res: Response): Promise<Response> => {
+  const { publicId } = req.params as any;
+  const phoneRaw = String((req.query as any)?.phone || "");
+  if (!phoneRaw || phoneRaw.trim() === "") {
+    throw new AppError("Informe o telefone para buscar seu histórico.", 400);
+  }
+
+  const normalizePhone = (input: string) => {
+    return normalizeBrazilPhoneForWhatsapp(input);
+  };
+
+  const phoneNormalized = normalizePhone(phoneRaw);
+  if (!phoneNormalized || phoneNormalized.length < 10) {
+    throw new AppError("Telefone inválido. Informe DDD e número.", 400);
+  }
+
+  const form = await Form.findOne({
+    where: { publicId, isActive: true },
+    attributes: ["id", "companyId", "settings"],
+  });
+  if (!form) {
+    throw new AppError("ERR_FORM_NOT_FOUND", 404);
+  }
+
+  const settings = (form.settings as any) || {};
+  const maxOrders = Math.min(30, Math.max(1, Number(settings.pieceAgainMaxOrders ?? 5) || 5));
+  const maxItems = Math.min(50, Math.max(1, Number(settings.pieceAgainMaxItems ?? 6) || 6));
+
+  const contact = await Contact.findOne({
+    where: { number: phoneNormalized, companyId: form.companyId },
+    include: ["extraInfo"],
+  });
+
+  const decodeMaybeJson = (val: any) => {
+    const str = typeof val === "string" ? val : String(val ?? "");
+    if (str.startsWith("__json__:")) {
+      try {
+        return JSON.parse(str.replace("__json__:", ""));
+      } catch {
+        return str;
+      }
+    }
+    return str;
+  };
+
+  // Montar prefillByLabel a partir dos ContactCustomFields (name=label do campo).
+  // Se houver duplicados, o último vence (pela ordem do array).
+  const prefillByLabel: Record<string, any> = {};
+  if (contact && Array.isArray((contact as any).extraInfo)) {
+    (contact as any).extraInfo.forEach((info: any) => {
+      if (info?.name && info?.value != null && String(info.value).trim() !== "") {
+        prefillByLabel[String(info.name)] = decodeMaybeJson(info.value);
+      }
+    });
+  }
+
+  const responses = await FormResponse.findAll({
+    where: { formId: form.id, responderPhone: phoneNormalized },
+    attributes: ["metadata", "submittedAt"],
+    order: [["submittedAt", "DESC"]],
+    limit: maxOrders,
+  });
+
+  const countByProduct: Record<number, number> = {};
+  responses.forEach((r) => {
+    const meta = (r.metadata || {}) as any;
+    const items = Array.isArray(meta.menuItems) ? meta.menuItems : [];
+    items.forEach((item: any) => {
+      const id = Number(item?.productId);
+      if (!id) return;
+      const qty = Number(item?.quantity || 1) || 1;
+      countByProduct[id] = (countByProduct[id] || 0) + qty;
+    });
+  });
+
+  const productIds = Object.entries(countByProduct)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, maxItems)
+    .map(([id]) => Number(id));
+
+  return res.json({
+    phoneNormalized,
+    contactName: contact?.name || "",
+    productIds,
+    prefillByLabel,
+  });
 };

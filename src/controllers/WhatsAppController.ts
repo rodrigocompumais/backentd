@@ -175,9 +175,7 @@ export const remove = async (
   const { whatsappId } = req.params;
   const { companyId } = req.user;
 
-  await ShowWhatsAppService(whatsappId, companyId);
-
-  await DeleteWhatsAppService(whatsappId);
+  await DeleteWhatsAppService(whatsappId, companyId);
   removeWbot(+whatsappId);
 
   const io = getIO();

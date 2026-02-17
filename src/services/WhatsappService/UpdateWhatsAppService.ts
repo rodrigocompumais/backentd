@@ -111,6 +111,16 @@ const UpdateWhatsAppService = async ({
 
   const whatsapp = await ShowWhatsAppService(whatsappId, companyId);
 
+  // Se estiver atualizando o nome, garantir unicidade por empresa (excluindo esta conexão)
+  if (name && name.trim() && name !== whatsapp.name) {
+    const nameExists = await Whatsapp.findOne({
+      where: { name: name.trim(), companyId, id: { [Op.not]: whatsappId } }
+    });
+    if (nameExists) {
+      throw new AppError("Esse nome já está sendo utilizado por outra conexão", 400);
+    }
+  }
+
   // Se estiver atualizando credenciais Gupshup, validar
   const isUpdatingGupshup = provider === "gupshup" || (whatsapp.provider === "gupshup" && (gupshupApiKey || gupshupAppName));
   

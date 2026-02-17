@@ -6,6 +6,7 @@ import ShowContactService from "../ContactServices/ShowContactService";
 import { getIO } from "../../libs/socket";
 import GetDefaultWhatsAppByUser from "../../helpers/GetDefaultWhatsAppByUser";
 import ShowWhatsAppService from "../WhatsappService/ShowWhatsAppService";
+import { UniqueConstraintError } from "sequelize";
 
 interface Request {
   contactId: number;
@@ -41,38 +42,56 @@ const CreateTicketService = async ({
   if (!defaultWhatsapp)
     defaultWhatsapp = await GetDefaultWhatsApp(companyId);
 
+  if (!defaultWhatsapp?.id) {
+    throw new AppError("ERR_WHATSAPP_NOT_FOUND", 404);
+  }
+  const targetWhatsappId = Number(defaultWhatsapp.id);
+
   if (!reuseOpenTicket) {
-    await CheckContactOpenTickets(contactId, whatsappId);
+    await CheckContactOpenTickets(contactId, companyId, targetWhatsappId);
   }
 
   const { isGroup } = await ShowContactService(contactId, companyId);
 
-  const whereTicket: { contactId: number; companyId: number; whatsappId?: string | number } = {
-    contactId,
-    companyId,
-  };
-  if (whatsappId != null && whatsappId !== "") {
-    whereTicket.whatsappId = whatsappId;
+  // IMPORTANTE: a tabela Tickets tem índice único em (contactId, companyId, whatsappId).
+  // Não podemos "pegar qualquer ticket do contato" e depois trocar o whatsappId via UPDATE,
+  // pois isso pode colidir com um ticket existente e gerar UniqueConstraintError.
+  const whereTicket = { contactId, companyId, whatsappId: targetWhatsappId };
+
+  let ticket = await Ticket.findOne({ where: whereTicket, include: ["contact", "queue"] });
+
+  if (!ticket) {
+    try {
+      ticket = await Ticket.create({
+        contactId,
+        companyId,
+        whatsappId: targetWhatsappId,
+        status: status || "open",
+        isGroup,
+        userId,
+        queueId
+      });
+      ticket = await Ticket.findByPk(ticket.id, { include: ["contact", "queue"] });
+    } catch (err: any) {
+      // Corrida: se outro request criou ao mesmo tempo, buscar e seguir.
+      if (err instanceof UniqueConstraintError) {
+        ticket = await Ticket.findOne({ where: whereTicket, include: ["contact", "queue"] });
+      } else {
+        throw err;
+      }
+    }
   }
 
-  const [{ id }] = await Ticket.findOrCreate({
-    where: whereTicket,
-    defaults: {
-      contactId,
+  if (ticket) {
+    await ticket.update({
       companyId,
-      whatsappId: defaultWhatsapp.id,
-      status,
-      isGroup,
-      userId
-    }
-  });
-
-  await Ticket.update(
-    { companyId, queueId, userId, whatsappId: defaultWhatsapp.id, status: "open" },
-    { where: { id } }
-  );
-
-  const ticket = await Ticket.findByPk(id, { include: ["contact", "queue"] });
+      queueId,
+      userId,
+      whatsappId: targetWhatsappId,
+      status: "open"
+    });
+    await ticket.reload({ include: ["contact", "queue"] });
+  }
 
   if (!ticket) {
     throw new AppError("ERR_CREATING_TICKET");

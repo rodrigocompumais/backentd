@@ -4,6 +4,7 @@ import GetDefaultWhatsApp from "../../helpers/GetDefaultWhatsApp";
 import CreateOrUpdateContactService from "../ContactServices/CreateOrUpdateContactService";
 import FindOrCreateTicketService from "../TicketServices/FindOrCreateTicketService";
 import SendWhatsAppMessage from "../WbotServices/SendWhatsAppMessage";
+import { normalizeBrazilPhoneForWhatsapp } from "../../helpers/NormalizeBrazilPhone";
 
 const DEFAULT_EVALUATION_MESSAGE =
   "📋 Como foi sua experiência? Avalie nosso atendimento respondendo esta mensagem. Obrigado!";
@@ -19,16 +20,14 @@ const SendOrderEvaluationService = async ({
 }: Request): Promise<boolean> => {
   let phone = (response.responderPhone || "").trim();
   if (!phone && response.contact?.number) {
-    const raw = response.contact.number.replace(/[^0-9]/g, "");
-    phone = raw.length >= 10 ? (raw.startsWith("55") ? raw : "55" + raw) : "";
+    phone = normalizeBrazilPhoneForWhatsapp(response.contact.number);
   }
   if (!phone && response.answers?.length) {
     const phoneAnswer = response.answers.find(
       (a) => (a.field?.metadata as any)?.autoFieldType === "phone" || a.field?.fieldType === "phone"
     );
     if (phoneAnswer?.answer) {
-      const raw = String(phoneAnswer.answer).replace(/\D/g, "");
-      if (raw.length >= 10) phone = raw.startsWith("55") ? raw : "55" + raw;
+      phone = normalizeBrazilPhoneForWhatsapp(String(phoneAnswer.answer));
     }
   }
   if (!phone) return false;

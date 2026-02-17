@@ -29,18 +29,24 @@ const SendOrderStatusNotificationService = async ({
     return false;
   }
 
-  let phone = (response.responderPhone || "").trim();
-  if (!phone && response.contact?.number) {
-    phone = normalizeBrazilPhoneForWhatsapp(response.contact.number);
-  }
-  if (!phone && response.answers?.length) {
+  // IMPORTANTE: preferir o telefone digitado no formulário (answers),
+  // pois responderPhone/contact.number podem ter sido normalizados “errado” no passado.
+  let phoneRaw = "";
+  if (response.answers?.length) {
     const phoneAnswer = response.answers.find(
       (a) => (a.field?.metadata as any)?.autoFieldType === "phone" || a.field?.fieldType === "phone"
     );
     if (phoneAnswer?.answer) {
-      phone = normalizeBrazilPhoneForWhatsapp(String(phoneAnswer.answer));
+      phoneRaw = String(phoneAnswer.answer);
     }
   }
+  if (!phoneRaw) {
+    phoneRaw = (response.responderPhone || "").trim();
+  }
+  if (!phoneRaw && response.contact?.number) {
+    phoneRaw = String(response.contact.number || "").trim();
+  }
+  const phone = normalizeBrazilPhoneForWhatsapp(phoneRaw);
   if (!phone) {
     console.warn("SendOrderStatusNotification: não foi possível obter telefone", { responseId: response.id });
     return false;
@@ -82,6 +88,20 @@ const SendOrderStatusNotificationService = async ({
     }
 
     let contact = response.contact;
+
+    // Se já existe contato mas com número em formato antigo/errado, corrigir antes de criar/usar ticket
+    if (contact?.number) {
+      const normalizedContactNumber = normalizeBrazilPhoneForWhatsapp(String(contact.number));
+      if (normalizedContactNumber && normalizedContactNumber !== String(contact.number)) {
+        try {
+          await contact.update({ number: normalizedContactNumber });
+          await contact.reload();
+        } catch {
+          // se falhar, seguimos (melhor tentar enviar com o phone normalizado via novo contato/ticket)
+        }
+      }
+    }
+
     if (!contact) {
       contact = await CreateOrUpdateContactService({
         name: response.responderName || "Cliente",
@@ -90,6 +110,14 @@ const SendOrderStatusNotificationService = async ({
         isGroup: false,
         companyId: form.companyId,
       });
+    } else if (!contact.number || normalizeBrazilPhoneForWhatsapp(String(contact.number)) !== phone) {
+      // Garantir que o contato do ticket fique com o mesmo número normalizado do pedido
+      try {
+        await contact.update({ number: phone });
+        await contact.reload();
+      } catch {
+        // ignore
+      }
     }
 
     const ticket = await FindOrCreateTicketService(

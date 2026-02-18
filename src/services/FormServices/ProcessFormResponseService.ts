@@ -847,6 +847,8 @@ const ProcessFormResponseService = async ({
         const meta = (response.metadata || metadata || {}) as Record<string, unknown>;
         const tableNumberMsg = (meta?.tableNumber as string) || undefined;
         const garcomNameMsg = (meta?.garcomName as string) || undefined;
+        const deliveryFee = meta?.deliveryFee != null ? Number(meta.deliveryFee) : undefined;
+        const total = meta?.total != null ? Number(meta.total) : undefined;
         const orderMessage = await FormatMenuOrderMessage({
           menuItems: normalizedMenuItems && normalizedMenuItems.length > 0 ? normalizedMenuItems : menuItems,
           customerName: contactName || "Cliente",
@@ -855,6 +857,8 @@ const ProcessFormResponseService = async ({
           protocol: response.protocol || undefined,
           tableNumber: tableNumberMsg,
           garcomName: garcomNameMsg,
+          deliveryFee: deliveryFee,
+          total: total,
         });
         const sentMessage = await SendWhatsAppMessage({ body: orderMessage, ticket });
         if (sentMessage) {

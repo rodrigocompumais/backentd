@@ -23,6 +23,10 @@ interface Request {
   tableNumber?: string;
   /** Nome do garçom que anotou o pedido */
   garcomName?: string;
+  /** Taxa de entrega (se houver) */
+  deliveryFee?: number;
+  /** Total já calculado (incluindo taxa de entrega) */
+  total?: number;
 }
 
 const FormatMenuOrderMessage = async ({
@@ -33,6 +37,8 @@ const FormatMenuOrderMessage = async ({
   protocol,
   tableNumber,
   garcomName,
+  deliveryFee = 0,
+  total,
 }: Request): Promise<string> => {
   // Buscar informações completas dos produtos se não estiverem no menuItem
   const productIds = menuItems.map((item) => item.productId);
@@ -81,20 +87,37 @@ const FormatMenuOrderMessage = async ({
   message += `📱 *Telefone:* ${customerPhone}\n\n`;
   message += "📋 *ITENS DO PEDIDO:*\n\n";
 
-  let total = 0;
+  let calculatedTotal = total;
+  if (calculatedTotal == null) {
+    calculatedTotal = 0;
+    // Adicionar itens agrupados por grupo
+    Object.keys(itemsByGroup).forEach((grupo) => {
+      itemsByGroup[grupo].forEach((item) => {
+        const itemTotal = (item.productValue || 0) * item.quantity;
+        calculatedTotal += itemTotal;
+      });
+    });
+    // Adicionar taxa de entrega se houver
+    calculatedTotal += deliveryFee || 0;
+  }
 
-  // Adicionar itens agrupados por grupo
+  // Adicionar itens agrupados por grupo na mensagem
   Object.keys(itemsByGroup).forEach((grupo) => {
     message += `*${grupo}*\n`;
     itemsByGroup[grupo].forEach((item) => {
       const itemTotal = (item.productValue || 0) * item.quantity;
-      total += itemTotal;
       message += `• ${item.productName} - Qtd: ${item.quantity} - R$ ${itemTotal.toFixed(2).replace(".", ",")}\n`;
     });
     message += "\n";
   });
 
-  message += `💰 *TOTAL:* R$ ${total.toFixed(2).replace(".", ",")}\n`;
+  // Mostrar subtotal, taxa de entrega (se houver) e total
+  const itemsSubtotal = calculatedTotal - (deliveryFee || 0);
+  if (deliveryFee && deliveryFee > 0) {
+    message += `💰 *Subtotal:* R$ ${itemsSubtotal.toFixed(2).replace(".", ",")}\n`;
+    message += `🚚 *Taxa de entrega:* R$ ${deliveryFee.toFixed(2).replace(".", ",")}\n`;
+  }
+  message += `💰 *TOTAL:* R$ ${calculatedTotal.toFixed(2).replace(".", ",")}\n`;
 
   // Adicionar campos customizados se houver
   if (customFields && customFields.length > 0) {

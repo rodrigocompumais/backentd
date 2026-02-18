@@ -1,4 +1,3 @@
-import { createContactListFromTag, createContactListFromTagAndContactList } from "../../controllers/CampaignController";
 import AppError from "../../errors/AppError";
 import Campaign from "../../models/Campaign";
 import ContactList from "../../models/ContactList";
@@ -44,35 +43,7 @@ const UpdateService = async (data: Data, companyId: number): Promise<Campaign> =
     data.status = "PROGRAMADA";
   }
 
-  if(record.tagId !== data.tagId) {
-    if (data.tagId && typeof data.contactListId !== 'number') {
-      const tagId = data.tagId;
-      const campanhaNome = data.name;
-
-      try {
-        const contactListId = await createContactListFromTag(tagId, companyId, campanhaNome);
-
-        data.contactListId = contactListId;
-        data.tagId = Number(data.tagId);
-      } catch (error) {
-        throw new AppError('Error creating contact list');
-      }
-    }
-
-    if (data.tagId && typeof data.contactListId === 'number') {
-      const tagId = data.tagId;
-      const campanhaNome = data.name;
-
-      try {
-        const contactListId = await createContactListFromTagAndContactList(tagId, data.contactListId, companyId, campanhaNome);
-
-        data.contactListId = contactListId;
-        data.tagId = Number(data.tagId);
-      } catch (error) {
-        throw new AppError('Error creating contact list');
-      }
-    }
-  }
+  // Não criar lista de contatos automaticamente ao atualizar tag
 
   await record.update(data);
 

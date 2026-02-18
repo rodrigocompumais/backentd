@@ -25,6 +25,8 @@ routes.post("/campaigns/:id/cancel", isAuth, CampaignController.cancel);
 
 routes.post("/campaigns/:id/restart", isAuth, CampaignController.restart);
 
+routes.post("/campaigns/:id/duplicate", isAuth, CampaignController.duplicate);
+
 routes.post(
   "/campaigns/:id/media-upload",
   isAuth,

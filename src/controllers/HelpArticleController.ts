@@ -1,6 +1,7 @@
 import * as Yup from "yup";
 import { Request, Response } from "express";
 import { getIO } from "../libs/socket";
+import { head } from "lodash";
 
 import ListService from "../services/HelpArticleService/ListService";
 import CreateService from "../services/HelpArticleService/CreateService";
@@ -127,4 +128,23 @@ export const remove = async (
   });
 
   return res.status(200).json({ message: "Help article deleted" });
+};
+
+export const uploadImage = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  const files = req.files as Express.Multer.File[];
+  const file = head(files);
+
+  if (!file) {
+    throw new AppError("Nenhum arquivo enviado", 400);
+  }
+
+  const imageUrl = `/public/help-articles/${file.filename}`;
+
+  return res.status(200).json({
+    url: imageUrl,
+    filename: file.filename
+  });
 };

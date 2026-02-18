@@ -3,6 +3,7 @@ import Task from "../../models/Task";
 import User from "../../models/User";
 import Contact from "../../models/Contact";
 import Ticket from "../../models/Ticket";
+import AppError from "../../errors/AppError";
 
 interface Request {
   companyId: number;
@@ -35,6 +36,11 @@ const ListTasksService = async ({
   pageNumber = "1",
   limit = "20"
 }: Request): Promise<Response> => {
+  // Validação de companyId
+  if (!companyId || companyId === undefined || companyId === null) {
+    throw new AppError("companyId é obrigatório e não pode ser undefined", 400);
+  }
+
   const offset = parseInt(limit) * (parseInt(pageNumber) - 1);
 
   let whereCondition: Filterable["where"] = {

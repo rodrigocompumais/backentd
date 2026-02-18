@@ -25,12 +25,21 @@ const isAuth = (req: Request, res: Response, next: NextFunction): void => {
   try {
     const decoded = verify(token, authConfig.secret);
     const { id, profile, companyId } = decoded as TokenPayload;
+    
+    // Validação de companyId no token
+    if (!companyId || companyId === undefined || companyId === null) {
+      throw new AppError("Token inválido: companyId não encontrado", 403);
+    }
+    
     req.user = {
       id,
       profile,
       companyId
     };
   } catch (err) {
+    if (err instanceof AppError) {
+      throw err;
+    }
     throw new AppError("Invalid token. We'll try to assign a new one on next request", 403);
   }
 

@@ -11,6 +11,7 @@ import Tag from "../../models/Tag";
 import TicketTag from "../../models/TicketTag";
 import { intersection } from "lodash";
 import Whatsapp from "../../models/Whatsapp";
+import AppError from "../../errors/AppError";
 
 interface Request {
   searchParam?: string;
@@ -47,6 +48,11 @@ const ListTicketsServiceKanban = async ({
   withUnreadMessages,
   companyId
 }: Request): Promise<Response> => {
+  // Validação de companyId
+  if (!companyId || companyId === undefined || companyId === null) {
+    throw new AppError("companyId é obrigatório e não pode ser undefined", 400);
+  }
+
   let whereCondition: Filterable["where"] = {
     [Op.or]: [{ userId }, { status: "pending" }],
     queueId: { [Op.or]: [queueIds, null] }
@@ -193,7 +199,7 @@ const ListTicketsServiceKanban = async ({
     const ticketsUserFilter: any[] | null = [];
     for (let user of users) {
       const ticketUsers = await Ticket.findAll({
-        where: { userId: user }
+        where: { userId: user, companyId }
       });
       if (ticketUsers) {
         ticketsUserFilter.push(ticketUsers.map(t => t.id));

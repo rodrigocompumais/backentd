@@ -54,6 +54,11 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
   const userId = req.user.id;
   const { companyId } = req.user;
 
+  // Validação de companyId
+  if (!companyId || companyId === undefined || companyId === null) {
+    return res.status(400).json({ error: "companyId é obrigatório" });
+  }
+
   let queueIds: number[] = [];
   let tagsIds: number[] = [];
   let usersIds: number[] = [];
@@ -128,6 +133,11 @@ export const kanban = async (req: Request, res: Response): Promise<Response> => 
 
   const userId = req.user.id;
   const { companyId } = req.user;
+
+  // Validação de companyId
+  if (!companyId || companyId === undefined || companyId === null) {
+    return res.status(400).json({ error: "companyId é obrigatório" });
+  }
 
   let queueIds: number[] = [];
   let tagsIds: number[] = [];

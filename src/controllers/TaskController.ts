@@ -34,6 +34,11 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
     limit
   } = req.query;
 
+  // Validação de companyId
+  if (!companyId || companyId === undefined || companyId === null) {
+    return res.status(400).json({ error: "companyId é obrigatório" });
+  }
+
   const tasks = await ListTasksService({
     companyId,
     userId,

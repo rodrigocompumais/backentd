@@ -34,7 +34,7 @@ const CreateTaskService = async (taskData: TaskData): Promise<Task> => {
 
   // Se tem dueDate e não é para pular a criação do agendamento, criar agendamento vinculado
   // Verificar se já existe um agendamento para evitar duplicação
-  const hasDueDate = task.dueDate != null && task.dueDate !== undefined && task.dueDate !== '';
+  const hasDueDate = task.dueDate != null && task.dueDate !== undefined;
   if (hasDueDate && !skipAppointmentCreation) {
     logger.info(`CreateTaskService: Tentando criar agendamento para tarefa ${task.id} com dueDate: ${task.dueDate}`);
     try {

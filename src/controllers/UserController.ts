@@ -185,6 +185,83 @@ export const setLanguage = async (req: Request, res: Response): Promise<Response
   return res.status(200).json({message: "Language updated successfully"});
 }
 
+export const updateAvailabilitySettings = async (req: Request, res: Response): Promise<Response> => {
+  const { userId } = req.params;
+  const { companyId, profile } = req.user;
+  const { availabilitySettings } = req.body;
+
+  // Apenas admin pode atualizar configurações de outros usuários
+  if (Number(userId) !== Number(req.user.id) && profile !== "admin") {
+    throw new AppError("Você não tem permissão para atualizar configurações de outros usuários", 403);
+  }
+
+  const user = await User.findOne({
+    where: { id: userId, companyId },
+  });
+
+  if (!user) {
+    throw new AppError("Usuário não encontrado", 404);
+  }
+
+  // Validar estrutura das configurações
+  if (availabilitySettings) {
+    if (typeof availabilitySettings.enabled !== "boolean") {
+      throw new AppError("Campo 'enabled' deve ser um booleano", 400);
+    }
+
+    if (availabilitySettings.weekdays) {
+      const validDays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+      for (const day of Object.keys(availabilitySettings.weekdays)) {
+        if (!validDays.includes(day)) {
+          throw new AppError(`Dia inválido: ${day}`, 400);
+        }
+        const dayConfig = availabilitySettings.weekdays[day];
+        if (dayConfig.enabled && (!dayConfig.startTime || !dayConfig.endTime)) {
+          throw new AppError(`Dia ${day} requer startTime e endTime quando enabled é true`, 400);
+        }
+        // Validar formato de horário (HH:MM)
+        if (dayConfig.startTime && !/^\d{2}:\d{2}$/.test(dayConfig.startTime)) {
+          throw new AppError(`Formato de horário inválido para ${day}.startTime. Use HH:MM`, 400);
+        }
+        if (dayConfig.endTime && !/^\d{2}:\d{2}$/.test(dayConfig.endTime)) {
+          throw new AppError(`Formato de horário inválido para ${day}.endTime. Use HH:MM`, 400);
+        }
+      }
+    }
+  }
+
+  await user.update({ availabilitySettings });
+
+  const io = getIO();
+  io.to(`company-${companyId}-mainchannel`).emit(`company-${companyId}-user`, {
+    action: "update",
+    user: user.toJSON(),
+  });
+
+  return res.status(200).json({ availabilitySettings: user.availabilitySettings });
+};
+
+export const getAvailabilitySettings = async (req: Request, res: Response): Promise<Response> => {
+  const { userId } = req.params;
+  const { companyId, profile } = req.user;
+
+  // Apenas admin pode ver configurações de outros usuários
+  if (Number(userId) !== Number(req.user.id) && profile !== "admin") {
+    throw new AppError("Você não tem permissão para ver configurações de outros usuários", 403);
+  }
+
+  const user = await User.findOne({
+    where: { id: userId, companyId },
+    attributes: ["id", "name", "email", "availabilitySettings"],
+  });
+
+  if (!user) {
+    throw new AppError("Usuário não encontrado", 404);
+  }
+
+  return res.status(200).json({ availabilitySettings: user.availabilitySettings || null });
+};
+
 export const uploadAvatar = async (req: Request, res: Response): Promise<Response> => {
   const { userId } = req.params;
   const { companyId, id: requestUserId } = req.user;

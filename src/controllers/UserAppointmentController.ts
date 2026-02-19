@@ -16,13 +16,14 @@ interface IndexQuery {
 }
 
 export const index = async (req: Request, res: Response): Promise<Response> => {
-    const { companyId, id } = req.user;
+    const { companyId, id, profile } = req.user;
     const userId = Number(id);
     const { filterType, searchParam, pageNumber } = req.query as IndexQuery;
 
     const { appointments, count, hasMore } = await ListService({
         companyId,
         userId,
+        userProfile: profile,
         filterType,
         searchParam,
         pageNumber,

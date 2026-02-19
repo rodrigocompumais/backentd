@@ -4,6 +4,7 @@ import UserAppointment from "../../models/UserAppointment";
 interface Request {
     companyId: number;
     userId?: number;
+    userProfile?: string; // Profile do usuário (admin, user, etc)
     filterType?: "all" | "myAppointments" | "assignedToMe";
     searchParam?: string;
     pageNumber?: string;
@@ -18,31 +19,46 @@ interface Response {
 const ListService = async ({
     companyId,
     userId,
+    userProfile,
     filterType = "all",
     searchParam,
     pageNumber = "1",
 }: Request): Promise<Response> => {
-    let whereCondition: any = {
-        companyId,
-    };
+    const conditions: any[] = [
+        { companyId }
+    ];
 
-    // Apply filter based on filterType
-    if (filterType === "myAppointments" && userId) {
-        whereCondition.userId = userId;
-    } else if (filterType === "assignedToMe" && userId) {
-        whereCondition.assignedUserId = userId;
+    // Se o usuário não for admin, só pode ver seus próprios agendamentos
+    // (criados por ele ou atribuídos a ele)
+    if (userProfile !== "admin" && userId) {
+        conditions.push({
+            [Op.or]: [
+                { userId: userId },
+                { assignedUserId: userId }
+            ]
+        });
+    } else {
+        // Admin pode ver todos, mas ainda respeita o filterType se especificado
+        if (filterType === "myAppointments" && userId) {
+            conditions.push({ userId: userId });
+        } else if (filterType === "assignedToMe" && userId) {
+            conditions.push({ assignedUserId: userId });
+        }
     }
 
     // Apply search filter
     if (searchParam) {
-        whereCondition = {
-            ...whereCondition,
+        conditions.push({
             [Op.or]: [
                 { title: { [Op.like]: `%${searchParam}%` } },
                 { description: { [Op.like]: `%${searchParam}%` } },
-            ],
-        };
+            ]
+        });
     }
+
+    const whereCondition = conditions.length > 1 
+        ? { [Op.and]: conditions }
+        : conditions[0];
 
     const limit = 20;
     const offset = limit * (+pageNumber - 1);

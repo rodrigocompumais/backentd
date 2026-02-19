@@ -70,6 +70,12 @@ class User extends Model<User> {
   @Column
   repeatPendingChatSound: boolean;
 
+  @Column({
+    type: DataType.JSONB,
+    allowNull: true,
+  })
+  availabilitySettings: any; // Configurações de disponibilidade para agendamentos
+
   @CreatedAt
   createdAt: Date;
 

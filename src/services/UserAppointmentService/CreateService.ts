@@ -1,7 +1,9 @@
 import AppError from "../../errors/AppError";
 import UserAppointment from "../../models/UserAppointment";
 import CreateTaskService from "../TaskServices/CreateTaskService";
+import ValidateAvailabilityPeriodService from "./ValidateAvailabilityPeriodService";
 import { logger } from "../../utils/logger";
+import { Op } from "sequelize";
 
 interface Request {
     title: string;
@@ -33,6 +35,45 @@ const CreateService = async ({
         throw new AppError("End time must be after start time", 400);
     }
 
+    // Validar se o horário está dentro do período permitido para o usuário
+    const availabilityValidation = await ValidateAvailabilityPeriodService({
+        userId,
+        assignedUserId,
+        startTime: new Date(startTime),
+        endTime: new Date(endTime),
+        companyId,
+    });
+
+    if (!availabilityValidation.valid) {
+        throw new AppError(availabilityValidation.reason || "Horário fora do período permitido", 400);
+    }
+
+    // Verificar se já existe um agendamento idêntico (mesmo título, startTime e companyId) nos últimos 5 segundos
+    // Isso evita duplicação por múltiplas chamadas acidentais
+    const fiveSecondsAgo = new Date(Date.now() - 5000);
+    const existingAppointment = await UserAppointment.findOne({
+        where: {
+            title,
+            startTime: new Date(startTime),
+            companyId,
+            createdAt: {
+                [Op.gte]: fiveSecondsAgo
+            }
+        }
+    });
+
+    if (existingAppointment) {
+        logger.info(`Agendamento duplicado detectado. Retornando agendamento existente ${existingAppointment.id}`);
+        await existingAppointment.reload({
+            include: [
+                { association: "user", attributes: ["id", "name", "email"] },
+                { association: "assignedUser", attributes: ["id", "name", "email"] },
+                { association: "task" },
+            ],
+        });
+        return existingAppointment;
+    }
+
     // Create the appointment
     const appointment = await UserAppointment.create({
         title,
@@ -46,6 +87,8 @@ const CreateService = async ({
         reminderMinutes,
         notificationSent: false,
     });
+
+    logger.info(`Agendamento ${appointment.id} criado: ${title} em ${startTime}`);
 
     // Se não for para pular a criação da tarefa, criar tarefa vinculada
     if (!skipTaskCreation) {

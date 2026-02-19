@@ -24,6 +24,10 @@ userRoutes.delete("/users/:userId", isAuth, UserController.remove);
 
 userRoutes.post("/users/set-language/:newLanguage", isAuth, UserController.setLanguage);
 
+userRoutes.put("/users/:userId/availability-settings", isAuth, UserController.updateAvailabilitySettings);
+
+userRoutes.get("/users/:userId/availability-settings", isAuth, UserController.getAvailabilitySettings);
+
 userRoutes.post(
   "/users/:userId/avatar", 
   isAuth, 

@@ -507,7 +507,22 @@ export const getPublicRepeatData = async (req: Request, res: Response): Promise<
     limit: maxOrders,
   });
 
-  const countByProduct: Record<number, number> = {};
+  // Estrutura para armazenar produtos com suas variações mais frequentes
+  interface ProductRepeatData {
+    productId: number;
+    count: number;
+    variationOptionId?: number; // Variação mais frequente
+    isHalfAndHalf?: boolean; // Se é meio a meio
+    half1ProductId?: number;
+    half2ProductId?: number;
+    half1OptionId?: number;
+    half2OptionId?: number;
+  }
+
+  const productDataMap: Record<number, ProductRepeatData> = {};
+  const variationCountMap: Record<string, number> = {}; // "productId_optionId" -> count
+  const halfAndHalfCountMap: Record<string, number> = {}; // "baseId_half1Id_half2Id" -> count
+
   responses.forEach((r) => {
     const meta = (r.metadata || {}) as any;
     const items = Array.isArray(meta.menuItems) ? meta.menuItems : [];
@@ -515,19 +530,78 @@ export const getPublicRepeatData = async (req: Request, res: Response): Promise<
       const id = Number(item?.productId);
       if (!id) return;
       const qty = Number(item?.quantity || 1) || 1;
-      countByProduct[id] = (countByProduct[id] || 0) + qty;
+
+      // Contar produto simples
+      if (!productDataMap[id]) {
+        productDataMap[id] = { productId: id, count: 0 };
+      }
+      productDataMap[id].count += qty;
+
+      // Se tem variação, contar a variação específica
+      if (item.variationOptionId) {
+        const varKey = `${id}_${item.variationOptionId}`;
+        variationCountMap[varKey] = (variationCountMap[varKey] || 0) + qty;
+      }
+
+      // Se é meio a meio, contar a combinação
+      if (item.type === "halfAndHalf" && item.half1ProductId && item.half2ProductId) {
+        const halfKey = `${id}_${item.half1ProductId}_${item.half2ProductId}_${item.half1OptionId || 0}_${item.half2OptionId || 0}`;
+        halfAndHalfCountMap[halfKey] = (halfAndHalfCountMap[halfKey] || 0) + qty;
+      }
     });
   });
 
-  const productIds = Object.entries(countByProduct)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, maxItems)
-    .map(([id]) => Number(id));
+  // Determinar a variação mais frequente para cada produto
+  Object.keys(variationCountMap).forEach((key) => {
+    const [productIdStr, optionIdStr] = key.split("_");
+    const productId = Number(productIdStr);
+    const optionId = Number(optionIdStr);
+    if (productDataMap[productId]) {
+      const currentVarKey = productDataMap[productId].variationOptionId
+        ? `${productId}_${productDataMap[productId].variationOptionId}`
+        : null;
+      const currentCount = currentVarKey ? variationCountMap[currentVarKey] || 0 : 0;
+      if (variationCountMap[key] > currentCount) {
+        productDataMap[productId].variationOptionId = optionId;
+      }
+    }
+  });
+
+  // Determinar a combinação meio a meio mais frequente
+  let mostFrequentHalfAndHalf: { baseId: number; half1Id: number; half2Id: number; half1OptionId?: number; half2OptionId?: number; count: number } | null = null;
+  Object.entries(halfAndHalfCountMap).forEach(([key, count]) => {
+    const parts = key.split("_");
+    if (parts.length >= 3) {
+      const baseId = Number(parts[0]);
+      const half1Id = Number(parts[1]);
+      const half2Id = Number(parts[2]);
+      const half1OptionId = parts[3] ? Number(parts[3]) : undefined;
+      const half2OptionId = parts[4] ? Number(parts[4]) : undefined;
+      if (!mostFrequentHalfAndHalf || count > mostFrequentHalfAndHalf.count) {
+        mostFrequentHalfAndHalf = { baseId, half1Id, half2Id, half1OptionId, half2OptionId, count };
+      }
+    }
+  });
+
+  const productData = Object.values(productDataMap)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, maxItems);
 
   return res.json({
     phoneNormalized,
     contactName: contact?.name || "",
-    productIds,
+    productIds: productData.map((p) => p.productId),
+    productData: productData.map((p) => ({
+      productId: p.productId,
+      variationOptionId: p.variationOptionId,
+    })),
+    mostFrequentHalfAndHalf: mostFrequentHalfAndHalf ? {
+      baseProductId: mostFrequentHalfAndHalf.baseId,
+      half1ProductId: mostFrequentHalfAndHalf.half1Id,
+      half2ProductId: mostFrequentHalfAndHalf.half2Id,
+      half1OptionId: mostFrequentHalfAndHalf.half1OptionId,
+      half2OptionId: mostFrequentHalfAndHalf.half2OptionId,
+    } : null,
     prefillByLabel,
   });
 };

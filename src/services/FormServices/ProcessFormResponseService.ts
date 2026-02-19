@@ -562,6 +562,15 @@ const ProcessFormResponseService = async ({
   }
 
   // Auto-ocupação de mesa: quando cliente pede via cardápio com mesa livre (?mesa=X)
+  // Verificar se requireMesaOccupation está habilitado (padrão: true para compatibilidade)
+  const requireMesaOccupationRaw = formSettings?.requireMesaOccupation;
+  const requireMesaOccupation = requireMesaOccupationRaw !== false; // Default true
+  console.log("ProcessFormResponseService: requireMesaOccupation check:", {
+    raw: requireMesaOccupationRaw,
+    final: requireMesaOccupation,
+    formSettingsKeys: Object.keys(formSettings || {}),
+  });
+  
   if (tableId != null && contact) {
     try {
       const mesaId = typeof tableId === "string" ? parseInt(tableId, 10) : Number(tableId);
@@ -569,18 +578,48 @@ const ProcessFormResponseService = async ({
         const mesa = await Mesa.findOne({
           where: { id: mesaId, companyId: form.companyId },
         });
-        if (mesa && mesa.status === "livre") {
-          const mesaOcupada = await OcuparMesaService({
+        if (mesa) {
+          console.log("ProcessFormResponseService: Mesa found for order:", {
             mesaId: mesa.id,
-            companyId: form.companyId,
-            contactId: contact.id,
-            ticketId: ticket?.id,
+            mesaStatus: mesa.status,
+            requireMesaOccupation,
+            willOccupy: requireMesaOccupation && mesa.status === "livre",
           });
-          const updatedMeta = { ...(response.metadata as object || {}), tableNumber: mesa.name || mesa.number };
-          await response.update({
-            metadata: updatedMeta,
-            ...(mesaOcupada.sessionId && { mesaSessionId: mesaOcupada.sessionId }),
-          });
+          
+          if (requireMesaOccupation && mesa.status === "livre") {
+            // Modo tradicional: ocupar mesa automaticamente
+            console.log("ProcessFormResponseService: Ocupando mesa automaticamente");
+            const mesaOcupada = await OcuparMesaService({
+              mesaId: mesa.id,
+              companyId: form.companyId,
+              contactId: contact.id,
+              ticketId: ticket?.id,
+            });
+            const updatedMeta = { ...(response.metadata as object || {}), tableNumber: mesa.name || mesa.number };
+            await response.update({
+              metadata: updatedMeta,
+              ...(mesaOcupada.sessionId && { mesaSessionId: mesaOcupada.sessionId }),
+            });
+          } else if (!requireMesaOccupation) {
+            // Modo sem controle: apenas associar mesa ao pedido sem ocupar
+            console.log("ProcessFormResponseService: Modo sem ocupação - apenas associando mesa ao pedido");
+            const updatedMeta = { ...(response.metadata as object || {}), tableNumber: mesa.name || mesa.number };
+            const updatePayload: any = { metadata: updatedMeta };
+            
+            // Se mesa já estiver ocupada, usar sessionId existente
+            if (mesa.status === "ocupada" && mesa.sessionId) {
+              updatePayload.mesaSessionId = mesa.sessionId;
+            }
+            
+            await response.update(updatePayload);
+          } else if (mesa.status === "ocupada" && mesa.sessionId) {
+            // Mesa já ocupada: associar pedido à sessão existente
+            const updatedMeta = { ...(response.metadata as object || {}), tableNumber: mesa.name || mesa.number };
+            await response.update({
+              metadata: updatedMeta,
+              mesaSessionId: mesa.sessionId,
+            });
+          }
         }
       }
     } catch (err: any) {

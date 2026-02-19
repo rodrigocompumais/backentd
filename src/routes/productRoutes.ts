@@ -13,6 +13,7 @@ const requireLanchonetes = hasCompanyModule("lanchonetes");
 routes.get("/products", isAuth, requireLanchonetes, ProductController.index);
 routes.post("/products", isAuth, requireLanchonetes, ProductController.store);
 routes.post("/products/upload-image", isAuth, requireLanchonetes, upload.single("image"), ProductController.uploadImage);
+routes.post("/products/:id/duplicate", isAuth, requireLanchonetes, ProductController.duplicate);
 routes.get("/products/:id", isAuth, requireLanchonetes, ProductController.show);
 routes.put("/products/:id", isAuth, requireLanchonetes, ProductController.update);
 routes.delete("/products/:id", isAuth, requireLanchonetes, ProductController.destroy);

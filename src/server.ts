@@ -15,6 +15,7 @@ import CheckAgendamentoRemindersService from "./services/AppointmentServices/Che
 import CheckWaitlistAndNotifyService from "./services/AppointmentServices/CheckWaitlistAndNotifyService";
 import CheckOrderAutoConfirmService from "./services/OrderServices/CheckOrderAutoConfirmService";
 import CloseStuckTicketsFromDisconnectedWhatsAppService from "./services/TicketServices/CloseStuckTicketsFromDisconnectedWhatsAppService";
+import AutoLiberarMesasService from "./services/MesaServices/AutoLiberarMesasService";
 import { Op } from "sequelize";
 import PrintPedido from "./models/PrintPedido";
 import FormResponse from "./models/FormResponse";
@@ -198,6 +199,22 @@ cron.schedule("0 0 * * *", async () => {
     }
   } catch (error: any) {
     logger.error("Erro no job de fechamento de tickets travados:", error);
+  }
+});
+
+// Job para liberar automaticamente mesas/comandas ocupadas há mais de 24 horas
+// Roda a cada hora
+cron.schedule("0 * * * *", async () => {
+  try {
+    logger.info("Iniciando verificação de mesas ocupadas há mais de 24 horas...");
+    const result = await AutoLiberarMesasService();
+    if (result.total > 0) {
+      logger.info(`Liberação automática: ${result.total} mesa(s) liberada(s) automaticamente após 24 horas.`);
+    } else {
+      logger.info("Verificação de mesas concluída (nenhuma mesa para liberar).");
+    }
+  } catch (error: any) {
+    logger.error("Erro no job de liberação automática de mesas:", error);
   }
 });
 

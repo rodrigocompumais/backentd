@@ -75,13 +75,14 @@ const UpdateFormService = async ({
   const oldIsMenuForm = (form.settings as any)?.formType === "cardapio";
   const oldIsAnonymous = form.isAnonymous;
 
-  // Log para debug - verificar o que está sendo recebido
-  if (formData.settings) {
-    const settings = formData.settings as any;
-    console.log("UpdateFormService: Received settings with mesaPrintConfig:", settings.mesaPrintConfig);
-    console.log("UpdateFormService: Received settings with deliveryPrintDeviceIds:", settings.deliveryPrintDeviceIds);
-    console.log("UpdateFormService: Full received settings:", JSON.stringify(settings, null, 2));
-  }
+    // Log para debug - verificar o que está sendo recebido
+    if (formData.settings) {
+      const settings = formData.settings as any;
+      console.log("UpdateFormService: Received settings with mesaPrintConfig:", settings.mesaPrintConfig);
+      console.log("UpdateFormService: Received settings with deliveryPrintDeviceIds:", settings.deliveryPrintDeviceIds);
+      console.log("UpdateFormService: Received requireMesaOccupation:", settings.requireMesaOccupation);
+      console.log("UpdateFormService: Full received settings:", JSON.stringify(settings, null, 2));
+    }
 
   // Se settings foi fornecido, fazer merge com settings existente para preservar outros campos
   // IMPORTANTE: Arrays vazios devem ser substituídos, não preservados
@@ -110,9 +111,15 @@ const UpdateFormService = async ({
       newSettings.formType = newSettingsData.formType;
     }
     
+    // Garantir que requireMesaOccupation seja preservado quando enviado (pode ser false)
+    if (newSettingsData.hasOwnProperty('requireMesaOccupation')) {
+      newSettings.requireMesaOccupation = newSettingsData.requireMesaOccupation;
+    }
+    
     formData.settings = newSettings;
     console.log("UpdateFormService: Merged settings:", JSON.stringify(newSettings, null, 2));
     console.log("UpdateFormService: mesaPrintConfig in merged settings:", newSettings.mesaPrintConfig);
+    console.log("UpdateFormService: requireMesaOccupation in merged settings:", newSettings.requireMesaOccupation);
   }
 
   // Se settings foi fornecido, garantir que seja salvo (via Sequelize para serialização correta do JSONB)

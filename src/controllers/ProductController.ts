@@ -4,6 +4,7 @@ import { getIO } from "../libs/socket";
 import CreateProductService from "../services/ProductServices/CreateProductService";
 import UpdateProductService from "../services/ProductServices/UpdateProductService";
 import DeleteProductService from "../services/ProductServices/DeleteProductService";
+import DuplicateProductService from "../services/ProductServices/DuplicateProductService";
 import ListProductsService from "../services/ProductServices/ListProductsService";
 import ShowProductService from "../services/ProductServices/ShowProductService";
 import Product from "../models/Product";
@@ -266,4 +267,25 @@ export const uploadImage = async (req: Request, res: Response): Promise<Response
   const baseUrl = process.env.BACKEND_URL || "http://localhost:3333";
   const imageUrl = `${baseUrl.replace(/\/$/, "")}/public/products/${file.filename}`;
   return res.json({ imageUrl });
+};
+
+export const duplicate = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  const { id } = req.params;
+  const { companyId } = req.user;
+
+  const product = await DuplicateProductService({
+    productId: Number(id),
+    companyId,
+  });
+
+  const io = getIO();
+  io.to(`company-${companyId}-mainchannel`).emit(`company-${companyId}-product`, {
+    action: "create",
+    product,
+  });
+
+  return res.status(200).json(product);
 };

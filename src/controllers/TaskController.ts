@@ -65,7 +65,13 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
     description: Yup.string().nullable(),
     status: Yup.string().oneOf(["pending", "in_progress", "completed", "cancelled"]),
     priority: Yup.string().oneOf(["low", "medium", "high", "urgent"]),
-    dueDate: Yup.date().nullable(),
+    dueDate: Yup.date().nullable().transform((value, originalValue) => {
+      // Se for string vazia ou null, retornar null
+      if (!originalValue || originalValue === '') return null;
+      // Se for string, converter para Date
+      if (typeof originalValue === 'string') return new Date(originalValue);
+      return value;
+    }),
     category: Yup.string().nullable(),
     assignedToId: Yup.number().nullable(),
     contactId: Yup.number().nullable(),

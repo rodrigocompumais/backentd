@@ -61,6 +61,73 @@ export const translateMessage = async (
 };
 
 /**
+ * Traduz múltiplas mensagens em batch (otimização de performance)
+ */
+export const translateMessagesBatch = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  try {
+    const { companyId } = req.user;
+    const { messageIds, targetLanguage } = req.body;
+
+    // Validações
+    if (!messageIds || !Array.isArray(messageIds) || messageIds.length === 0) {
+      return res.status(400).json({ error: "messageIds deve ser um array não vazio" });
+    }
+
+    // Limitar batch size para evitar sobrecarga
+    const MAX_BATCH_SIZE = 20;
+    const messageIdsToProcess = messageIds.slice(0, MAX_BATCH_SIZE);
+
+    // Obter idioma de destino
+    let targetLang = targetLanguage;
+    if (!targetLang) {
+      targetLang = await TranslationService.getCompanyLanguage(companyId);
+    }
+
+    // Buscar todas as mensagens de uma vez
+    const messages = await Message.findAll({
+      where: {
+        id: messageIdsToProcess,
+        companyId
+      },
+      attributes: ['id', 'body']
+    });
+
+    // Traduzir em paralelo (limitado para evitar sobrecarga)
+    const translationPromises = messages.map(message => 
+      TranslationService.translateText({
+        text: message.body,
+        targetLanguage: targetLang,
+        companyId
+      }).then(result => ({
+        messageId: message.id,
+        ...result
+      })).catch(err => ({
+        messageId: message.id,
+        error: err.message || "Erro ao traduzir"
+      }))
+    );
+
+    const results = await Promise.all(translationPromises);
+
+    return res.status(200).json({ translations: results });
+  } catch (err: any) {
+    console.error("Erro ao traduzir mensagens em batch:", err);
+    
+    if (err instanceof AppError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+
+    return res.status(500).json({ 
+      error: "Erro ao traduzir mensagens em batch",
+      message: err.message 
+    });
+  }
+};
+
+/**
  * Traduz um texto fornecido diretamente
  */
 export const translateText = async (

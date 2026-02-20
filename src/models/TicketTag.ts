@@ -11,7 +11,15 @@ import Tag from "./Tag";
 import Ticket from "./Ticket";
 
 @Table({
-  tableName: 'TicketTags'
+  tableName: 'TicketTags',
+  indexes: [
+    // Índice composto para queries frequentes de tags por ticket
+    { fields: ["tagId", "ticketId"] },
+    // Índice para ticketId (usado em filtros)
+    { fields: ["ticketId"] },
+    // Índice para tagId (usado em filtros)
+    { fields: ["tagId"] }
+  ]
 })
 class TicketTag extends Model<TicketTag> {
   @ForeignKey(() => Ticket)

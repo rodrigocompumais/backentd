@@ -12,6 +12,7 @@ interface Request {
   companyId: number;
   pageNumber?: string;
   queues?: number[];
+  includeQuoted?: boolean; // Opcional: incluir mensagens citadas
 }
 
 interface Response {
@@ -25,7 +26,8 @@ const ListMessagesService = async ({
   pageNumber = "1",
   ticketId,
   companyId,
-  queues = []
+  queues = [],
+  includeQuoted = true
 }: Request): Promise<Response> => {
   const ticket = await ShowTicketService(ticketId, companyId);
 
@@ -53,39 +55,65 @@ const ListMessagesService = async ({
     };
   }
 
+  // Construir includes otimizados
+  const includes: any[] = [
+    {
+      model: Contact,
+      as: "contact",
+      required: false,
+      attributes: ["id", "name", "number", "profilePicUrl"] // Limitar atributos
+    }
+  ];
+
+  // Incluir quotedMsg apenas se necessário
+  if (includeQuoted) {
+    includes.push({
+      model: Message,
+      as: "quotedMsg",
+      required: false,
+      attributes: ["id", "body", "mediaType", "mediaUrl", "fromMe", "isDeleted", "createdAt"], // Limitar atributos
+      include: [{
+        model: Contact,
+        as: "contact",
+        required: false,
+        attributes: ["id", "name"] // Limitar atributos
+      }]
+    });
+  }
+
+  // Queue apenas se necessário (geralmente não usado na listagem de mensagens)
+  includes.push({
+    model: Queue,
+    as: "queue",
+    required: false,
+    attributes: ["id", "name"] // Limitar atributos
+  });
+
+  // Para primeira página: buscar mais recentes primeiro, depois reverter
+  // Para páginas seguintes: buscar mais antigas primeiro (scroll infinito)
+  const isFirstPage = pageNumber === "1";
+  
   const { count, rows: messages } = await Message.findAndCountAll({
     ...options,
     limit,
-    include: [
-      {
-        model: Contact,
-        as: "contact",
-        required: false // LEFT JOIN para incluir mensagens sem contactId (mensagens do bot)
-      },
-      {
-        model: Message,
-        as: "quotedMsg",
-        required: false,
-        include: [{
-          model: Contact,
-          as: "contact",
-          required: false
-        }]
-      },
-      {
-        model: Queue,
-        as: "queue",
-        required: false
-      }
-    ],
+    attributes: {
+      exclude: ["dataJson"] // Excluir campo pesado que não é usado na listagem
+    },
+    include: includes,
     offset,
-    order: [["createdAt", "DESC"]]
+    order: isFirstPage 
+      ? [["createdAt", "DESC"], ["id", "DESC"]] // Primeira página: mais recentes primeiro
+      : [["createdAt", "ASC"], ["id", "ASC"]]   // Páginas seguintes: mais antigas primeiro
   });
 
   const hasMore = count > offset + messages.length;
 
+  // Se é a primeira página, reverter a ordem para mostrar mais antigas primeiro, mais recentes por último
+  // Se não, já está na ordem correta (mais antigas primeiro)
+  const sortedMessages = isFirstPage ? messages.reverse() : messages;
+
   return {
-    messages: messages.reverse(),
+    messages: sortedMessages,
     ticket,
     count,
     hasMore

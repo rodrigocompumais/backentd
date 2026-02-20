@@ -28,7 +28,20 @@ import TicketTag from "./TicketTag";
 import QueueIntegrations from "./QueueIntegrations";
 import Prompt from "./Prompt";
 
-@Table
+@Table({
+  indexes: [
+    // Índice composto para queries frequentes de tickets por empresa
+    { fields: ["companyId", "updatedAt", "status"] },
+    // Índice para userId (usado em filtros)
+    { fields: ["userId"] },
+    // Índice para queueId (usado em filtros)
+    { fields: ["queueId"] },
+    // Índice para status (usado em filtros)
+    { fields: ["status"] },
+    // Índice composto para unreadMessages
+    { fields: ["companyId", "unreadMessages"] }
+  ]
+})
 class Ticket extends Model<Ticket> {
   @PrimaryKey
   @AutoIncrement

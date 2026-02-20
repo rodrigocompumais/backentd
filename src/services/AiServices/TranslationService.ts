@@ -179,16 +179,29 @@ Language code:`;
         };
       }
 
-      // Se idioma de origem é desconhecido, não traduzir
+      // Se idioma de origem é desconhecido, tentar traduzir mesmo assim
+      // (pode ser que a detecção falhou mas o texto ainda precisa ser traduzido)
+      // Apenas não traduzir se o texto for muito curto ou apenas números/emojis
       if (normalizedSource === "unknown") {
-        return {
-          originalText: text,
-          translatedText: text,
-          sourceLanguage: normalizedSource,
-          targetLanguage: normalizedTarget,
-          translationNeeded: false,
-          cached: false
-        };
+        const trimmedText = text.trim();
+        const textWithoutEmojis = trimmedText.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
+        const onlyNumbersOrSpecial = /^[0-9\s\W]+$/.test(textWithoutEmojis);
+        
+        // Se for texto válido (não apenas números/emojis), tentar traduzir mesmo com idioma desconhecido
+        if (trimmedText.length >= 5 && !onlyNumbersOrSpecial && textWithoutEmojis.length >= 3) {
+          // Continuar com a tradução, assumindo que pode ser um idioma diferente
+          // O provider de IA vai tentar traduzir mesmo sem saber o idioma de origem
+        } else {
+          // Texto muito curto ou inválido, não traduzir
+          return {
+            originalText: text,
+            translatedText: text,
+            sourceLanguage: normalizedSource,
+            targetLanguage: normalizedTarget,
+            translationNeeded: false,
+            cached: false
+          };
+        }
       }
 
       // Verificar cache
@@ -228,7 +241,10 @@ Language code:`;
       const targetLangName = languageNames[normalizedTarget] || normalizedTarget;
 
       // Prompt para tradução
-      const prompt = `Translate the following text from ${sourceLangName} to ${targetLangName}. 
+      let prompt: string;
+      if (normalizedSource === "unknown") {
+        // Quando o idioma é desconhecido, pedir para detectar e traduzir
+        prompt = `Detect the language of the following text and translate it to ${targetLangName}. 
 Preserve all formatting, emojis, and line breaks. 
 Respond ONLY with the translated text, no explanations or additional comments.
 
@@ -236,6 +252,16 @@ Text to translate:
 ${text}
 
 Translation:`;
+      } else {
+        prompt = `Translate the following text from ${sourceLangName} to ${targetLangName}. 
+Preserve all formatting, emojis, and line breaks. 
+Respond ONLY with the translated text, no explanations or additional comments.
+
+Text to translate:
+${text}
+
+Translation:`;
+      }
 
       const translatedText = await provider.generateText(prompt, {
         temperature: 0.3,

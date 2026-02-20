@@ -172,69 +172,106 @@ const ListTicketsService = async ({
   }
 
   if (Array.isArray(tags) && tags.length > 0) {
-    const ticketsTagFilter: any[] | null = [];
-    for (let tag of tags) {
-      // Buscar apenas IDs para economizar memória
-      const ticketTags = await TicketTag.findAll({
-        where: { tagId: tag },
-        attributes: ['ticketId'], // Apenas o campo necessário
-        limit: 10000 // Limite de segurança para evitar sobrecarga
-      });
-      if (ticketTags && ticketTags.length > 0) {
-        ticketsTagFilter.push(ticketTags.map(t => t.ticketId));
+    // Otimização: buscar todos os ticketTags de uma vez ao invés de loop
+    const allTicketTags = await TicketTag.findAll({
+      where: { 
+        tagId: { [Op.in]: tags }
+      },
+      attributes: ['ticketId', 'tagId'],
+      limit: 50000 // Limite aumentado já que é uma única query
+    });
+
+    if (allTicketTags.length === 0) {
+      return { tickets: [], count: 0, hasMore: false };
+    }
+
+    // Agrupar por tagId
+    const ticketsByTag: Map<number, Set<number>> = new Map();
+    allTicketTags.forEach(tt => {
+      if (!ticketsByTag.has(tt.tagId)) {
+        ticketsByTag.set(tt.tagId, new Set());
+      }
+      ticketsByTag.get(tt.tagId)!.add(tt.ticketId);
+    });
+
+    // Calcular interseção: tickets que têm TODAS as tags
+    let ticketsIntersection: number[] = [];
+    const tagSets = Array.from(ticketsByTag.values());
+    
+    if (tagSets.length > 0) {
+      // Começar com o primeiro conjunto
+      ticketsIntersection = Array.from(tagSets[0]);
+      
+      // Intersecção com os demais
+      for (let i = 1; i < tagSets.length; i++) {
+        ticketsIntersection = ticketsIntersection.filter(ticketId => 
+          tagSets[i].has(ticketId)
+        );
       }
     }
 
-    if (ticketsTagFilter.length > 0) {
-      const ticketsIntersection: number[] = intersection(...ticketsTagFilter);
-
-      if (ticketsIntersection.length > 0) {
-        whereCondition = {
-          ...whereCondition,
-          id: {
-            [Op.in]: ticketsIntersection
-          }
-        };
-      } else {
-        // Se não há interseção, retornar vazio
-        return { tickets: [], count: 0, hasMore: false };
-      }
+    if (ticketsIntersection.length > 0) {
+      whereCondition = {
+        ...whereCondition,
+        id: {
+          [Op.in]: ticketsIntersection
+        }
+      };
     } else {
-      // Se não há tickets com as tags, retornar vazio
+      // Se não há interseção, retornar vazio
       return { tickets: [], count: 0, hasMore: false };
     }
   }
 
   if (Array.isArray(users) && users.length > 0) {
-    const ticketsUserFilter: any[] | null = [];
-    for (let user of users) {
-      // Buscar apenas IDs para economizar memória
-      const ticketUsers = await Ticket.findAll({
-        where: { userId: user, companyId },
-        attributes: ['id'], // Apenas o campo necessário
-        limit: 10000 // Limite de segurança para evitar sobrecarga
-      });
-      if (ticketUsers && ticketUsers.length > 0) {
-        ticketsUserFilter.push(ticketUsers.map(t => t.id));
+    // Otimização: buscar todos os tickets dos usuários de uma vez
+    const allUserTickets = await Ticket.findAll({
+      where: { 
+        userId: { [Op.in]: users },
+        companyId 
+      },
+      attributes: ['id', 'userId'],
+      limit: 50000 // Limite aumentado já que é uma única query
+    });
+
+    if (allUserTickets.length === 0) {
+      return { tickets: [], count: 0, hasMore: false };
+    }
+
+    // Agrupar por userId
+    const ticketsByUser: Map<number, Set<number>> = new Map();
+    allUserTickets.forEach(t => {
+      if (!ticketsByUser.has(t.userId)) {
+        ticketsByUser.set(t.userId, new Set());
+      }
+      ticketsByUser.get(t.userId)!.add(t.id);
+    });
+
+    // Calcular interseção: tickets que pertencem a TODOS os usuários
+    let ticketsIntersection: number[] = [];
+    const userSets = Array.from(ticketsByUser.values());
+    
+    if (userSets.length > 0) {
+      // Começar com o primeiro conjunto
+      ticketsIntersection = Array.from(userSets[0]);
+      
+      // Intersecção com os demais
+      for (let i = 1; i < userSets.length; i++) {
+        ticketsIntersection = ticketsIntersection.filter(ticketId => 
+          userSets[i].has(ticketId)
+        );
       }
     }
 
-    if (ticketsUserFilter.length > 0) {
-      const ticketsIntersection: number[] = intersection(...ticketsUserFilter);
-
-      if (ticketsIntersection.length > 0) {
-        whereCondition = {
-          ...whereCondition,
-          id: {
-            [Op.in]: ticketsIntersection
-          }
-        };
-      } else {
-        // Se não há interseção, retornar vazio
-        return { tickets: [], count: 0, hasMore: false };
-      }
+    if (ticketsIntersection.length > 0) {
+      whereCondition = {
+        ...whereCondition,
+        id: {
+          [Op.in]: ticketsIntersection
+        }
+      };
     } else {
-      // Se não há tickets dos usuários, retornar vazio
+      // Se não há interseção, retornar vazio
       return { tickets: [], count: 0, hasMore: false };
     }
   }

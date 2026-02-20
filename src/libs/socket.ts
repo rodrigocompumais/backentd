@@ -29,24 +29,14 @@ export const initIO = (httpServer: Server): SocketIO => {
     cors: {
       origin: allowedOrigins.length > 0 
         ? (origin, callback) => {
-            console.log(`🌐 Socket.IO CORS check - Origin recebida: ${origin || "undefined"}`);
-            logger.info(`🌐 Socket.IO CORS check - Origin recebida: ${origin || "undefined"}`);
-            
             // Permitir requisições sem origin (mobile apps, Postman, etc)
             if (!origin) {
-              console.log(`✅ CORS permitido: requisição sem origin (mobile/app)`);
-              logger.info(`✅ CORS permitido: requisição sem origin`);
               return callback(null, true);
             }
             
             // Verificar se a origin está na lista de permitidas
             const isAllowed = allowedOrigins.some(allowed => {
-              const matches = origin.includes(allowed) || origin === allowed;
-              if (matches) {
-                console.log(`✅ CORS permitido: ${origin} corresponde a ${allowed}`);
-                logger.info(`✅ CORS permitido: ${origin} corresponde a ${allowed}`);
-              }
-              return matches;
+              return origin.includes(allowed) || origin === allowed;
             });
             
             if (isAllowed) {
@@ -69,32 +59,12 @@ export const initIO = (httpServer: Server): SocketIO => {
   });
 
   io.on("connection", async socket => {
-    const origin = socket.handshake.headers.origin || socket.handshake.headers.referer || "unknown";
-    console.log(`🔌 Nova tentativa de conexão Socket.IO:`, {
-      id: socket.id,
-      origin: origin,
-      transport: socket.conn.transport.name,
-      query: socket.handshake.query
-    });
-    logger.info(`🔌 Nova tentativa de conexão Socket.IO - ID: ${socket.id}, Origin: ${origin}`);
-    
     logger.info("Client Connected");
     const { token } = socket.handshake.query;
-    
-    console.log(`🔑 Token recebido:`, {
-      hasToken: !!token,
-      tokenLength: token ? String(token).length : 0,
-      tokenPreview: token ? String(token).substring(0, 50) + "..." : "N/A"
-    });
     
     let tokenData = null;
     try {
       tokenData = verify(token as string, authConfig.secret);
-      console.log(`✅ Token válido decodificado:`, {
-        userId: tokenData.id,
-        username: tokenData.username,
-        companyId: tokenData.companyId
-      });
       logger.debug(tokenData, "io-onConnection: tokenData");
     } catch (error) {
       console.error(`❌ Erro ao decodificar token:`, error.message);
@@ -126,21 +96,9 @@ export const initIO = (httpServer: Server): SocketIO => {
     socket.join(`company-${user.companyId}-mainchannel`);
     socket.join(`user-${user.id}`);
 
-    console.log(`✅ Cliente autenticado e conectado:`, {
-      socketId: socket.id,
-      userId: user.id,
-      username: user.name,
-      companyId: user.companyId,
-      rooms: [`company-${user.companyId}-mainchannel`, `user-${user.id}`]
-    });
     logger.info(`✅ Cliente autenticado - Socket ID: ${socket.id}, User ID: ${user.id}, Company ID: ${user.companyId}`);
 
     socket.on("disconnect", (reason) => {
-      console.log(`🔌 Cliente desconectado:`, {
-        socketId: socket.id,
-        userId: user.id,
-        reason: reason
-      });
       logger.info(`🔌 Cliente desconectado - Socket ID: ${socket.id}, User ID: ${user.id}, Reason: ${reason}`);
     });
 

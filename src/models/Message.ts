@@ -15,7 +15,18 @@ import Ticket from "./Ticket";
 import Company from "./Company";
 import Queue from "./Queue";
 
-@Table
+@Table({
+  indexes: [
+    // Índice composto para queries frequentes de mensagens por ticket
+    { fields: ["ticketId", "createdAt", "id"] },
+    // Índice composto para queries por empresa e ticket
+    { fields: ["companyId", "ticketId", "createdAt"] },
+    // Índice para quotedMsgId (usado em joins)
+    { fields: ["quotedMsgId"] },
+    // Índice para contactId
+    { fields: ["contactId"] }
+  ]
+})
 class Message extends Model<Message> {
   @PrimaryKey
   @Column

@@ -7,6 +7,9 @@ const routes = express.Router();
 // Traduzir mensagem específica
 routes.post("/translation/message/:messageId", isAuth, TranslationController.translateMessage);
 
+// Traduzir múltiplas mensagens em batch (otimização)
+routes.post("/translation/messages/batch", isAuth, TranslationController.translateMessagesBatch);
+
 // Traduzir texto diretamente
 routes.post("/translation/translate", isAuth, TranslationController.translateText);
 

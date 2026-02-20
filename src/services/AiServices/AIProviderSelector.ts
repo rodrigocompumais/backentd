@@ -78,16 +78,25 @@ export class AIProviderSelector {
     const providerName = (providerSetting?.value || DEFAULT_PROVIDERS[functionType]) as "gemini" | "openai";
 
     // Validar que o provider escolhido está disponível
+    // Se o provider escolhido não estiver disponível, tentar usar o outro se disponível
     if (providerName === "gemini" && !available.gemini) {
+      // Se OpenAI está disponível, usar como fallback
+      if (available.openai) {
+        return await AIProviderFactory.createOpenAIProvider(companyId);
+      }
       throw new AppError(
-        `Provider Gemini configurado para ${functionType}, mas a API Key do Gemini não está configurada.`,
+        `Provider Gemini configurado para ${functionType}, mas a API Key do Gemini não está configurada ou é inválida.`,
         400
       );
     }
 
     if (providerName === "openai" && !available.openai) {
+      // Se Gemini está disponível, usar como fallback
+      if (available.gemini) {
+        return await AIProviderFactory.createGeminiProvider(companyId);
+      }
       throw new AppError(
-        `Provider OpenAI configurado para ${functionType}, mas a API Key do OpenAI não está configurada.`,
+        `Provider OpenAI configurado para ${functionType}, mas a API Key do OpenAI não está configurada ou é inválida.`,
         400
       );
     }

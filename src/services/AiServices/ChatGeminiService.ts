@@ -10,6 +10,7 @@ import User from "../../models/User";
 import Queue from "../../models/Queue";
 import Tag from "../../models/Tag";
 import Whatsapp from "../../models/Whatsapp";
+import HelpArticle from "../../models/HelpArticle";
 import { AIProviderSelector } from "./AIProviderSelector";
 import { ChatMessage } from "./AIProviderInterface";
 
@@ -17,6 +18,7 @@ interface ChatGeminiParams {
   companyId: number;
   message: string;
   conversationHistory?: Array<{ role: string; content: string }>;
+  articles?: Array<{ id: number; title: string; content: string; summary?: string; keywords?: string; category?: string }>;
 }
 
 interface ChatGeminiResponse {
@@ -488,10 +490,32 @@ const fetchCompanyData = async (companyId: number, period: DetectedEntities["per
 const ChatGeminiService = async ({
   companyId,
   message,
-  conversationHistory = []
+  conversationHistory = [],
+  articles
 }: ChatGeminiParams): Promise<ChatGeminiResponse> => {
   // Selecionar provider usando configuração automática
   const provider = await AIProviderSelector.getProvider(companyId, "chat");
+
+  // Buscar artigos se não foram fornecidos
+  let articlesToUse = articles;
+  if (!articlesToUse || articlesToUse.length === 0) {
+    const allArticles = await HelpArticle.findAll({
+      where: {
+        isActive: true,
+        createdByCompanyId: companyId
+      },
+      order: [["order", "ASC"], ["createdAt", "DESC"]],
+      limit: 100 // Limitar a 100 artigos para não exceder tokens
+    });
+    articlesToUse = allArticles.map(article => ({
+      id: article.id,
+      title: article.title,
+      content: article.content,
+      summary: article.summary,
+      keywords: article.keywords,
+      category: article.category
+    }));
+  }
 
   // Detectar entidades na pergunta do usuário
   const entities = await detectEntitiesInQuestion(message, companyId);
@@ -590,6 +614,19 @@ Total: ${contactTickets.length} tickets
   // Carregar manual de utilização do sistema
   const systemManual = getSystemManual();
 
+  // Formatar artigos para incluir no contexto
+  let articlesContext = "";
+  if (articlesToUse && articlesToUse.length > 0) {
+    articlesContext = `\n\n📚 ARTIGOS DE AJUDA DISPONÍVEIS (${articlesToUse.length} artigos):
+═══════════════════════════════════════════════════════════════════
+${articlesToUse.map((article, index) => {
+      const content = article.content || article.summary || "";
+      const truncatedContent = content.length > 2000 ? content.substring(0, 2000) + "..." : content;
+      return `\n[ARTIGO #${article.id}] ${article.title}${article.category ? ` (Categoria: ${article.category})` : ""}${article.keywords ? `\nPalavras-chave: ${article.keywords}` : ""}${article.summary ? `\nResumo: ${article.summary}` : ""}\nConteúdo: ${truncatedContent}`;
+    }).join("\n\n─────────────────────────────────────────────────────────────────────")}
+═══════════════════════════════════════════════════════════════════`;
+  }
+
   const systemContext = `Você é um ASSISTENTE DE IA para a empresa "${companyData.company}". Você tem acesso aos dados do sistema de atendimento via WhatsApp. Seu nome é Compuchat.
 
 ${systemManual}
@@ -604,15 +641,17 @@ ${systemManual}
 
 💬 MENSAGENS RECENTES: ${recentTicketsWithMessages || 'Nenhuma'}
 
-${specificData}
+${specificData}${articlesContext}
 
 INSTRUÇÕES: 
 - Use os dados acima para responder.
+- PRIORIZE usar informações dos ARTIGOS DE AJUDA quando a pergunta do usuário estiver relacionada a eles.
+- Quando responder com base em um artigo, mencione o título do artigo e cite o conteúdo relevante.
 - Seja profissional, porém caloroso, prestativo e natural.
 - Evite linguagem robótica ou excessivamente formal.
 - Cite dados concretos quando disponíveis.
 - Responda em português brasileiro.
-- Se o usuário perguntar algo que não está nos dados, informe educadamente que não encontrou a informação.`;
+- Se o usuário perguntar algo que não está nos dados ou artigos, informe educadamente que não encontrou a informação.`;
 
   try {
     console.log(`📤 Enviando mensagem para ${provider.name}...`);

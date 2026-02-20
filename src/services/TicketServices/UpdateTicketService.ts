@@ -79,7 +79,13 @@ const UpdateTicketService = async ({
     });
 
     if (isNil(whatsappId)) {
-      whatsappId = ticket.whatsappId.toString();
+      if (ticket.whatsappId !== null && ticket.whatsappId !== undefined) {
+        whatsappId = ticket.whatsappId.toString();
+      } else {
+        // Quando a conexão foi encerrada, whatsappId pode ser null
+        // Permitimos a atualização do ticket mesmo sem whatsappId
+        whatsappId = null;
+      }
     }
 
     await SetTicketMessagesAsRead(ticket);
@@ -88,7 +94,7 @@ const UpdateTicketService = async ({
     const oldUserId = ticket.user?.id;
     const oldQueueId = ticket.queueId;
 
-    if (oldStatus === "closed" || Number(whatsappId) !== ticket.whatsappId) {
+    if (oldStatus === "closed" || (whatsappId !== null && whatsappId !== undefined && Number(whatsappId) !== ticket.whatsappId)) {
       // let otherTicket = await Ticket.findOne({
       //   where: {
       //     contactId: ticket.contactId,
@@ -108,17 +114,28 @@ const UpdateTicketService = async ({
 
       //     return { ticket: otherTicket, oldStatus, oldUserId }
       // }
-      await CheckContactOpenTickets(ticket.contact.id, companyId, whatsappId);
+      await CheckContactOpenTickets(ticket.contact.id, companyId, whatsappId || undefined);
       chatbot = null;
       queueOptionId = null;
     }
 
     // Só processar mensagem de avaliação se o status está mudando PARA "closed" (não se já estava fechado)
     if (status !== undefined && ["closed"].indexOf(status) > -1 && oldStatus !== "closed") {
-      const { complationMessage, ratingMessage } = await ShowWhatsAppService(
-        ticket.whatsappId,
-        companyId
-      );
+      // Só tentar obter configurações do WhatsApp se a conexão ainda existir
+      let complationMessage: string | null = null;
+      let ratingMessage: string | null = null;
+      if (ticket.whatsappId !== null && ticket.whatsappId !== undefined) {
+        try {
+          const whatsappService = await ShowWhatsAppService(
+            ticket.whatsappId,
+            companyId
+          );
+          complationMessage = whatsappService.complationMessage;
+          ratingMessage = whatsappService.ratingMessage;
+        } catch (err) {
+          // Se a conexão foi encerrada, continuar sem mensagens de avaliação
+        }
+      }
 
       if (setting?.value === "enabled") {
         if (ticketTraking.ratingAt == null) {
@@ -296,7 +313,7 @@ const UpdateTicketService = async ({
       status,
       queueId,
       userId,
-      whatsappId,
+      whatsappId: whatsappId !== null ? whatsappId : undefined,
       chatbot,
       queueOptionId
     });
@@ -305,7 +322,7 @@ const UpdateTicketService = async ({
 
     if (status !== undefined && ["pending"].indexOf(status) > -1) {
       ticketTraking.update({
-        whatsappId,
+        whatsappId: whatsappId !== null ? whatsappId : ticket.whatsappId,
         queuedAt: moment().toDate(),
         startedAt: null,
         userId: null
@@ -317,7 +334,7 @@ const UpdateTicketService = async ({
         startedAt: moment().toDate(),
         ratingAt: null,
         rated: false,
-        whatsappId,
+        whatsappId: whatsappId !== null ? whatsappId : ticket.whatsappId,
         userId: ticket.userId
       });
     }
@@ -350,6 +367,8 @@ const UpdateTicketService = async ({
     return { ticket, oldStatus, oldUserId };
   } catch (err) {
     Sentry.captureException(err);
+    logger.error("UpdateTicketService error:", err);
+    throw err;
   }
 };
 

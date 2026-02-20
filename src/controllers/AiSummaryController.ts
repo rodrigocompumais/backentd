@@ -52,7 +52,7 @@ export const chat = async (
 ): Promise<Response> => {
   try {
     const { companyId } = req.user;
-    const { message, conversationHistory } = req.body;
+    const { message, conversationHistory, articles } = req.body;
 
     if (!message || !message.trim()) {
       return res.status(400).json({ error: "Mensagem é obrigatória" });
@@ -61,7 +61,8 @@ export const chat = async (
     const response = await ChatGeminiService({
       companyId,
       message: message.trim(),
-      conversationHistory: conversationHistory || []
+      conversationHistory: conversationHistory || [],
+      articles: articles || []
     });
 
     return res.status(200).json(response);
@@ -101,7 +102,6 @@ export const testApiKey = async (
       return res.status(400).json(result);
     }
   } catch (err: any) {
-    console.error("Erro ao testar API Key:", err);
     return res.status(500).json({ 
       valid: false,
       message: err.message || "Erro ao testar chave da API"

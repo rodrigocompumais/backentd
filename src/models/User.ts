@@ -66,10 +66,6 @@ class User extends Model<User> {
   @Column
   avatar: string;
 
-  @Default(true)
-  @Column
-  repeatPendingChatSound: boolean;
-
   @Column({
     type: DataType.JSONB,
     allowNull: true,

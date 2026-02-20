@@ -76,13 +76,6 @@ const TestGeminiApiKeyService = async ({
     const status = err.response?.status;
     const errorData = err.response?.data;
     
-    console.error("❌ Erro ao testar Gemini API Key:", {
-      status,
-      data: errorData,
-      message: err.message,
-      model: GEMINI_MODEL
-    });
-    
     if (status) {
       const userMessage = interpretGeminiError(status, errorData);
       return {

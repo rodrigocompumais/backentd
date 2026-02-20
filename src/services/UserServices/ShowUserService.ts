@@ -16,7 +16,6 @@ const ShowUserService = async (id: string | number): Promise<User> => {
       "whatsappId",
       "allTicket",
       "avatar",
-      "repeatPendingChatSound",
       "defaultRoute",
     ],
     include: [

@@ -15,7 +15,6 @@ interface UserData {
   whatsappId?: number;
   allTicket?: string;
   avatar?: string;
-  repeatPendingChatSound?: boolean;
   defaultRoute?: string | null;
 }
 
@@ -56,7 +55,7 @@ const UpdateUserService = async ({
     defaultRoute: Yup.string().nullable(),
   });
 
-  const { email, password, profile, name, queueIds = [], whatsappId, allTicket, avatar, repeatPendingChatSound, defaultRoute } = userData;
+  const { email, password, profile, name, queueIds = [], whatsappId, allTicket, avatar, defaultRoute } = userData;
 
   try {
     await schema.validate({ email, password, profile, name, allTicket });
@@ -72,7 +71,6 @@ const UpdateUserService = async ({
     whatsappId: whatsappId || null,
     allTicket,
     avatar: avatar !== undefined ? avatar : user.avatar,
-    repeatPendingChatSound: repeatPendingChatSound !== undefined ? repeatPendingChatSound : user.repeatPendingChatSound,
     defaultRoute: defaultRoute !== undefined ? (defaultRoute || null) : user.defaultRoute,
   });
 

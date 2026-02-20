@@ -209,15 +209,18 @@ export const update = async (
   const ticketData: TicketData = req.body;
   const { companyId, id} = req.user;
 
-  const { ticket } = await UpdateTicketService({
+  const result = await UpdateTicketService({
     ticketData,
     ticketId,
     companyId,
     actionUserId: id
   });
 
+  if (!result || !result.ticket) {
+    return res.status(500).json({ error: "Erro ao atualizar ticket" });
+  }
 
-  return res.status(200).json(ticket);
+  return res.status(200).json(result.ticket);
 };
 
 export const markAsUnread = async (

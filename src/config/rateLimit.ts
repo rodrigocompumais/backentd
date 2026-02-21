@@ -1,4 +1,22 @@
-import rateLimit, { ipKeyGenerator } from "express-rate-limit";
+import rateLimit from "express-rate-limit";
+
+/**
+ * Função auxiliar para normalizar IPs (IPv4 e IPv6)
+ * Na versão 8.x do express-rate-limit, ipKeyGenerator não é mais exportado,
+ * então usamos uma função auxiliar para normalizar IPs manualmente
+ */
+const normalizeIp = (ip: string): string => {
+  if (!ip || ip === "unknown") return "unknown";
+  
+  // Se for IPv6 mapeado para IPv4 (::ffff:192.168.1.1), extrair o IPv4
+  if (ip.startsWith("::ffff:")) {
+    return ip.substring(7);
+  }
+  
+  // Se for IPv6 completo, manter como está (express-rate-limit já lida com isso)
+  // Se for IPv4, retornar como está
+  return ip;
+};
 
 /**
  * Configurações de Rate Limiting
@@ -38,10 +56,10 @@ export const authRateLimit = rateLimit({
   legacyHeaders: false,
   skipSuccessfulRequests: false, // Contar todas as tentativas, mesmo as bem-sucedidas
   keyGenerator: (req) => {
-    // Extrair IP do request e normalizar usando ipKeyGenerator para suporte correto a IPv6
+    // Extrair IP do request e normalizar para suporte correto a IPv6
     // Combinar IP + email para melhor rastreamento
     const rawIp = req.ip || req.socket.remoteAddress || "unknown";
-    const normalizedIp = ipKeyGenerator(rawIp);
+    const normalizedIp = normalizeIp(rawIp);
     const email = req.body?.email || req.body?.username || "";
     return email ? `${normalizedIp}-${email}` : normalizedIp;
   }
@@ -85,7 +103,7 @@ export const createCustomRateLimit = (options: {
   message?: string;
   keyGenerator?: (req: any) => string;
 }) => {
-  // Se um keyGenerator customizado for fornecido, garantir que use ipKeyGenerator para IPv6
+  // Se um keyGenerator customizado for fornecido, garantir que use normalizeIp para IPv6
   let finalKeyGenerator = options.keyGenerator;
   
   if (options.keyGenerator) {
@@ -97,7 +115,7 @@ export const createCustomRateLimit = (options: {
         // Verificar se parece ser um IP e normalizar se necessário
         const ipMatch = result.match(/^([\d\.:a-fA-F]+)(-.*)?$/);
         if (ipMatch && ipMatch[1]) {
-          const normalizedIp = ipKeyGenerator(ipMatch[1]);
+          const normalizedIp = normalizeIp(ipMatch[1]);
           return ipMatch[2] ? `${normalizedIp}${ipMatch[2]}` : normalizedIp;
         }
       }
@@ -114,6 +132,10 @@ export const createCustomRateLimit = (options: {
     },
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: finalKeyGenerator
+    keyGenerator: finalKeyGenerator || ((req: any) => {
+      // Se não houver keyGenerator customizado, usar IP normalizado
+      const rawIp = req.ip || req.socket.remoteAddress || "unknown";
+      return normalizeIp(rawIp);
+    })
   });
 };

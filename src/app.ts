@@ -13,7 +13,8 @@ import routes from "./routes";
 import { logger } from "./utils/logger";
 import { messageQueue, sendScheduledMessages } from "./queues";
 import bodyParser from "body-parser";
-import { generalRateLimit } from "./middleware/rateLimiter";
+// Rate limit geral desabilitado para VPS - todos os clientes compartilham o mesmo IP
+// import { generalRateLimit } from "./middleware/rateLimiter";
 
 Sentry.init({ dsn: process.env.SENTRY_DSN });
 
@@ -66,8 +67,11 @@ app.use(cookieParser());
 app.use(express.json());
 app.use(Sentry.Handlers.requestHandler());
 
-// Aplicar rate limiting geral antes das rotas
-app.use(generalRateLimit);
+// Rate limiting geral DESABILITADO para VPS
+// Em VPS, todos os clientes compartilham o mesmo IP, então rate limit por IP bloqueia todos os usuários
+// Rate limits específicos (auth, import, webhook) continuam ativos nas rotas que precisam
+// Para reativar, descomente a linha abaixo e configure DISABLE_RATE_LIMIT_GENERAL=false
+// app.use(generalRateLimit);
 
 app.use("/public", express.static(uploadConfig.directory));
 app.use(routes);

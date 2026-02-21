@@ -53,9 +53,12 @@ const getClientIp = (req: any): string => {
  */
 
 // Rate Limit Geral - Proteção base para todas as rotas
+// ATENÇÃO: Este rate limit está DESABILITADO por padrão em VPS
+// Em VPS, todos os clientes compartilham o mesmo IP, então rate limit por IP bloqueia todos os usuários
+// Para reativar, configure DISABLE_RATE_LIMIT_GENERAL=false no .env
 export const generalRateLimit = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || "60000", 10), // 1 minuto padrão (reduzido de 15 minutos)
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "200", 10), // 200 requests por minuto (aumentado de 100)
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || "60000", 10), // 1 minuto padrão
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "200", 10), // 200 requests por minuto
   message: {
     error: "ERR_RATE_LIMIT_EXCEEDED",
     message: "Muitas requisições deste IP, por favor tente novamente mais tarde."
@@ -68,6 +71,12 @@ export const generalRateLimit = rateLimit({
     return getClientIp(req);
   },
   skip: (req) => {
+    // DESABILITADO por padrão em VPS - todos os clientes compartilham o mesmo IP
+    // Para reativar, configure DISABLE_RATE_LIMIT_GENERAL=false
+    if (process.env.DISABLE_RATE_LIMIT_GENERAL !== "false") {
+      return true; // Pular rate limit geral por padrão
+    }
+    
     // Pular rate limit em ambiente de desenvolvimento para rotas de teste
     if (process.env.NODE_ENV === "development" && req.path.startsWith("/test")) {
       return true;

@@ -13,6 +13,7 @@ import routes from "./routes";
 import { logger } from "./utils/logger";
 import { messageQueue, sendScheduledMessages } from "./queues";
 import bodyParser from "body-parser";
+import { generalRateLimit } from "./middleware/rateLimiter";
 
 Sentry.init({ dsn: process.env.SENTRY_DSN });
 
@@ -59,6 +60,10 @@ app.options("*", cors());
 app.use(cookieParser());
 app.use(express.json());
 app.use(Sentry.Handlers.requestHandler());
+
+// Aplicar rate limiting geral antes das rotas
+app.use(generalRateLimit);
+
 app.use("/public", express.static(uploadConfig.directory));
 app.use(routes);
 

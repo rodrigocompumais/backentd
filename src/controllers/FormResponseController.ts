@@ -360,6 +360,7 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
   const userAgent = req.headers["user-agent"] || "";
 
   console.log(`FormResponseController: Processing response for formId=${form.id}, publicId=${publicId}, hasOrderToken=${!!data.orderToken}`);
+  console.log(`FormResponseController: quotationItems received:`, data.quotationItems ? JSON.stringify(data.quotationItems) : "none");
 
   const response = await ProcessFormResponseService({
     formId: form.id,

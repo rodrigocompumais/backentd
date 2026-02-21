@@ -1,14 +1,17 @@
 import express from "express";
 import isAuth from "../middleware/isAuth";
+import { importRateLimit } from "../middleware/rateLimiter";
 
 import * as ContactController from "../controllers/ContactController";
 import * as ImportPhoneContactsController from "../controllers/ImportPhoneContactsController";
 
 const contactRoutes = express.Router();
 
+// Aplicar rate limit nas rotas de importação de contatos
 contactRoutes.post(
   "/contacts/import",
   isAuth,
+  importRateLimit,
   ImportPhoneContactsController.store
 );
 
@@ -20,7 +23,8 @@ contactRoutes.get("/contacts/:contactId", isAuth, ContactController.show);
 
 contactRoutes.post("/contacts", isAuth, ContactController.store);
 
-contactRoutes.post("/contacts/upload", isAuth, ContactController.storeUpload);
+// Aplicar rate limit na rota de upload de contatos
+contactRoutes.post("/contacts/upload", isAuth, importRateLimit, ContactController.storeUpload);
 
 contactRoutes.put("/contacts/:contactId", isAuth, ContactController.update);
 

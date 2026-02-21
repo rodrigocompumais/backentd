@@ -1,6 +1,7 @@
 import express from "express";
 import isAuth from "../middleware/isAuth";
 import uploadConfig from "../config/upload";
+import { importRateLimit } from "../middleware/rateLimiter";
 
 import * as ContactListController from "../controllers/ContactListController";
 import multer from "multer";
@@ -17,9 +18,11 @@ routes.get("/contact-lists/:id", isAuth, ContactListController.show);
 
 routes.post("/contact-lists", isAuth, ContactListController.store);
 
+// Aplicar rate limit na rota de upload de contatos
 routes.post(
   "/contact-lists/:id/upload",
   isAuth,
+  importRateLimit,
   upload.array("file"),
   ContactListController.upload
 );

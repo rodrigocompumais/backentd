@@ -1,5 +1,6 @@
 import express from "express";
 import * as MercadoPagoController from "../controllers/MercadoPagoController";
+import { webhookRateLimit } from "../middleware/rateLimiter";
 
 const mercadoPagoRoutes = express.Router();
 
@@ -9,9 +10,10 @@ mercadoPagoRoutes.post(
   MercadoPagoController.createPaymentIntentController
 );
 
-// Webhook do Mercado Pago
+// Webhook do Mercado Pago - Aplicar rate limit para proteger contra abuso
 mercadoPagoRoutes.post(
   "/mercadopago/webhook",
+  webhookRateLimit,
   MercadoPagoController.webhookController
 );
 

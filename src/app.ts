@@ -19,6 +19,11 @@ Sentry.init({ dsn: process.env.SENTRY_DSN });
 
 const app = express();
 
+// Configurar trust proxy para detectar corretamente o IP do cliente
+// quando a aplicação está atrás de um proxy/load balancer
+// Usar 1 ao invés de true para evitar warning do express-rate-limit
+app.set("trust proxy", 1);
+
 app.set("queues", {
   messageQueue,
   sendScheduledMessages

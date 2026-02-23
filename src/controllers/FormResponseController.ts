@@ -277,6 +277,13 @@ export const index = async (req: Request, res: Response): Promise<Response> => {
     order: [["submittedAt", "DESC"]],
   });
 
+  // #region agent log
+  if (responses.length > 0) {
+    const firstResponse = responses[0];
+    fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'FormResponseController.ts:259',message:'FormResponse index - first response metadata',data:{responseId:firstResponse.id,hasMetadata:!!firstResponse.metadata,metadataType:typeof firstResponse.metadata,quotationItems:(firstResponse.metadata as any)?.quotationItems?JSON.stringify((firstResponse.metadata as any).quotationItems):null,quotationItemsLength:(firstResponse.metadata as any)?.quotationItems?.length,quotationItemsType:typeof (firstResponse.metadata as any)?.quotationItems,quotationItemsIsArray:Array.isArray((firstResponse.metadata as any)?.quotationItems)},timestamp:Date.now(),runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+  }
+  // #endregion
+
   return res.json({
     responses,
     count,
@@ -320,6 +327,10 @@ export const show = async (req: Request, res: Response): Promise<Response> => {
     throw new AppError("ERR_RESPONSE_NOT_FOUND", 404);
   }
 
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'FormResponseController.ts:317',message:'FormResponse show - retrieved response',data:{responseId:response.id,formId,hasMetadata:!!response.metadata,metadataType:typeof response.metadata,metadataKeys:response.metadata?Object.keys(response.metadata):null,quotationItems:(response.metadata as any)?.quotationItems?JSON.stringify((response.metadata as any).quotationItems):null,quotationItemsLength:(response.metadata as any)?.quotationItems?.length,quotationItemsType:typeof (response.metadata as any)?.quotationItems,quotationItemsIsArray:Array.isArray((response.metadata as any)?.quotationItems)},timestamp:Date.now(),runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+  // #endregion
+
   return res.json(response);
 };
 
@@ -361,6 +372,11 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
 
   console.log(`FormResponseController: Processing response for formId=${form.id}, publicId=${publicId}, hasOrderToken=${!!data.orderToken}`);
   console.log(`FormResponseController: quotationItems received:`, data.quotationItems ? JSON.stringify(data.quotationItems) : "none");
+  console.log(`FormResponseController: answers received:`, data.answers ? JSON.stringify(data.answers.map((a: any) => ({ fieldId: a.fieldId, answer: typeof a.answer === "string" ? a.answer.substring(0, 50) : a.answer }))) : "none");
+
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'FormResponseController.ts:362',message:'FormResponseController store called',data:{formId:form.id,publicId,hasQuotationItems:!!data.quotationItems,quotationItemsLength:data.quotationItems?.length,quotationItemsType:typeof data.quotationItems,dataKeys:Object.keys(data)},timestamp:Date.now(),runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
 
   const response = await ProcessFormResponseService({
     formId: form.id,
@@ -369,6 +385,10 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
     ipAddress: Array.isArray(ipAddress) ? ipAddress[0] : ipAddress,
     userAgent,
   });
+  
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'FormResponseController.ts:373',message:'After ProcessFormResponseService',data:{responseId:response.id,responseMetadata:response.metadata?JSON.stringify(response.metadata):null,responseMetadataQuotationItems:(response.metadata as any)?.quotationItems?JSON.stringify((response.metadata as any).quotationItems):null,responseMetadataQuotationItemsLength:(response.metadata as any)?.quotationItems?.length},timestamp:Date.now(),runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
 
   const io = getIO();
   io.to(`company-${form.companyId}-mainchannel`).emit(`company-${form.companyId}-formResponse`, {
@@ -553,7 +573,13 @@ export const exportData = async (
   
   responses.forEach((response) => {
     if (isQuotationForm) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'FormResponseController.ts:574',message:'exportData - processing quotation response',data:{responseId:response.id,hasMetadata:!!response.metadata,metadataType:typeof response.metadata,metadataKeys:response.metadata?Object.keys(response.metadata):null,quotationItems:(response.metadata as any)?.quotationItems?JSON.stringify((response.metadata as any).quotationItems):null,quotationItemsLength:(response.metadata as any)?.quotationItems?.length,quotationItemsType:typeof (response.metadata as any)?.quotationItems,quotationItemsIsArray:Array.isArray((response.metadata as any)?.quotationItems)},timestamp:Date.now(),runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
       const quotationItems = (response.metadata as any)?.quotationItems || [];
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'FormResponseController.ts:576',message:'exportData - extracted quotationItems',data:{responseId:response.id,quotationItemsLength:quotationItems.length,quotationItems:quotationItems.length>0?JSON.stringify(quotationItems.slice(0,2)):null},timestamp:Date.now(),runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
       if (quotationItems.length > 0) {
         quotationItems.forEach((item: any, index: number) => {
           const row: any = {

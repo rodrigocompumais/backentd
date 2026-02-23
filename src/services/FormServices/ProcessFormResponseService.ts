@@ -190,6 +190,15 @@ const ProcessFormResponseService = async ({
   metadata,
   orderToken,
 }: Request): Promise<FormResponse> => {
+  // #region agent log
+  try {
+    const quotationItemsStr = quotationItems ? JSON.stringify(quotationItems) : null;
+    const menuItemsStr = menuItems ? JSON.stringify(menuItems) : null;
+    fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:180',message:'ProcessFormResponseService called',data:{formId,quotationItems:quotationItemsStr,quotationItemsLength:quotationItems?.length,quotationItemsType:typeof quotationItems,quotationItemsIsArray:Array.isArray(quotationItems),menuItems:menuItemsStr,menuItemsLength:menuItems?.length,hasMetadata:!!metadata},timestamp:Date.now(),runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+  } catch (e) {
+    fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:180',message:'ProcessFormResponseService called - error serializing',data:{formId,quotationItemsError:String(e),quotationItemsLength:quotationItems?.length,quotationItemsType:typeof quotationItems},timestamp:Date.now(),runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+  }
+  // #endregion
   // Load form with fields
   const form = await Form.findByPk(formId, {
     include: [
@@ -231,10 +240,15 @@ const ProcessFormResponseService = async ({
   let contactPhone = responderPhone || "";
   let contactEmail = responderEmail || "";
 
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:231',message:'Initial contactPhone value',data:{contactPhone,responderPhone,contactPhoneLength:contactPhone?.length,contactPhoneDigits:contactPhone?.replace(/\D/g,''),contactPhoneDigitsLength:contactPhone?.replace(/\D/g,'')?.length},timestamp:Date.now(),runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
+
   const toStr = (v: unknown): string =>
     v == null ? "" : Array.isArray(v) ? v.join(", ") : String(v);
 
   // Try to find name, phone, email in form fields
+  let phoneFieldCount = 0;
   for (const answer of answers) {
     const field = fields.find((f) => f.id === answer.fieldId);
     if (field) {
@@ -246,24 +260,101 @@ const ProcessFormResponseService = async ({
         if (val) contactName = val;
       }
       if (fieldMetadata?.autoFieldType === "phone" || field.fieldType === "phone") {
-        if (val) contactPhone = val;
+        phoneFieldCount++;
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:248',message:'Found phone field in answers',data:{fieldId:field.id,fieldLabel:field.label,fieldType:field.fieldType,autoFieldType:fieldMetadata?.autoFieldType,rawValue:answer.answer,val,phoneFieldCount,contactPhoneBefore:contactPhone,contactPhoneDigitsBefore:contactPhone?.replace(/\D/g,''),contactPhoneDigitsBeforeLength:contactPhone?.replace(/\D/g,'')?.length},timestamp:Date.now(),runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        if (val) {
+          console.log("ProcessFormResponseService: Found phone in answer", {
+            fieldId: field.id,
+            fieldLabel: field.label,
+            fieldType: field.fieldType,
+            autoFieldType: fieldMetadata?.autoFieldType,
+            rawValue: answer.answer,
+            stringValue: val
+          });
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:258',message:'Setting contactPhone from answer',data:{fieldId:field.id,answerValue:answer.answer,val,contactPhoneBefore:contactPhone,contactPhoneAfter:val,contactPhoneDigitsBefore:contactPhone?.replace(/\D/g,''),contactPhoneDigitsAfter:val?.replace(/\D/g,''),phoneFieldCount},timestamp:Date.now(),runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+          // #endregion
+          contactPhone = val;
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:261',message:'After setting contactPhone from answer',data:{contactPhone,contactPhoneDigits:contactPhone?.replace(/\D/g,''),contactPhoneDigitsLength:contactPhone?.replace(/\D/g,'')?.length,phoneFieldCount},timestamp:Date.now(),runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+          // #endregion
+        }
       }
       if (field.fieldType === "email") {
         if (val) contactEmail = val;
       }
     }
   }
+  
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:268',message:'After processing all answers',data:{contactPhone,contactPhoneDigits:contactPhone?.replace(/\D/g,''),contactPhoneDigitsLength:contactPhone?.replace(/\D/g,'')?.length,phoneFieldCount,willNormalize:!!contactPhone},timestamp:Date.now(),runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
+  
+  console.log("ProcessFormResponseService: Extracted contact info", {
+    contactName: contactName || "empty",
+    contactPhone: contactPhone || "empty",
+    contactEmail: contactEmail || "empty",
+    responderPhone: responderPhone || "empty",
+    responderName: responderName || "empty"
+  });
 
   // Normalizar telefone: só dígitos, garantir 55 para Brasil se tiver 10+ dígitos
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:279',message:'Entering normalization block',data:{contactPhone,contactPhoneTruthy:!!contactPhone,contactPhoneLength:contactPhone?.length,contactPhoneDigits:contactPhone?.replace(/\D/g,''),contactPhoneDigitsLength:contactPhone?.replace(/\D/g,'')?.length},timestamp:Date.now(),runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+  // #endregion
   if (contactPhone) {
+    const phoneBeforeNormalize = contactPhone;
+    const phoneDigitsBefore = phoneBeforeNormalize.replace(/\D/g, "");
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:283',message:'Before normalizeBrazilPhoneForWhatsapp',data:{contactPhone,phoneDigitsBefore,phoneDigitsBeforeLength:phoneDigitsBefore.length},timestamp:Date.now(),runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
     contactPhone = normalizeBrazilPhoneForWhatsapp(contactPhone);
+    const phoneDigitsAfter = contactPhone.replace(/\D/g, "");
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:286',message:'After normalizeBrazilPhoneForWhatsapp',data:{contactPhoneBefore:phoneBeforeNormalize,contactPhoneAfter:contactPhone,phoneDigitsBefore,phoneDigitsAfter,phoneDigitsBeforeLength:phoneDigitsBefore.length,phoneDigitsAfterLength:phoneDigitsAfter.length},timestamp:Date.now(),runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
+    console.log("ProcessFormResponseService: Phone normalization", {
+      before: phoneBeforeNormalize,
+      after: contactPhone,
+      digitsBefore: phoneDigitsBefore,
+      digitsAfter: phoneDigitsAfter,
+      lengthBefore: phoneDigitsBefore.length,
+      lengthAfter: phoneDigitsAfter.length,
+      isValid: phoneDigitsAfter.length >= 12 && phoneDigitsAfter.length <= 13
+    });
+    
+    // Se a normalização resultou em string vazia, manter o original (pode ser um formato não reconhecido)
+    if (!contactPhone || contactPhone.length === 0) {
+      console.warn("ProcessFormResponseService: Phone normalization resulted in empty string, keeping original");
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:301',message:'Normalization resulted in empty, restoring original',data:{phoneBeforeNormalize,contactPhoneBeforeRestore:contactPhone},timestamp:Date.now(),runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      contactPhone = phoneBeforeNormalize;
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:303',message:'After restoring original phone',data:{contactPhone,contactPhoneDigits:contactPhone?.replace(/\D/g,''),contactPhoneDigitsLength:contactPhone?.replace(/\D/g,'')?.length},timestamp:Date.now(),runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+    }
+  } else {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:305',message:'Skipping normalization - contactPhone is falsy',data:{contactPhone,contactPhoneType:typeof contactPhone},timestamp:Date.now(),runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
   }
+  
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:308',message:'After normalization block',data:{contactPhone,contactPhoneLength:contactPhone?.length,contactPhoneDigits:contactPhone?.replace(/\D/g,''),contactPhoneDigitsLength:contactPhone?.replace(/\D/g,'')?.length},timestamp:Date.now(),runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+  // #endregion
 
   // Check if form is quotation or menu type and process items
   const formSettings = form.settings as any;
   const isQuotationForm = formSettings?.formType === "quotation";
   const isMenuForm = formSettings?.formType === "cardapio";
   const isAgendamentoForm = formSettings?.formType === "agendamento";
+
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:340',message:'Checking form type',data:{isQuotationForm,isMenuForm,isAgendamentoForm,quotationItems:quotationItems?JSON.stringify(quotationItems):null,quotationItemsLength:quotationItems?.length,quotationItemsTruthy:!!quotationItems},timestamp:Date.now(),runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
 
   // Prepare metadata with quotationItems or menuItems if applicable
   const responseMetadata: any = metadata || {};
@@ -275,9 +366,18 @@ const ProcessFormResponseService = async ({
     if (meta.endTime != null) responseMetadata.endTime = meta.endTime;
   }
   if (isQuotationForm && quotationItems && quotationItems.length > 0) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:355',message:'Setting quotationItems in responseMetadata',data:{quotationItems:JSON.stringify(quotationItems),quotationItemsLength:quotationItems.length,responseMetadataBefore:JSON.stringify(responseMetadata)},timestamp:Date.now(),runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
     responseMetadata.quotationItems = quotationItems;
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:357',message:'After setting quotationItems in responseMetadata',data:{responseMetadataQuotationItems:JSON.stringify(responseMetadata.quotationItems),responseMetadataQuotationItemsLength:responseMetadata.quotationItems?.length},timestamp:Date.now(),runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
     console.log("ProcessFormResponseService: Saving quotationItems:", quotationItems);
   } else if (isQuotationForm) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:359',message:'Form is quotation but no quotationItems received',data:{isQuotationForm,quotationItems:quotationItems?JSON.stringify(quotationItems):null,quotationItemsLength:quotationItems?.length,quotationItemsTruthy:!!quotationItems},timestamp:Date.now(),runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
     console.log("ProcessFormResponseService: Form is quotation but no quotationItems received");
   }
   
@@ -291,6 +391,9 @@ const ProcessFormResponseService = async ({
   }
 
   // Create FormResponse (orderStatus "novo" for menu/cardapio forms)
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:371',message:'Before creating FormResponse',data:{responseMetadata:JSON.stringify(responseMetadata),responseMetadataQuotationItems:JSON.stringify(responseMetadata.quotationItems),responseMetadataQuotationItemsLength:responseMetadata.quotationItems?.length},timestamp:Date.now(),runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+  // #endregion
   const createPayload: any = {
     formId: form.id,
     responderPhone: contactPhone,
@@ -300,6 +403,9 @@ const ProcessFormResponseService = async ({
     userAgent,
     metadata: responseMetadata,
   };
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:380',message:'createPayload prepared',data:{createPayloadMetadata:JSON.stringify(createPayload.metadata),createPayloadMetadataQuotationItems:JSON.stringify(createPayload.metadata?.quotationItems),createPayloadMetadataQuotationItemsLength:createPayload.metadata?.quotationItems?.length},timestamp:Date.now(),runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+  // #endregion
   if (isMenuForm) {
     // Mesa: pedido pelo garçom → confirmado; pedido direto pelo QR da mesa → novo
     const orderType = (responseMetadata.orderType ?? (metadata as any)?.orderType) as string | undefined;
@@ -330,7 +436,13 @@ const ProcessFormResponseService = async ({
     });
     createPayload.protocol = `PED-${dateStr}-${String(count + 1).padStart(4, "0")}`;
   }
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:433',message:'Before FormResponse.create',data:{createPayloadMetadata:JSON.stringify(createPayload.metadata),createPayloadMetadataQuotationItems:JSON.stringify(createPayload.metadata?.quotationItems),createPayloadMetadataQuotationItemsLength:createPayload.metadata?.quotationItems?.length},timestamp:Date.now(),runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+  // #endregion
   const response = await FormResponse.create(createPayload);
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:435',message:'After FormResponse.create',data:{responseId:response.id,responseMetadata:JSON.stringify(response.metadata),responseMetadataQuotationItems:JSON.stringify((response.metadata as any)?.quotationItems),responseMetadataQuotationItemsLength:(response.metadata as any)?.quotationItems?.length},timestamp:Date.now(),runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+  // #endregion
 
   // Pedido delivery: gerar token único para QR do entregador
   if (isMenuForm && responseMetadata.orderType === "delivery") {
@@ -376,6 +488,28 @@ const ProcessFormResponseService = async ({
           where: { id: mesa.contactId, companyId: form.companyId },
         });
         if (contact) {
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:424',message:'Found contact from mesa',data:{contactId:contact.id,contactNumber:contact.number,contactPhoneBefore:contactPhone,contactPhoneAfter:contactPhone},timestamp:Date.now(),runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+          // #endregion
+          // IMPORTANTE: Se o contato da mesa tem número incorreto, atualizar com o número normalizado
+          const contactNumberDigits = (contact.number || "").replace(/\D/g, "");
+          const contactPhoneDigits = (contactPhone || "").replace(/\D/g, "");
+          if (contactNumberDigits !== contactPhoneDigits && contactPhoneDigits.length > 0) {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:430',message:'Updating contact from mesa with normalized phone',data:{contactNumberBefore:contact.number,contactPhone,contactNumberDigits,contactPhoneDigits},timestamp:Date.now(),runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+            // #endregion
+            // Atualizar o contato da mesa com o número normalizado
+            contact = await CreateOrUpdateContactService({
+              name: contact.name || contactName || "Sem nome",
+              number: contactPhone,
+              email: contact.email || contactEmail,
+              isGroup: false,
+              companyId: form.companyId,
+            });
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:440',message:'After updating contact from mesa',data:{contactNumberAfter:contact.number,contactPhone},timestamp:Date.now(),runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+            // #endregion
+          }
           ticket = mesa.ticketId
             ? await Ticket.findOne({ where: { id: mesa.ticketId, companyId: form.companyId } })
             : null;
@@ -822,15 +956,38 @@ const ProcessFormResponseService = async ({
   }
 
   // Process menu form: send WhatsApp message to customer em segundo plano (não bloqueia a resposta)
+  // Usar normalizedMenuItems se disponível, caso contrário usar menuItems
+  const itemsToSend = normalizedMenuItems && normalizedMenuItems.length > 0 ? normalizedMenuItems : menuItems;
+  const hasItems = itemsToSend && itemsToSend.length > 0;
+  
+  // Capturar contactPhone normalizado ANTES da closure assíncrona
+  // IMPORTANTE: O contactPhone já foi normalizado na linha 285, então capturamos o valor atual
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:900',message:'Before capturing normalizedContactPhone',data:{contactPhone,contactPhoneLength:contactPhone?.length,contactPhoneDigits:contactPhone?.replace(/\D/g,''),contactPhoneDigitsLength:contactPhone?.replace(/\D/g,'')?.length},timestamp:Date.now(),runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+  // #endregion
+  const normalizedContactPhone = contactPhone;
+  
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:905',message:'After capturing normalizedContactPhone',data:{contactPhone,normalizedContactPhone,contactPhoneLength:contactPhone?.length,contactPhoneDigits:contactPhone?.replace(/\D/g,''),normalizedContactPhoneDigits:normalizedContactPhone?.replace(/\D/g,''),areEqual:contactPhone===normalizedContactPhone},timestamp:Date.now(),runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+  // #endregion
+  
   console.log("ProcessFormResponseService - Checking menu form:", {
     isMenuForm,
     menuItemsCount: menuItems?.length || 0,
-    contactPhone: contactPhone ? "present" : "missing",
+    normalizedMenuItemsCount: normalizedMenuItems?.length || 0,
+    itemsToSendCount: itemsToSend?.length || 0,
+    contactPhone: contactPhone || "missing",
+    contactPhoneLength: contactPhone ? contactPhone.length : 0,
+    hasItems,
+    willSend: isMenuForm && hasItems && contactPhone && contactPhone.length > 0
   });
 
-  if (isMenuForm && menuItems && menuItems.length > 0 && contactPhone) {
+  if (isMenuForm && hasItems && contactPhone && contactPhone.length > 0) {
     (async () => {
       try {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:879',message:'Inside async closure - contactPhone value',data:{contactPhone,normalizedContactPhone,contactPhoneLength:contactPhone?.length},timestamp:Date.now(),runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
         console.log("ProcessFormResponseService (background) - Starting WhatsApp send");
         const formSettings = form.settings as any;
         const selectedWhatsappId = formSettings?.whatsappId;
@@ -848,15 +1005,48 @@ const ProcessFormResponseService = async ({
           console.warn("ProcessFormResponseService (background) - Nenhuma conexão WhatsApp disponível");
           return;
         }
+        // Usar normalizedContactPhone em vez de contactPhone para garantir que usamos o valor normalizado
+        const phoneToUse = normalizedContactPhone || contactPhone;
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:896',message:'Before CreateOrUpdateContactService',data:{contactPhone,normalizedContactPhone,phoneToUse,contactExists:!!contact,contactNumber:contact?.number},timestamp:Date.now(),runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
         let contactForSend = contact;
-        if (!contactForSend && contactPhone) {
+        if (!contactForSend && phoneToUse) {
+          // Criar novo contato com número normalizado
           contactForSend = await CreateOrUpdateContactService({
             name: contactName || "Sem nome",
-            number: contactPhone,
+            number: phoneToUse,
             email: contactEmail,
             isGroup: false,
             companyId: form.companyId,
           });
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:904',message:'After CreateOrUpdateContactService',data:{phoneToUse,contactForSendNumber:contactForSend?.number,contactForSendId:contactForSend?.id},timestamp:Date.now(),runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+          // #endregion
+        } else if (contactForSend && phoneToUse) {
+          // Se o contato existe mas o número está incorreto, atualizar o contato com o número normalizado
+          const contactNumberDigits = (contactForSend.number || "").replace(/\D/g, "");
+          const phoneToUseDigits = phoneToUse.replace(/\D/g, "");
+          if (contactNumberDigits !== phoneToUseDigits) {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:906',message:'Updating existing contact with normalized phone',data:{contactNumberBefore:contactForSend.number,phoneToUse,contactNumberDigits,phoneToUseDigits},timestamp:Date.now(),runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+            // #endregion
+            // Atualizar o contato com o número normalizado
+            contactForSend = await CreateOrUpdateContactService({
+              name: contactForSend.name || contactName || "Sem nome",
+              number: phoneToUse,
+              email: contactForSend.email || contactEmail,
+              isGroup: false,
+              companyId: form.companyId,
+            });
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:920',message:'After updating contact',data:{phoneToUse,contactForSendNumber:contactForSend?.number,contactForSendId:contactForSend?.id},timestamp:Date.now(),runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+            // #endregion
+          } else {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:906',message:'Using existing contact - phone already correct',data:{phoneToUse,contactForSendNumber:contactForSend?.number,contactForSendId:contactForSend?.id},timestamp:Date.now(),runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+            // #endregion
+          }
         }
         if (!contactForSend) return;
         const ticket = await FindOrCreateTicketService(
@@ -865,6 +1055,9 @@ const ProcessFormResponseService = async ({
           0,
           form.companyId
         );
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:912',message:'After FindOrCreateTicketService',data:{phoneToUse,ticketId:ticket?.id,ticketContactNumber:ticket?.contact?.number},timestamp:Date.now(),runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
         const customFields = answers
           .map((answer) => {
             const field = fields.find((f) => f.id === answer.fieldId);
@@ -889,9 +1082,9 @@ const ProcessFormResponseService = async ({
         const deliveryFee = meta?.deliveryFee != null ? Number(meta.deliveryFee) : undefined;
         const total = meta?.total != null ? Number(meta.total) : undefined;
         const orderMessage = await FormatMenuOrderMessage({
-          menuItems: normalizedMenuItems && normalizedMenuItems.length > 0 ? normalizedMenuItems : menuItems,
+          menuItems: itemsToSend,
           customerName: contactName || "Cliente",
-          customerPhone: contactPhone,
+          customerPhone: phoneToUse,
           customFields,
           protocol: response.protocol || undefined,
           tableNumber: tableNumberMsg,
@@ -899,9 +1092,15 @@ const ProcessFormResponseService = async ({
           deliveryFee: deliveryFee,
           total: total,
         });
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:948',message:'Before SendWhatsAppMessage',data:{contactPhone,normalizedContactPhone,phoneToUse,contactName,ticketId:ticket?.id,contactNumber:ticket?.contact?.number},timestamp:Date.now(),runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
         const sentMessage = await SendWhatsAppMessage({ body: orderMessage, ticket });
         if (sentMessage) {
           console.log("ProcessFormResponseService (background) - WhatsApp message sent", { messageId: sentMessage?.key?.id });
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:932',message:'After SendWhatsAppMessage success',data:{messageId:sentMessage?.key?.id,contactPhone,contactNumber:ticket?.contact?.number},timestamp:Date.now(),runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+          // #endregion
         }
       } catch (err: any) {
         console.error("ProcessFormResponseService (background) - Error sending WhatsApp:", err?.message);
@@ -974,6 +1173,9 @@ const ProcessFormResponseService = async ({
     })();
   }
 
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:1164',message:'Before response.reload',data:{responseId:response.id,responseMetadata:JSON.stringify(response.metadata),responseMetadataQuotationItems:JSON.stringify((response.metadata as any)?.quotationItems),responseMetadataQuotationItemsLength:(response.metadata as any)?.quotationItems?.length},timestamp:Date.now(),runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+  // #endregion
   await response.reload({
     include: [
       { association: "answers", include: [{ association: "field" }] },
@@ -981,6 +1183,9 @@ const ProcessFormResponseService = async ({
       { association: "ticket" },
     ],
   });
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/654d036a-7e93-40a5-be06-4549cdbdbbac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessFormResponseService.ts:1171',message:'After response.reload',data:{responseId:response.id,responseMetadata:JSON.stringify(response.metadata),responseMetadataQuotationItems:JSON.stringify((response.metadata as any)?.quotationItems),responseMetadataQuotationItemsLength:(response.metadata as any)?.quotationItems?.length},timestamp:Date.now(),runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+  // #endregion
 
   // Envio WhatsApp é em segundo plano; frontend não deve bloquear
   if (isMenuForm) {

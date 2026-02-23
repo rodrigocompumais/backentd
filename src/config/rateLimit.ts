@@ -53,53 +53,57 @@ const getClientIp = (req: any): string => {
  */
 
 // Rate Limit Geral - Proteção base para todas as rotas
-// ATENÇÃO: Este rate limit está DESABILITADO por padrão em VPS
+// ATENÇÃO: Este rate limit está COMPLETAMENTE DESABILITADO por padrão em VPS
 // Em VPS, todos os clientes compartilham o mesmo IP, então rate limit por IP bloqueia todos os usuários
-// Para reativar, configure DISABLE_RATE_LIMIT_GENERAL=false no .env
-export const generalRateLimit = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || "60000", 10), // 1 minuto padrão
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "200", 10), // 200 requests por minuto
-  message: {
-    error: "ERR_RATE_LIMIT_EXCEEDED",
-    message: "Muitas requisições deste IP, por favor tente novamente mais tarde."
-  },
-  standardHeaders: true, // Retorna informações de rate limit nos headers `RateLimit-*`
-  legacyHeaders: false, // Desabilita headers `X-RateLimit-*`
-  keyGenerator: (req) => {
-    // Usar função auxiliar para extrair IP real do cliente
-    // Isso garante que em produção com proxy/load balancer, cada usuário tenha seu próprio limite
-    return getClientIp(req);
-  },
-  skip: (req) => {
-    // DESABILITADO por padrão em VPS - todos os clientes compartilham o mesmo IP
-    // Para reativar, configure DISABLE_RATE_LIMIT_GENERAL=false
-    if (process.env.DISABLE_RATE_LIMIT_GENERAL !== "false") {
-      return true; // Pular rate limit geral por padrão
-    }
-    
-    // Pular rate limit em ambiente de desenvolvimento para rotas de teste
-    if (process.env.NODE_ENV === "development" && req.path.startsWith("/test")) {
-      return true;
-    }
-    // Permitir desabilitar rate limit via variável de ambiente
-    if (process.env.DISABLE_RATE_LIMIT === "true") {
-      return true;
-    }
-    // Excluir arquivos estáticos do rate limit
-    if (req.path.startsWith("/public/")) {
-      return true;
-    }
-    // Excluir health checks e rotas de monitoramento
-    if (req.path === "/health" || req.path === "/status" || req.path.startsWith("/metrics")) {
-      return true;
-    }
-    // Excluir webhooks públicos (eles têm seu próprio rate limit)
-    if (req.path.startsWith("/webhook/") || req.path.startsWith("/mercadopago/webhook")) {
-      return true;
-    }
-    return false;
-  }
-});
+// Para reativar, configure ENABLE_RATE_LIMIT_GENERAL=true no .env
+
+// Middleware vazio que simplesmente passa a requisição adiante
+// Isso garante que mesmo se for importado, não aplica nenhum rate limit
+const noOpMiddleware = (req: any, res: any, next: any) => {
+  next();
+};
+
+// Criar rate limit condicionalmente apenas se estiver habilitado
+export const generalRateLimit = process.env.ENABLE_RATE_LIMIT_GENERAL === "true"
+  ? rateLimit({
+      windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || "60000", 10), // 1 minuto padrão
+      max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "200", 10), // 200 requests por minuto
+      message: {
+        error: "ERR_RATE_LIMIT_EXCEEDED",
+        message: "Muitas requisições deste IP, por favor tente novamente mais tarde."
+      },
+      standardHeaders: true, // Retorna informações de rate limit nos headers `RateLimit-*`
+      legacyHeaders: false, // Desabilita headers `X-RateLimit-*`
+      keyGenerator: (req) => {
+        // Usar função auxiliar para extrair IP real do cliente
+        // Isso garante que em produção com proxy/load balancer, cada usuário tenha seu próprio limite
+        return getClientIp(req);
+      },
+      skip: (req) => {
+        // Pular rate limit em ambiente de desenvolvimento para rotas de teste
+        if (process.env.NODE_ENV === "development" && req.path.startsWith("/test")) {
+          return true;
+        }
+        // Permitir desabilitar rate limit via variável de ambiente
+        if (process.env.DISABLE_RATE_LIMIT === "true") {
+          return true;
+        }
+        // Excluir arquivos estáticos do rate limit
+        if (req.path.startsWith("/public/")) {
+          return true;
+        }
+        // Excluir health checks e rotas de monitoramento
+        if (req.path === "/health" || req.path === "/status" || req.path.startsWith("/metrics")) {
+          return true;
+        }
+        // Excluir webhooks públicos (eles têm seu próprio rate limit)
+        if (req.path.startsWith("/webhook/") || req.path.startsWith("/mercadopago/webhook")) {
+          return true;
+        }
+        return false;
+      }
+    })
+  : noOpMiddleware; // Retornar middleware vazio se não estiver habilitado
 
 // Rate Limit de Autenticação - Mais restritivo para proteção contra brute force
 export const authRateLimit = rateLimit({

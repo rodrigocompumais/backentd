@@ -39,6 +39,6 @@ export const SendMessage = async (
       );
     }
   } catch (err: any) {
-    throw new Error(err);
+    throw err;
   }
 };

@@ -10,7 +10,13 @@ export const StartWhatsAppSession = async (
   whatsapp: Whatsapp,
   companyId: number
 ): Promise<void> => {
-  logger.info(`StartWhatsAppSession - ID: ${whatsapp.id} | Name: ${whatsapp.name} | Provider: ${whatsapp.provider} | Type: ${whatsapp.type}`);
+  logger.info("StartWhatsAppSession", {
+    whatsappId: whatsapp.id,
+    companyId,
+    name: whatsapp.name,
+    provider: whatsapp.provider,
+    type: whatsapp.type
+  });
 
   // Se provider for Gupshup ou Instagram, não iniciar sessão Baileys
   if (whatsapp.provider === "gupshup" || whatsapp.type === "instagram") {
@@ -45,8 +51,45 @@ export const StartWhatsAppSession = async (
     const wbot = await initWASocket(whatsapp);
     wbotMessageListener(wbot, companyId);
     wbotMonitor(wbot, whatsapp, companyId);
-  } catch (err) {
+  } catch (err: any) {
+    if (err?.message === "ERR_WAPP_LOCK_NOT_ACQUIRED") {
+      logger.warn("Sessão WhatsApp em lock por outra instância/processo", {
+        whatsappId: whatsapp.id,
+        companyId
+      });
+
+      // Evita spinner infinito: se ninguém atualizar o status, sair de OPENING.
+      setTimeout(async () => {
+        const fresh = await Whatsapp.findByPk(whatsapp.id);
+        if (!fresh) return;
+        if (fresh.status === "OPENING") {
+          await fresh.update({ status: "PENDING" });
+          const io = getIO();
+          io.to(`company-${fresh.companyId}-mainchannel`).emit("whatsappSession", {
+            action: "update",
+            session: fresh
+          });
+        }
+      }, 8000);
+      return;
+    }
+
     Sentry.captureException(err);
-    logger.error(err);
+    logger.error("Falha ao iniciar sessão WhatsApp", {
+      whatsappId: whatsapp.id,
+      companyId,
+      error: (err as Error).message
+    });
+
+    // Evita tela travada em "carregando" em falhas inesperadas de inicialização.
+    const fresh = await Whatsapp.findByPk(whatsapp.id);
+    if (fresh && fresh.status === "OPENING") {
+      await fresh.update({ status: "PENDING" });
+      const io = getIO();
+      io.to(`company-${fresh.companyId}-mainchannel`).emit("whatsappSession", {
+        action: "update",
+        session: fresh
+      });
+    }
   }
 };

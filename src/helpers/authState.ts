@@ -23,8 +23,12 @@ const authState = async (
 ): Promise<{ state: AuthenticationState; saveState: () => void }> => {
   let creds: AuthenticationCreds;
   let keys: any = {};
+  let persistTimer: NodeJS.Timeout | null = null;
+  let dirty = false;
 
-  const saveState = async () => {
+  const persistState = async () => {
+    if (!dirty) return;
+    dirty = false;
     try {
       await whatsapp.update({
         session: JSON.stringify({ creds, keys }, BufferJSON.replacer, 0)
@@ -34,12 +38,26 @@ const authState = async (
     }
   };
 
+  const saveState = async () => {
+    dirty = true;
+    if (persistTimer) return;
+    persistTimer = setTimeout(async () => {
+      persistTimer = null;
+      await persistState();
+    }, Number(process.env.WBOT_AUTHSTATE_DEBOUNCE_MS || 1200));
+  };
+
   // const getSessionDatabase = await whatsappById(whatsapp.id);
 
   if (whatsapp.session && whatsapp.session !== null) {
-    const result = JSON.parse(whatsapp.session, BufferJSON.reviver);
-    creds = result.creds;
-    keys = result.keys;
+    try {
+      const result = JSON.parse(whatsapp.session, BufferJSON.reviver);
+      creds = result?.creds || initAuthCreds();
+      keys = result?.keys || {};
+    } catch (_parseError) {
+      creds = initAuthCreds();
+      keys = {};
+    }
   } else {
     creds = initAuthCreds();
     keys = {};
@@ -68,8 +86,7 @@ const authState = async (
             keys[key] = keys[key] || {};
             Object.assign(keys[key], data[i]);
           }
-          // Salvar estado de forma assíncrona para não bloquear
-          // O BufferJSON.replacer garante serialização correta
+          // Persistência com debounce para reduzir I/O em picos de atualização de chaves.
           setImmediate(() => saveState());
         }
       }

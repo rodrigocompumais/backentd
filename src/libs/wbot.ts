@@ -21,6 +21,8 @@ import { StartWhatsAppSession } from "../services/WbotServices/StartWhatsAppSess
 import DeleteBaileysService from "../services/BaileysServices/DeleteBaileysService";
 import CloseTicketsByWhatsAppIdService from "../services/TicketServices/CloseTicketsByWhatsAppIdService";
 import NodeCache from 'node-cache';
+import { acquireSessionLock, releaseSessionLock } from "./sessionLock";
+import { metricsReconnectAttempt, metricsReconnectSuccess } from "../utils/wbotMetrics";
 
 // Usar pino diretamente ao invés de path interno do Baileys (compatível com Baileys 7.x)
 const loggerBaileys = pino({ 
@@ -42,6 +44,74 @@ const retriesQrCodeMap = new Map<number, number>();
 
 // Mapa para rastrear sessões em processo de inicialização
 const initializingSessions = new Map<number, boolean>();
+const sessionLockHandles = new Map<number, Awaited<ReturnType<typeof acquireSessionLock>>>();
+const reconnectAttemptsMap = new Map<number, number>();
+const reconnectTimers = new Map<number, NodeJS.Timeout>();
+
+const MAX_RECONNECT_DELAY_MS = Number(process.env.WBOT_RECONNECT_MAX_DELAY_MS || 60000);
+const BASE_RECONNECT_DELAY_MS = Number(process.env.WBOT_RECONNECT_BASE_DELAY_MS || 2000);
+const MAX_RECONNECT_ATTEMPTS_BEFORE_COOLDOWN = Number(process.env.WBOT_RECONNECT_MAX_ATTEMPTS || 10);
+const RECONNECT_COOLDOWN_MS = Number(process.env.WBOT_RECONNECT_COOLDOWN_MS || 5 * 60 * 1000);
+
+const calculateReconnectDelay = (attempt: number): number => {
+  const exponentialDelay = Math.min(
+    BASE_RECONNECT_DELAY_MS * Math.pow(2, Math.max(attempt - 1, 0)),
+    MAX_RECONNECT_DELAY_MS
+  );
+  const jitter = 0.6 + Math.random() * 0.8;
+  return Math.floor(exponentialDelay * jitter);
+};
+
+const clearReconnectTimer = (whatsappId: number): void => {
+  const timer = reconnectTimers.get(whatsappId);
+  if (timer) {
+    clearTimeout(timer);
+    reconnectTimers.delete(whatsappId);
+  }
+};
+
+const scheduleReconnect = (whatsapp: Whatsapp, reason?: any): void => {
+  const { id, companyId } = whatsapp;
+  clearReconnectTimer(id);
+
+  const statusCode = (reason as Boom)?.output?.statusCode;
+  const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 403;
+  if (isLoggedOut || whatsapp.type === "instagram" || whatsapp.provider === "gupshup") {
+    logger.warn("Reconexão automática ignorada", {
+      whatsappId: id,
+      companyId,
+      statusCode,
+      type: whatsapp.type,
+      provider: whatsapp.provider
+    });
+    return;
+  }
+
+  const attempts = (reconnectAttemptsMap.get(id) || 0) + 1;
+  reconnectAttemptsMap.set(id, attempts);
+  metricsReconnectAttempt(companyId, id);
+
+  let delay = calculateReconnectDelay(attempts);
+  if (attempts > MAX_RECONNECT_ATTEMPTS_BEFORE_COOLDOWN) {
+    delay = Math.max(delay, RECONNECT_COOLDOWN_MS);
+  }
+
+  logger.warn("Agendando reconexão da sessão WhatsApp", {
+    whatsappId: id,
+    companyId,
+    attempts,
+    delay,
+    statusCode
+  });
+
+  const timer = setTimeout(() => {
+    reconnectTimers.delete(id);
+    if (!initializingSessions.get(id)) {
+      StartWhatsAppSession(whatsapp, companyId);
+    }
+  }, delay);
+  reconnectTimers.set(id, timer);
+};
 
 export const getWbot = (whatsappId: number): Session => {
   const sessionIndex = sessions.findIndex(s => s.id === whatsappId);
@@ -57,17 +127,48 @@ export const removeWbot = async (
   isLogout = true
 ): Promise<void> => {
   try {
+    clearReconnectTimer(whatsappId);
     const sessionIndex = sessions.findIndex(s => s.id === whatsappId);
     if (sessionIndex !== -1) {
       if (isLogout) {
-        sessions[sessionIndex].logout();
-        sessions[sessionIndex].ws.close();
+        try {
+          sessions[sessionIndex].logout();
+        } catch (logoutErr: any) {
+          // Erros de "Connection Closed" são esperados quando a conexão já está fechada
+          if (logoutErr?.message === "Connection Closed" || 
+              logoutErr?.output?.payload?.message === "Connection Closed" ||
+              logoutErr?.output?.statusCode === 428) {
+            logger.debug(`Conexão WhatsApp ${whatsappId} já estava fechada ao tentar logout`);
+          } else {
+            logger.warn(`Erro ao fazer logout da sessão ${whatsappId}:`, logoutErr);
+          }
+        }
+        try {
+          sessions[sessionIndex].ws.close();
+        } catch (closeErr: any) {
+          // Erros ao fechar websocket já fechado são esperados
+          if (closeErr?.message?.includes("closed") || closeErr?.code === "ECONNRESET") {
+            logger.debug(`WebSocket ${whatsappId} já estava fechado`);
+          } else {
+            logger.warn(`Erro ao fechar websocket ${whatsappId}:`, closeErr);
+          }
+        }
       }
 
       sessions.splice(sessionIndex, 1);
     }
-  } catch (err) {
-    logger.error(err);
+    const lockHandle = sessionLockHandles.get(whatsappId) || null;
+    await releaseSessionLock(lockHandle);
+    sessionLockHandles.delete(whatsappId);
+  } catch (err: any) {
+    // Verificar se é erro de conexão fechada (esperado)
+    if (err?.message === "Connection Closed" || 
+        err?.output?.payload?.message === "Connection Closed" ||
+        err?.output?.statusCode === 428) {
+      logger.debug(`Erro esperado ao remover sessão ${whatsappId}: conexão já fechada`);
+    } else {
+      logger.error(`Erro ao remover sessão ${whatsappId}:`, err);
+    }
   }
 };
 
@@ -81,7 +182,11 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
           where: { id: whatsapp.id }
         });
 
-        if (!whatsappUpdate) return;
+        if (!whatsappUpdate) {
+          initializingSessions.delete(whatsapp.id);
+          reject(new AppError("ERR_WAPP_NOT_FOUND", 404));
+          return;
+        }
 
         const { id, name, provider } = whatsappUpdate;
 
@@ -112,6 +217,18 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
 
         // Marcar como em inicialização
         initializingSessions.set(id, true);
+
+        const lockHandle = await acquireSessionLock(id);
+        if (!lockHandle) {
+          initializingSessions.delete(id);
+          logger.warn("Sessão já está sendo gerenciada por outra instância", {
+            whatsappId: id,
+            companyId: whatsapp.companyId
+          });
+          reject(new AppError("ERR_WAPP_LOCK_NOT_ACQUIRED", 423));
+          return;
+        }
+        sessionLockHandles.set(id, lockHandle);
 
         const { version, isLatest } = await fetchLatestBaileysVersion();
         const isLegacy = provider === "stable" ? true : false;
@@ -189,6 +306,8 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
             if (connection === "close") {
               // Limpar flag de inicialização
               initializingSessions.delete(id);
+              await releaseSessionLock(sessionLockHandles.get(id) || null);
+              sessionLockHandles.delete(id);
               
               if ((lastDisconnect?.error as Boom)?.output?.statusCode === 403) {
                 await whatsapp.update({ status: "PENDING", session: "" });
@@ -204,17 +323,7 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
                 DisconnectReason.loggedOut
               ) {
                 removeWbot(id, false);
-                // Aguardar um pouco antes de reconectar para evitar múltiplas inicializações
-                // Não reconectar se for Instagram ou Gupshup (não usam Baileys)
-                setTimeout(
-                  () => {
-                    // Verificar se não está já inicializando e se não é Instagram/Gupshup antes de reconectar
-                    if (!initializingSessions.get(id) && whatsapp.type !== "instagram" && whatsapp.provider !== "gupshup") {
-                      StartWhatsAppSession(whatsapp, whatsapp.companyId);
-                    }
-                  },
-                  2000
-                );
+                scheduleReconnect(whatsapp, lastDisconnect?.error);
               } else {
                 await whatsapp.update({ status: "PENDING", session: "" });
                 await DeleteBaileysService(whatsapp.id);
@@ -223,17 +332,7 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
                   session: whatsapp
                 });
                 removeWbot(id, false);
-                // Aguardar um pouco antes de reconectar para evitar múltiplas inicializações
-                // Não reconectar se for Instagram ou Gupshup (não usam Baileys)
-                setTimeout(
-                  () => {
-                    // Verificar se não está já inicializando e se não é Instagram/Gupshup antes de reconectar
-                    if (!initializingSessions.get(id) && whatsapp.type !== "instagram" && whatsapp.provider !== "gupshup") {
-                      StartWhatsAppSession(whatsapp, whatsapp.companyId);
-                    }
-                  },
-                  2000
-                );
+                scheduleReconnect(whatsapp, lastDisconnect?.error);
               }
             }
 
@@ -259,6 +358,9 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
 
               // Remover do mapa de inicialização
               initializingSessions.delete(id);
+              reconnectAttemptsMap.delete(id);
+              clearReconnectTimer(id);
+              metricsReconnectSuccess(whatsapp.companyId, whatsapp.id);
               
               resolve(wsocket);
             }
@@ -313,9 +415,18 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
       // Limpar flag de inicialização em caso de erro
       if (whatsapp?.id) {
         initializingSessions.delete(whatsapp.id);
+        clearReconnectTimer(whatsapp.id);
+
+        const lockHandle = sessionLockHandles.get(whatsapp.id) || null;
+        await releaseSessionLock(lockHandle);
+        sessionLockHandles.delete(whatsapp.id);
       }
-      Sentry.captureException(error);
-      console.log(error);
+
+      if ((error as Error)?.message !== "ERR_WAPP_LOCK_NOT_ACQUIRED") {
+        Sentry.captureException(error);
+        scheduleReconnect(whatsapp, error);
+      }
+
       reject(error);
     }
   });

@@ -3,7 +3,6 @@ import Contact from "../../models/Contact";
 import ContactCustomField from "../../models/ContactCustomField";
 import { isNil } from "lodash";
 import { Op } from "sequelize";
-import { logger } from "../../utils/logger";
 interface ExtraInfo extends ContactCustomField {
   name: string;
   value: string;
@@ -34,17 +33,6 @@ const CreateOrUpdateContactService = async ({
 }: Request): Promise<Contact> => {
   const number = isGroup ? rawNumber : rawNumber.replace(/[^0-9]/g, "");
 
-  // LOG CRÍTICO - Rastrear o que está sendo salvo
-  logger.info('💾 === CREATE OR UPDATE CONTACT SERVICE ===', {
-    rawNumber,
-    processedNumber: number,
-    numberLength: number.length,
-    isGroup,
-    companyId,
-    name,
-    whatsappId
-  });
-
   const io = getIO();
   let finalName = name;
 
@@ -64,6 +52,7 @@ const CreateOrUpdateContactService = async ({
 
   // Usar findOrCreate para evitar race conditions
   // Esta operação é atômica e garante que apenas um registro seja criado
+  // Nota: extraInfo não pode ser passado no defaults pois é uma associação HasMany
   const [contact, created] = await Contact.findOrCreate({
     where: {
       number,
@@ -75,20 +64,10 @@ const CreateOrUpdateContactService = async ({
       profilePicUrl,
       email,
       isGroup,
-      extraInfo,
       companyId,
       whatsappId,
       userId: userId || null
     }
-  });
-
-  // LOG DO RESULTADO
-  logger.info(`${created ? '✅ CONTATO CRIADO' : '🔄 CONTATO EXISTENTE'}`, {
-    contactId: contact.id,
-    contactNumber: contact.number,
-    contactName: contact.name,
-    created,
-    companyId
   });
 
   // Se o contato já existia, atualizar os dados
@@ -117,6 +96,24 @@ const CreateOrUpdateContactService = async ({
       action: "create",
       contact
     });
+  }
+
+  // Criar/atualizar extraInfo (ContactCustomField) separadamente
+  if (extraInfo && extraInfo.length > 0) {
+    // Remover campos customizados existentes antes de criar novos (ou atualizar se necessário)
+    // Isso garante que apenas os campos fornecidos sejam mantidos
+    await ContactCustomField.destroy({
+      where: { contactId: contact.id }
+    });
+
+    // Criar os novos campos customizados
+    const customFields = extraInfo.map(field => ({
+      name: field.name,
+      value: field.value,
+      contactId: contact.id
+    }));
+
+    await ContactCustomField.bulkCreate(customFields);
   }
 
   return contact;

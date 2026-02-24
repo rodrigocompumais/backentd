@@ -19,6 +19,40 @@ import AutoLiberarMesasService from "./services/MesaServices/AutoLiberarMesasSer
 import { Op } from "sequelize";
 import PrintPedido from "./models/PrintPedido";
 import FormResponse from "./models/FormResponse";
+import { logWbotMetricsSnapshot } from "./utils/wbotMetrics";
+
+// Handler global para unhandled promise rejections
+process.on("unhandledRejection", (reason: any, promise: Promise<any>) => {
+  // Verificar se é um erro de requisição abortada (terminated)
+  if (reason?.message === "terminated" || reason?.name === "AbortError") {
+    logger.debug("Requisição HTTP abortada (terminated)", {
+      reason: reason?.message,
+      stack: reason?.stack
+    });
+    return; // Não logar como erro crítico
+  }
+
+  // Verificar se é erro de conexão fechada do Baileys
+  if (reason?.message === "Connection Closed" || reason?.output?.payload?.message === "Connection Closed") {
+    logger.debug("Conexão WhatsApp fechada (esperado)", {
+      statusCode: reason?.output?.payload?.statusCode
+    });
+    return; // Não logar como erro crítico
+  }
+
+  logger.error("Unhandled Promise Rejection:", {
+    reason,
+    promise,
+    stack: reason?.stack
+  });
+});
+
+// Handler global para exceções não capturadas
+process.on("uncaughtException", (error: Error) => {
+  logger.error("Uncaught Exception:", error);
+  // Em produção, pode ser necessário fazer graceful shutdown
+  // Por enquanto, apenas logamos o erro
+});
 
 const server = app.listen(process.env.PORT, async () => {
   const companies = await Company.findAll();
@@ -50,6 +84,11 @@ const server = app.listen(process.env.PORT, async () => {
   }, 3000);
 
   logger.info(`Server started on port: ${process.env.PORT}`);
+
+  const metricsIntervalMs = Number(process.env.WBOT_METRICS_INTERVAL_MS || 60000);
+  setInterval(() => {
+    logWbotMetricsSnapshot();
+  }, metricsIntervalMs);
 });
 
 cron.schedule("* * * * *", async () => {

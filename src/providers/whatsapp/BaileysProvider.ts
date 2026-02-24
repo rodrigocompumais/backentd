@@ -10,6 +10,9 @@ import {
 } from "./IWhatsAppProvider";
 import fs from "fs";
 import { getMessageOptions } from "../../services/WbotServices/SendWhatsAppMedia";
+import { logger } from "../../utils/logger";
+import { classifyWhatsAppError, toAppError } from "../../utils/whatsappErrorClassifier";
+import { metricsSendFailure, metricsSendSuccess } from "../../utils/wbotMetrics";
 
 class BaileysProvider implements IWhatsAppProvider {
   /**
@@ -67,11 +70,29 @@ class BaileysProvider implements IWhatsAppProvider {
         baileysOptions
       );
 
+      metricsSendSuccess(whatsapp.companyId, whatsapp.id);
       return sentMessage;
-    } catch (err) {
-      Sentry.captureException(err);
-      console.log(err);
-      throw new AppError("ERR_SENDING_WAPP_MSG");
+    } catch (err: any) {
+      const classification = classifyWhatsAppError(err);
+      metricsSendFailure(whatsapp.companyId, whatsapp.id, classification.code);
+      const logPayload = {
+        companyId: whatsapp.companyId,
+        whatsappId: whatsapp.id,
+        provider: whatsapp.provider,
+        errorCode: classification.code,
+        retryable: classification.retryable,
+        statusCode: classification.statusCode
+      };
+      if (classification.retryable) {
+        logger.debug("Falha transitória ao enviar mensagem WhatsApp", logPayload);
+      } else {
+        logger.warn("Falha ao enviar mensagem WhatsApp", logPayload);
+      }
+      if (classification.kind === "unknown") {
+        Sentry.captureException(err);
+        throw new AppError("ERR_SENDING_WAPP_MSG");
+      }
+      throw toAppError(classification);
     }
   }
 
@@ -89,7 +110,8 @@ class BaileysProvider implements IWhatsAppProvider {
       const messageOptions = await getMessageOptions(
         options?.fileName || "",
         mediaPath,
-        options?.caption
+        options?.caption,
+        options?.mimetype
       );
 
       if (!messageOptions) {
@@ -98,11 +120,29 @@ class BaileysProvider implements IWhatsAppProvider {
 
       const sentMessage = await wbot.sendMessage(chatId, messageOptions);
 
+      metricsSendSuccess(whatsapp.companyId, whatsapp.id);
       return sentMessage;
-    } catch (err) {
-      Sentry.captureException(err);
-      console.log(err);
-      throw new AppError("ERR_SENDING_WAPP_MSG");
+    } catch (err: any) {
+      const classification = classifyWhatsAppError(err);
+      metricsSendFailure(whatsapp.companyId, whatsapp.id, classification.code);
+      const logPayload = {
+        companyId: whatsapp.companyId,
+        whatsappId: whatsapp.id,
+        provider: whatsapp.provider,
+        errorCode: classification.code,
+        retryable: classification.retryable,
+        statusCode: classification.statusCode
+      };
+      if (classification.retryable) {
+        logger.debug("Falha transitória ao enviar mídia WhatsApp", logPayload);
+      } else {
+        logger.warn("Falha ao enviar mídia WhatsApp", logPayload);
+      }
+      if (classification.kind === "unknown") {
+        Sentry.captureException(err);
+        throw new AppError("ERR_SENDING_WAPP_MSG");
+      }
+      throw toAppError(classification);
     }
   }
 

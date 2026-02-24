@@ -14,9 +14,7 @@ import ContactListItem from "./models/ContactListItem";
 import { isEmpty, isNil, isArray } from "lodash";
 import CampaignSetting from "./models/CampaignSetting";
 import CampaignShipping from "./models/CampaignShipping";
-import GetWhatsappWbot from "./helpers/GetWhatsappWbot";
 import sequelize from "./database";
-import { getMessageOptions } from "./services/WbotServices/SendWhatsAppMedia";
 import { getIO } from "./libs/socket";
 import path from "path";
 import User from "./models/User";
@@ -26,6 +24,8 @@ import ShowFileService from "./services/FileServices/ShowService";
 import { differenceInSeconds } from "date-fns";
 import formatBody from "./helpers/Mustache";
 import { ClosedAllOpenTickets } from "./services/WbotServices/wbotClosedTickets";
+import { classifyWhatsAppError } from "./utils/whatsappErrorClassifier";
+import { metricsSendFailure, metricsSendSuccess } from "./utils/wbotMetrics";
 
 
 const nodemailer = require('nodemailer');
@@ -51,6 +51,8 @@ interface DispatchCampaignData {
   campaignId: number;
   campaignShippingId: number;
   contactListItemId: number;
+  companyId?: number;
+  whatsappId?: number;
 }
 
 export const userMonitor = new BullQueue("UserMonitor", connection);
@@ -85,9 +87,22 @@ async function handleSendMessage(job) {
     const messageData: MessageData = data.data;
 
     await SendMessage(whatsapp, messageData);
+    metricsSendSuccess(whatsapp.companyId, whatsapp.id);
   } catch (e: any) {
-    Sentry.captureException(e);
-    logger.error("MessageQueue -> SendMessage: error", e.message);
+    const classification = classifyWhatsAppError(e);
+    const whatsappId = job?.data?.whatsappId;
+    const companyId = whatsappId ? (await Whatsapp.findByPk(whatsappId))?.companyId || 0 : 0;
+    if (whatsappId) {
+      metricsSendFailure(companyId, whatsappId, classification.code);
+    }
+    if (classification.kind === "unknown") {
+      Sentry.captureException(e);
+    }
+    logger.error("MessageQueue -> SendMessage: error", {
+      errorCode: classification.code,
+      retryable: classification.retryable,
+      message: e?.message
+    });
     throw e;
   }
 }
@@ -879,7 +894,9 @@ async function handlePrepareContact(job) {
         {
           campaignId: campaign.id,
           campaignShippingId: record.id,
-          contactListItemId: contactId
+          contactListItemId: contactId,
+          companyId: campaign.companyId,
+          whatsappId: campaign.whatsappId
         },
         {
           delay
@@ -917,20 +934,8 @@ async function handleDispatchCampaign(job) {
       return;
     }
 
-    const wbot = await GetWhatsappWbot(campaign.whatsapp);
-
-    if (!wbot) {
-      logger.error(`[🚨] - Wbot não encontrado para campanha ${campaignId}`);
-      return;
-    }
-
     if (!campaign.whatsapp) {
       logger.error(`[🚨] - WhatsApp não encontrado para campanha ${campaignId}`);
-      return;
-    }
-
-    if (!wbot?.user?.id) {
-      logger.error(`[🚨] - Usuário do wbot não encontrado para campanha ${campaignId}`);
       return;
     }
 
@@ -948,7 +953,11 @@ async function handleDispatchCampaign(job) {
       return;
     }
 
-    const chatId = `${campaignShipping.number}@s.whatsapp.net`;
+    // Idempotência: não reenviar se já marcado como entregue
+    if (campaignShipping.deliveredAt) {
+      logger.info(`[📊] - CampaignShipping ${campaignShippingId} já entregue, ignorando reenvio`);
+      return;
+    }
 
     let body = campaignShipping.message;
 
@@ -959,9 +968,14 @@ async function handleDispatchCampaign(job) {
         const publicFolder = path.resolve(__dirname, "..", "public");
         const files = await ShowFileService(campaign.fileListId, campaign.companyId)
         const folder = path.resolve(publicFolder, "fileList", String(files.id))
-        for (const [index, file] of files.options.entries()) {
-          const options = await getMessageOptions(file.path, path.resolve(folder, file.path), file.name);
-          await wbot.sendMessage(chatId, { ...options });
+        for (const file of files.options) {
+          await SendMessage(campaign.whatsapp, {
+            number: campaignShipping.number,
+            body: file.name || "",
+            mediaPath: path.resolve(folder, file.path),
+            fileName: file.name
+          });
+          metricsSendSuccess(campaign.companyId, campaign.whatsapp.id);
 
           logger.info(`[🚩] - Enviou arquivo: ${file.name} | CampaignShippingId: ${campaignShippingId} CampanhaID: ${campaignId}`);
         };
@@ -976,17 +990,22 @@ async function handleDispatchCampaign(job) {
       const publicFolder = path.resolve(__dirname, "..", "public");
       const filePath = path.join(publicFolder, campaign.mediaPath);
 
-      const options = await getMessageOptions(campaign.mediaName, filePath, body);
-      if (Object.keys(options).length) {
-        await wbot.sendMessage(chatId, { ...options });
-      }
+      await SendMessage(campaign.whatsapp, {
+        number: campaignShipping.number,
+        body: body || "",
+        mediaPath: filePath,
+        fileName: campaign.mediaName
+      });
+      metricsSendSuccess(campaign.companyId, campaign.whatsapp.id);
     }
     else {
       logger.info(`[🚩] - Enviando mensagem de texto da campanha | CampaignShippingId: ${campaignShippingId} CampanhaID: ${campaignId}`);
 
-      await wbot.sendMessage(chatId, {
-        text: body
+      await SendMessage(campaign.whatsapp, {
+        number: campaignShipping.number,
+        body
       });
+      metricsSendSuccess(campaign.companyId, campaign.whatsapp.id);
     }
 
     logger.info(`[🚩] - Atualizando campanha para enviada... | CampaignShippingId: ${campaignShippingId} CampanhaID: ${campaignId}`);
@@ -1001,10 +1020,18 @@ async function handleDispatchCampaign(job) {
     );
 
   } catch (err: any) {
-    Sentry.captureException(err);
+    const classification = classifyWhatsAppError(err);
+    const companyId = job?.data?.companyId || 0;
+    const whatsappId = job?.data?.whatsappId || 0;
+    metricsSendFailure(companyId, whatsappId, classification.code);
+    if (classification.kind === "unknown") {
+      Sentry.captureException(err);
+    }
     logger.error(`[🚨] - Erro ao disparar campanha: ${err.message}`, {
       campaignShippingId: job.data.campaignShippingId,
       campaignId: job.data.campaignId,
+      errorCode: classification.code,
+      retryable: classification.retryable,
       error: err.message,
       stack: err.stack
     });

@@ -61,6 +61,16 @@ class GupshupApiClient {
 
       return response.data;
     } catch (error: any) {
+      // Verificar se é erro de requisição abortada
+      if (error?.message === "terminated" || error?.name === "AbortError" || error?.code === "ECONNABORTED") {
+        throw new AppError("ERR_REQUEST_ABORTED", 499);
+      }
+
+      // Verificar se é erro de cancelamento do axios
+      if (axios.isCancel(error)) {
+        throw new AppError("ERR_REQUEST_CANCELLED", 499);
+      }
+
       Sentry.captureException(error);
       console.error("Gupshup API Error:", error.response?.data || error.message);
       throw new AppError(
@@ -154,6 +164,16 @@ class GupshupApiClient {
 
       return response.data;
     } catch (error: any) {
+      // Verificar se é erro de requisição abortada
+      if (error?.message === "terminated" || error?.name === "AbortError" || error?.code === "ECONNABORTED") {
+        throw new AppError("ERR_REQUEST_ABORTED", 499);
+      }
+
+      // Verificar se é erro de cancelamento do axios
+      if (axios.isCancel(error)) {
+        throw new AppError("ERR_REQUEST_CANCELLED", 499);
+      }
+
       Sentry.captureException(error);
       console.error("Gupshup API Error:", error.response?.data || error.message);
       throw new AppError(

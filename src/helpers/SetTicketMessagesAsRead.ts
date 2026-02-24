@@ -6,6 +6,7 @@ import Ticket from "../models/Ticket";
 import { logger } from "../utils/logger";
 import GetTicketWbot from "./GetTicketWbot";
 import { getChatJid } from "../services/WbotServices/wbotMessageListener";
+import { classifyWhatsAppError } from "../utils/whatsappErrorClassifier";
 
 const SetTicketMessagesAsRead = async (ticket: Ticket): Promise<void> => {
   await ticket.update({ unreadMessages: 0 });
@@ -13,6 +14,9 @@ const SetTicketMessagesAsRead = async (ticket: Ticket): Promise<void> => {
 
   try {
     const wbot = await GetTicketWbot(ticket);
+    if (!wbot) {
+      return;
+    }
 
     const getJsonMessage = await Message.findAll({
       where: {
@@ -48,10 +52,28 @@ const SetTicketMessagesAsRead = async (ticket: Ticket): Promise<void> => {
         }
       }
     );
-  } catch (err) {
-    logger.warn(
-      `Could not mark messages as read. Maybe whatsapp session disconnected? Err: ${err}`
-    );
+  } catch (err: any) {
+    const classification = classifyWhatsAppError(err);
+    const errorMessage = err?.message || JSON.stringify(err) || "unknown";
+
+    if (classification.retryable) {
+      logger.debug("Could not mark messages as read (transitório)", {
+        ticketId: ticket.id,
+        companyId: ticket.companyId,
+        whatsappId: ticket.whatsappId,
+        errorCode: classification.code,
+        message: errorMessage
+      });
+      return;
+    }
+
+    logger.warn("Could not mark messages as read", {
+      ticketId: ticket.id,
+      companyId: ticket.companyId,
+      whatsappId: ticket.whatsappId,
+      errorCode: classification.code,
+      message: errorMessage
+    });
   }
 
   const io = getIO();

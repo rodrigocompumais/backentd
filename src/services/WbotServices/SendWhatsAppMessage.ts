@@ -5,6 +5,8 @@ import Message from "../../models/Message";
 import Ticket from "../../models/Ticket";
 import WhatsAppService from "../WhatsAppService";
 import Whatsapp from "../../models/Whatsapp";
+import { logger } from "../../utils/logger";
+import { classifyWhatsAppError, toAppError } from "../../utils/whatsappErrorClassifier";
 
 import formatBody from "../../helpers/Mustache";
 
@@ -85,9 +87,27 @@ const SendWhatsAppMessage = async ({
     await ticket.update({ lastMessage: formattedBody });
     return sentMessage;
   } catch (err) {
-    Sentry.captureException(err);
-    console.log(err);
-    throw new AppError("ERR_SENDING_WAPP_MSG");
+    const classification = classifyWhatsAppError(err);
+    const logPayload = {
+      companyId: ticket.companyId,
+      ticketId: ticket.id,
+      whatsappId: ticket.whatsappId,
+      contactId: ticket.contactId,
+      errorCode: classification.code,
+      retryable: classification.retryable
+    };
+    if (classification.retryable) {
+      logger.debug("Falha transitória no fluxo de envio de mensagem", logPayload);
+    } else {
+      logger.warn("Falha no fluxo de envio de mensagem", logPayload);
+    }
+
+    if (classification.kind === "unknown") {
+      Sentry.captureException(err);
+      throw new AppError("ERR_SENDING_WAPP_MSG");
+    }
+
+    throw toAppError(classification);
   }
 };
 

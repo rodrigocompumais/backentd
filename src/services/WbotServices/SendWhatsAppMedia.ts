@@ -8,6 +8,8 @@ import AppError from "../../errors/AppError";
 import Ticket from "../../models/Ticket";
 import { lookup } from "mime-types";
 import formatBody from "../../helpers/Mustache";
+import { logger } from "../../utils/logger";
+import { classifyWhatsAppError, toAppError } from "../../utils/whatsappErrorClassifier";
 
 interface Request {
   media: Express.Multer.File;
@@ -48,9 +50,14 @@ const processAudioFile = async (audio: string): Promise<string> => {
 export const getMessageOptions = async (
   fileName: string,
   pathMedia: string,
-  body?: string
+  body?: string,
+  originalMimeType?: string
 ): Promise<any> => {
-  const mimeType = lookup(pathMedia) || "";
+  const mimeType =
+    originalMimeType ||
+    lookup(fileName || "") ||
+    lookup(pathMedia) ||
+    "";
   const typeMessage = mimeType.split("/")[0];
 
   try {
@@ -84,7 +91,7 @@ export const getMessageOptions = async (
           ptt: true
         };
       }
-    } else if (typeMessage === "document") {
+    } else if (typeMessage === "document" || typeMessage === "text") {
       options = {
         document: fs.readFileSync(pathMedia),
         caption: body ? body : null,
@@ -178,9 +185,27 @@ const SendWhatsAppMedia = async ({
 
     return sentMessage;
   } catch (err) {
-    Sentry.captureException(err);
-    console.log(err);
-    throw new AppError("ERR_SENDING_WAPP_MSG");
+    const classification = classifyWhatsAppError(err);
+    const logPayload = {
+      companyId: ticket.companyId,
+      ticketId: ticket.id,
+      whatsappId: ticket.whatsappId,
+      contactId: ticket.contactId,
+      errorCode: classification.code,
+      retryable: classification.retryable
+    };
+    if (classification.retryable) {
+      logger.debug("Falha transitória no fluxo de envio de mídia", logPayload);
+    } else {
+      logger.warn("Falha no fluxo de envio de mídia", logPayload);
+    }
+
+    if (classification.kind === "unknown") {
+      Sentry.captureException(err);
+      throw new AppError("ERR_SENDING_WAPP_MSG");
+    }
+
+    throw toAppError(classification);
   }
 };
 

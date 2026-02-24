@@ -79,6 +79,17 @@ app.use(routes);
 app.use(Sentry.Handlers.errorHandler());
 
 app.use(async (err: Error, req: Request, res: Response, _: NextFunction) => {
+  // Verificar se a resposta já foi enviada para evitar erro "Cannot set headers after they are sent"
+  if (res.headersSent) {
+    logger.warn("Tentativa de enviar resposta após headers já enviados", {
+      error: err.message,
+      stack: err.stack,
+      path: req.path,
+      method: req.method
+    });
+    return;
+  }
+
   if (err instanceof AppError) {
     logger.warn(err);
     return res.status(err.statusCode).json({ error: err.message });

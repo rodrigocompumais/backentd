@@ -40,7 +40,7 @@ const GetGroupParticipantsService = async (
   // 1. Buscar nomes nas mensagens deste ticket (participantes que já enviaram mensagem aqui)
   const messagesWithContact = await Message.findAll({
     where: {
-      ticketId: ticket.id,
+      ticketId: parseInt(ticketId),
       companyId,
       participant: { [Op.ne]: null }
     },

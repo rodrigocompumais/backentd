@@ -35,7 +35,7 @@ const SearchMessagesService = async ({
   const searchTerm = `%${query.trim()}%`;
 
   const where: Record<string, unknown> = {
-    ticketId: ticket.id,
+    ticketId,
     companyId,
     isDeleted: false,
     body: { [Op.like]: searchTerm }

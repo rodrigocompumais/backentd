@@ -19,7 +19,6 @@ import Whatsapp from "../../models/Whatsapp";
 import AppError from "../../errors/AppError";
 import Company from "../../models/Company";
 import { logger } from "../../utils/logger";
-import { classifyWhatsAppError } from "../../utils/whatsappErrorClassifier";
 
 interface TicketData {
   status?: string;
@@ -45,35 +44,6 @@ interface Response {
   oldStatus: string;
   oldUserId: number | undefined;
 }
-
-const sendAutomaticMessageSafely = async (
-  sendFn: () => Promise<any>,
-  context: {
-    companyId: number;
-    ticketId: number;
-    whatsappId: number | null;
-    flow: string;
-  }
-): Promise<any | null> => {
-  try {
-    return await sendFn();
-  } catch (err: any) {
-    const classification = classifyWhatsAppError(err);
-    const logPayload = {
-      ...context,
-      errorCode: classification.code,
-      statusCode: classification.statusCode,
-      retryable: classification.retryable
-    };
-
-    if (classification.retryable || classification.kind === "logged_out") {
-      logger.warn("Falha ao enviar mensagem automática do ticket; continuando atualização", logPayload);
-      return null;
-    }
-
-    throw err;
-  }
-};
 
 const UpdateTicketService = async ({
   ticketData,
@@ -181,15 +151,7 @@ const UpdateTicketService = async ({
             let bodyRatingMessage = `\u200e${ratingTxt}\n\n`;
             bodyRatingMessage +=
               "Digite de 1 à 3 para qualificar nosso atendimento:\n*1* - _Insatisfeito_\n*2* - _Satisfeito_\n*3* - _Muito Satisfeito_\n\n";
-            await sendAutomaticMessageSafely(
-              () => SendWhatsAppMessage({ body: bodyRatingMessage, ticket }),
-              {
-                companyId: ticket.companyId,
-                ticketId: ticket.id,
-                whatsappId: ticket.whatsappId,
-                flow: "close-rating"
-              }
-            );
+            await SendWhatsAppMessage({ body: bodyRatingMessage, ticket });
 
             await ticketTraking.update({
               ratingAt: moment().toDate(),
@@ -213,15 +175,7 @@ const UpdateTicketService = async ({
 
       if (!isNil(complationMessage) && complationMessage !== "") {
         const body = `\u200e${complationMessage}`;
-        await sendAutomaticMessageSafely(
-          () => SendWhatsAppMessage({ body, ticket }),
-          {
-            companyId: ticket.companyId,
-            ticketId: ticket.id,
-            whatsappId: ticket.whatsappId,
-            flow: "close-completion"
-          }
-        );
+        await SendWhatsAppMessage({ body, ticket });
       }
       await ticket.update({
         promptId: null,
@@ -264,23 +218,13 @@ const UpdateTicketService = async ({
             'es': "*Mensaje automático*:\nHas sido transferido al departamento *" + queue?.name + "*\npor favor espera, ¡te atenderemos pronto!"
           }
 
-          await sendAutomaticMessageSafely(
-            async () => {
-              const queueChangedMessage = await wbot.sendMessage(
-                getChatJid(ticket),
-                {
-                  text: translatedMessage[language]
-                }
-              );
-              await verifyMessage(queueChangedMessage, ticket, ticket.contact);
-            },
+          const queueChangedMessage = await wbot.sendMessage(
+            getChatJid(ticket),
             {
-              companyId: ticket.companyId,
-              ticketId: ticket.id,
-              whatsappId: ticket.whatsappId,
-              flow: "transfer-queue"
+              text: translatedMessage[language]
             }
           );
+          await verifyMessage(queueChangedMessage, ticket, ticket.contact);
         }
       }
       else
@@ -301,23 +245,13 @@ const UpdateTicketService = async ({
                 'es': "*Mensaje automático*:\nHas sido transferido al agente *" + nome.name + "*\npor favor espera, ¡te atenderemos pronto!"
             }
 
-            await sendAutomaticMessageSafely(
-              async () => {
-                const queueChangedMessage = await wbot.sendMessage(
-                  getChatJid(ticket),
-                  {
-                    text: translatedMessage[language]
-                  }
-                );
-                await verifyMessage(queueChangedMessage, ticket, ticket.contact);
-              },
+            const queueChangedMessage = await wbot.sendMessage(
+              getChatJid(ticket),
               {
-                companyId: ticket.companyId,
-                ticketId: ticket.id,
-                whatsappId: ticket.whatsappId,
-                flow: "transfer-agent"
+                text: translatedMessage[language]
               }
             );
+            await verifyMessage(queueChangedMessage, ticket, ticket.contact);
           }
         }
         else
@@ -339,23 +273,13 @@ const UpdateTicketService = async ({
                 'es': "*Mensaje automático*:\nHas sido transferido al departamento *" + queue?.name + "* y serás atendido por *" + nome.name + "*\npor favor espera, ¡te atenderemos pronto!"
               }
 
-              await sendAutomaticMessageSafely(
-                async () => {
-                  const queueChangedMessage = await wbot.sendMessage(
-                    getChatJid(ticket),
-                    {
-                      text: translatedMessage[language]
-                    }
-                  );
-                  await verifyMessage(queueChangedMessage, ticket, ticket.contact);
-                },
+              const queueChangedMessage = await wbot.sendMessage(
+                getChatJid(ticket),
                 {
-                  companyId: ticket.companyId,
-                  ticketId: ticket.id,
-                  whatsappId: ticket.whatsappId,
-                  flow: "transfer-queue-agent"
+                  text: translatedMessage[language]
                 }
               );
+              await verifyMessage(queueChangedMessage, ticket, ticket.contact);
             }
           } else
             if (oldUserId !== undefined && isNil(userId) && oldQueueId !== queueId && !isNil(queueId)) {
@@ -374,23 +298,13 @@ const UpdateTicketService = async ({
                   'es': "*Mensaje automático*:\nHas sido transferido al departamento *" + queue?.name + "*\npor favor espera, ¡te atenderemos pronto!"
                 }
 
-                await sendAutomaticMessageSafely(
-                  async () => {
-                    const queueChangedMessage = await wbot.sendMessage(
-                      getChatJid(ticket),
-                      {
-                        text: translatedMessage[language]
-                      }
-                    );
-                    await verifyMessage(queueChangedMessage, ticket, ticket.contact);
-                  },
+                const queueChangedMessage = await wbot.sendMessage(
+                  getChatJid(ticket),
                   {
-                    companyId: ticket.companyId,
-                    ticketId: ticket.id,
-                    whatsappId: ticket.whatsappId,
-                    flow: "transfer-unassigned-to-queue"
+                    text: translatedMessage[language]
                   }
                 );
+                await verifyMessage(queueChangedMessage, ticket, ticket.contact);
               }
             }
     }

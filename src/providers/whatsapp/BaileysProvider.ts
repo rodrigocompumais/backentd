@@ -13,127 +13,8 @@ import { getMessageOptions } from "../../services/WbotServices/SendWhatsAppMedia
 import { logger } from "../../utils/logger";
 import { classifyWhatsAppError, toAppError } from "../../utils/whatsappErrorClassifier";
 import { metricsSendFailure, metricsSendSuccess } from "../../utils/wbotMetrics";
-import { getWbot, removeWbot } from "../../libs/wbot";
-import { StartWhatsAppSession } from "../../services/WbotServices/StartWhatsAppSession";
-
-const SEND_MAX_ATTEMPTS = Math.max(1, Number(process.env.WBOT_SEND_MAX_ATTEMPTS || 2));
-const SEND_RETRY_DELAY_MS = Math.max(0, Number(process.env.WBOT_SEND_RETRY_DELAY_MS || 1200));
-const SOCKET_WAIT_TIMEOUT_MS = Math.max(1000, Number(process.env.WBOT_SEND_SOCKET_WAIT_TIMEOUT_MS || 12000));
-const SOCKET_WAIT_STEP_MS = 300;
 
 class BaileysProvider implements IWhatsAppProvider {
-  private async delay(ms: number): Promise<void> {
-    await new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  private shouldRetrySend(kind: string): boolean {
-    return kind === "connection_closed" || kind === "request_aborted" || kind === "not_initialized";
-  }
-
-  private async waitForSocketReady(whatsappId: number, timeoutMs: number): Promise<void> {
-    const start = Date.now();
-    while (Date.now() - start < timeoutMs) {
-      try {
-        const socket = getWbot(whatsappId) as any;
-        const readyState = socket?.ws?.readyState;
-        if (readyState === undefined || readyState === 1) {
-          return;
-        }
-      } catch (err) {
-        // Sessão ainda não inicializada; continua aguardando.
-      }
-      await this.delay(SOCKET_WAIT_STEP_MS);
-    }
-  }
-
-  private async recoverSession(whatsapp: Whatsapp): Promise<void> {
-    try {
-      await removeWbot(whatsapp.id, false);
-    } catch (err: any) {
-      logger.debug("Falha ao remover sessão durante recuperação de envio", {
-        whatsappId: whatsapp.id,
-        companyId: whatsapp.companyId,
-        error: err?.message
-      });
-    }
-
-    await StartWhatsAppSession(whatsapp, whatsapp.companyId);
-    await this.waitForSocketReady(whatsapp.id, SOCKET_WAIT_TIMEOUT_MS);
-  }
-
-  private async executeWithTransientRetry<T>(
-    whatsapp: Whatsapp,
-    sendType: "message" | "media",
-    operation: () => Promise<T>
-  ): Promise<T> {
-    let lastError: any;
-
-    for (let attempt = 1; attempt <= SEND_MAX_ATTEMPTS; attempt++) {
-      try {
-        const result = await operation();
-        metricsSendSuccess(whatsapp.companyId, whatsapp.id);
-        return result;
-      } catch (err: any) {
-        lastError = err;
-        const classification = classifyWhatsAppError(err);
-        const canRetry = attempt < SEND_MAX_ATTEMPTS && classification.retryable && this.shouldRetrySend(classification.kind);
-
-        if (canRetry) {
-          logger.warn("Falha transitória no envio WhatsApp, tentando recuperar sessão", {
-            companyId: whatsapp.companyId,
-            whatsappId: whatsapp.id,
-            provider: whatsapp.provider,
-            sendType,
-            attempt,
-            maxAttempts: SEND_MAX_ATTEMPTS,
-            errorCode: classification.code,
-            statusCode: classification.statusCode
-          });
-
-          try {
-            await this.recoverSession(whatsapp);
-          } catch (recoveryError: any) {
-            logger.warn("Falha ao recuperar sessão WhatsApp para retry", {
-              companyId: whatsapp.companyId,
-              whatsappId: whatsapp.id,
-              sendType,
-              attempt,
-              error: recoveryError?.message
-            });
-          }
-
-          await this.delay(SEND_RETRY_DELAY_MS);
-          continue;
-        }
-
-        metricsSendFailure(whatsapp.companyId, whatsapp.id, classification.code);
-        const logPayload = {
-          companyId: whatsapp.companyId,
-          whatsappId: whatsapp.id,
-          provider: whatsapp.provider,
-          sendType,
-          errorCode: classification.code,
-          retryable: classification.retryable,
-          statusCode: classification.statusCode
-        };
-        if (classification.retryable) {
-          logger.debug("Falha transitória ao enviar WhatsApp", logPayload);
-        } else {
-          logger.warn("Falha ao enviar WhatsApp", logPayload);
-        }
-
-        if (classification.kind === "unknown") {
-          Sentry.captureException(err);
-          throw new AppError("ERR_SENDING_WAPP_MSG");
-        }
-
-        throw toAppError(classification);
-      }
-    }
-
-    throw lastError;
-  }
-
   /**
    * Constrói o JID correto para envio de mensagens.
    * CORREÇÃO: Detecta se é grupo baseado no formato do número
@@ -167,23 +48,52 @@ class BaileysProvider implements IWhatsAppProvider {
     body: string,
     options?: SendMessageOptions
   ): Promise<WAMessage> {
-    const chatId = this.buildChatJid(number);
-    const formattedBody = `\u200e${body}`;
-
-    // Converter opções para o formato esperado pelo Baileys
-    const baileysOptions = options as MiscMessageGenerationOptions & { contextInfo?: { mentionedJid?: string[] } };
-
-    // Baileys espera "mentions" no nível raiz do conteúdo (não contextInfo) - processa e injeta em contextInfo
-    const messageContent: any = { text: formattedBody };
-    const mentionedJid = baileysOptions?.contextInfo?.mentionedJid;
-    if (mentionedJid?.length) {
-      messageContent.mentions = mentionedJid;
-    }
-
-    return this.executeWithTransientRetry(whatsapp, "message", async () => {
+    try {
       const wbot = await GetWhatsappWbot(whatsapp);
-      return wbot.sendMessage(chatId, messageContent, baileysOptions);
-    });
+      // CORREÇÃO: Usar buildChatJid para suportar grupos corretamente
+      const chatId = this.buildChatJid(number);
+      const formattedBody = `\u200e${body}`;
+
+      // Converter opções para o formato esperado pelo Baileys
+      const baileysOptions = options as MiscMessageGenerationOptions & { contextInfo?: { mentionedJid?: string[] } };
+
+      // Baileys espera "mentions" no nível raiz do conteúdo (não contextInfo) - processa e injeta em contextInfo
+      const messageContent: any = { text: formattedBody };
+      const mentionedJid = baileysOptions?.contextInfo?.mentionedJid;
+      if (mentionedJid?.length) {
+        messageContent.mentions = mentionedJid;
+      }
+
+      const sentMessage = await wbot.sendMessage(
+        chatId,
+        messageContent,
+        baileysOptions
+      );
+
+      metricsSendSuccess(whatsapp.companyId, whatsapp.id);
+      return sentMessage;
+    } catch (err: any) {
+      const classification = classifyWhatsAppError(err);
+      metricsSendFailure(whatsapp.companyId, whatsapp.id, classification.code);
+      const logPayload = {
+        companyId: whatsapp.companyId,
+        whatsappId: whatsapp.id,
+        provider: whatsapp.provider,
+        errorCode: classification.code,
+        retryable: classification.retryable,
+        statusCode: classification.statusCode
+      };
+      if (classification.retryable) {
+        logger.debug("Falha transitória ao enviar mensagem WhatsApp", logPayload);
+      } else {
+        logger.warn("Falha ao enviar mensagem WhatsApp", logPayload);
+      }
+      if (classification.kind === "unknown") {
+        Sentry.captureException(err);
+        throw new AppError("ERR_SENDING_WAPP_MSG");
+      }
+      throw toAppError(classification);
+    }
   }
 
   async sendMedia(
@@ -192,24 +102,48 @@ class BaileysProvider implements IWhatsAppProvider {
     mediaPath: string,
     options?: SendMediaOptions
   ): Promise<WAMessage> {
-    // CORREÇÃO: Usar buildChatJid para suportar grupos corretamente
-    const chatId = this.buildChatJid(number);
-
-    const messageOptions = await getMessageOptions(
-      options?.fileName || "",
-      mediaPath,
-      options?.caption,
-      options?.mimetype
-    );
-
-    if (!messageOptions) {
-      throw new AppError("ERR_INVALID_MEDIA");
-    }
-
-    return this.executeWithTransientRetry(whatsapp, "media", async () => {
+    try {
       const wbot = await GetWhatsappWbot(whatsapp);
-      return wbot.sendMessage(chatId, messageOptions);
-    });
+      // CORREÇÃO: Usar buildChatJid para suportar grupos corretamente
+      const chatId = this.buildChatJid(number);
+
+      const messageOptions = await getMessageOptions(
+        options?.fileName || "",
+        mediaPath,
+        options?.caption,
+        options?.mimetype
+      );
+
+      if (!messageOptions) {
+        throw new AppError("ERR_INVALID_MEDIA");
+      }
+
+      const sentMessage = await wbot.sendMessage(chatId, messageOptions);
+
+      metricsSendSuccess(whatsapp.companyId, whatsapp.id);
+      return sentMessage;
+    } catch (err: any) {
+      const classification = classifyWhatsAppError(err);
+      metricsSendFailure(whatsapp.companyId, whatsapp.id, classification.code);
+      const logPayload = {
+        companyId: whatsapp.companyId,
+        whatsappId: whatsapp.id,
+        provider: whatsapp.provider,
+        errorCode: classification.code,
+        retryable: classification.retryable,
+        statusCode: classification.statusCode
+      };
+      if (classification.retryable) {
+        logger.debug("Falha transitória ao enviar mídia WhatsApp", logPayload);
+      } else {
+        logger.warn("Falha ao enviar mídia WhatsApp", logPayload);
+      }
+      if (classification.kind === "unknown") {
+        Sentry.captureException(err);
+        throw new AppError("ERR_SENDING_WAPP_MSG");
+      }
+      throw toAppError(classification);
+    }
   }
 
   async getStatus(whatsapp: Whatsapp): Promise<string> {

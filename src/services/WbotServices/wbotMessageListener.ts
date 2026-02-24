@@ -153,24 +153,6 @@ export const extractChatId = (msg: proto.IWebMessageInfo): string => {
 export const extractSenderId = (msg: proto.IWebMessageInfo): string => {
   const key = msg.key as any;
 
-  // LOG DETALHADO - CAPTURA TODOS OS CAMPOS PARA DIAGNÓSTICO
-  logger.info('🔍 === EXTRAÇÃO DE SENDER ID ===', {
-    messageId: msg.key.id,
-    fromMe: msg.key.fromMe,
-    remoteJid: msg.key.remoteJid,
-    participant: msg.key.participant,
-    participantAlt: key.participantAlt,
-    remoteJidAlt: key.remoteJidAlt,
-    msgParticipant: msg.participant,
-    pushName: msg.pushName,
-    verifiedBizName: (msg as any).verifiedBizName,
-    // Extrair números limpos de cada campo para comparação
-    remoteJidNumber: msg.key.remoteJid?.replace(/@.*$/, "").replace(/\D/g, ""),
-    participantNumber: msg.key.participant?.replace(/@.*$/, "").replace(/\D/g, ""),
-    participantAltNumber: key.participantAlt?.replace(/@.*$/, "").replace(/\D/g, ""),
-    remoteJidAltNumber: key.remoteJidAlt?.replace(/@.*$/, "").replace(/\D/g, "")
-  });
-
   // NOVA LÓGICA: Priorizar campos que NÃO sejam LIDs
   // LIDs têm formato: numero@lid (ex: 52171554951275@lid)
   // Phone Numbers têm formato: numero@s.whatsapp.net
@@ -200,7 +182,7 @@ export const extractSenderId = (msg: proto.IWebMessageInfo): string => {
       if (!isLid && isValidNumber) {
         selectedField = candidate.field;
         selectedValue = normalized;
-        logger.info(`✅ Campo válido encontrado: ${selectedField} = ${selectedValue}`);
+        logger.debug(`Campo válido encontrado: ${selectedField} = ${selectedValue}`);
         break;
       }
     }

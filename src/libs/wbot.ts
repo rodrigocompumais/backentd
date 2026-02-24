@@ -22,11 +22,37 @@ import DeleteBaileysService from "../services/BaileysServices/DeleteBaileysServi
 import CloseTicketsByWhatsAppIdService from "../services/TicketServices/CloseTicketsByWhatsAppIdService";
 import NodeCache from 'node-cache';
 import { acquireSessionLock, releaseSessionLock } from "./sessionLock";
-import { metricsReconnectAttempt, metricsReconnectSuccess } from "../utils/wbotMetrics";
+import { metricsConnectionClose, metricsReconnectAttempt, metricsReconnectSuccess } from "../utils/wbotMetrics";
+
+const shouldSuppressBaileysErrorLog = (args: any[]): boolean => {
+  if (!Array.isArray(args) || args.length === 0) return false;
+
+  const firstArg = args[0];
+  const secondArg = args[1];
+  const statusCode =
+    firstArg?.error?.output?.statusCode ||
+    firstArg?.output?.statusCode ||
+    firstArg?.statusCode;
+  const payloadMessage =
+    firstArg?.error?.output?.payload?.message ||
+    firstArg?.output?.payload?.message;
+  const msg = typeof secondArg === "string" ? secondArg : "";
+
+  return statusCode === 428 && payloadMessage === "Connection Closed" && msg.includes("transaction failed");
+};
 
 // Usar pino diretamente ao invés de path interno do Baileys (compatível com Baileys 7.x)
-const loggerBaileys = pino({ 
+const loggerBaileys = pino({
   level: "error",
+  hooks: {
+    logMethod(args, method) {
+      // Ignora ruído transitório conhecido do Baileys para conexão já encerrada (428).
+      if (shouldSuppressBaileysErrorLog(args as any[])) {
+        return;
+      }
+      method.apply(this, args as any);
+    }
+  },
   transport: process.env.NODE_ENV === "development" ? {
     target: "pino-pretty",
     options: { colorize: true }
@@ -70,17 +96,34 @@ const clearReconnectTimer = (whatsappId: number): void => {
   }
 };
 
+const getDisconnectContext = (error: any) => {
+  const statusCode =
+    error?.output?.statusCode ||
+    error?.output?.payload?.statusCode ||
+    error?.statusCode;
+  const reasonCode = error?.code || error?.output?.payload?.error || error?.name;
+  const reasonMessage = error?.message || error?.output?.payload?.message;
+
+  return {
+    statusCode,
+    reasonCode,
+    reasonMessage
+  };
+};
+
 const scheduleReconnect = (whatsapp: Whatsapp, reason?: any): void => {
   const { id, companyId } = whatsapp;
   clearReconnectTimer(id);
 
-  const statusCode = (reason as Boom)?.output?.statusCode;
+  const { statusCode, reasonCode, reasonMessage } = getDisconnectContext(reason as Boom);
   const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 403;
   if (isLoggedOut || whatsapp.type === "instagram" || whatsapp.provider === "gupshup") {
     logger.warn("Reconexão automática ignorada", {
       whatsappId: id,
       companyId,
       statusCode,
+      reasonCode,
+      reasonMessage,
       type: whatsapp.type,
       provider: whatsapp.provider
     });
@@ -101,7 +144,9 @@ const scheduleReconnect = (whatsapp: Whatsapp, reason?: any): void => {
     companyId,
     attempts,
     delay,
-    statusCode
+    statusCode,
+    reasonCode,
+    reasonMessage
   });
 
   const timer = setTimeout(() => {
@@ -298,12 +343,25 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
         wsocket.ev.on(
           "connection.update",
           async ({ connection, lastDisconnect, qr }) => {
-            logger.info(
-              `Socket  ${name} Connection Update ${connection || ""} ${lastDisconnect || ""
-              }`
-            );
+            const disconnectCtx = getDisconnectContext(lastDisconnect?.error);
+            logger.info("Socket Connection Update", {
+              whatsappName: name,
+              whatsappId: id,
+              companyId: whatsapp.companyId,
+              connection: connection || "",
+              disconnectStatusCode: disconnectCtx.statusCode,
+              disconnectReasonCode: disconnectCtx.reasonCode,
+              disconnectReasonMessage: disconnectCtx.reasonMessage
+            });
 
             if (connection === "close") {
+              metricsConnectionClose(
+                whatsapp.companyId,
+                id,
+                disconnectCtx.statusCode,
+                disconnectCtx.reasonCode
+              );
+
               // Limpar flag de inicialização
               initializingSessions.delete(id);
               await releaseSessionLock(sessionLockHandles.get(id) || null);

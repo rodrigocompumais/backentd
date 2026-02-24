@@ -21,23 +21,34 @@ import PrintPedido from "./models/PrintPedido";
 import FormResponse from "./models/FormResponse";
 import { logWbotMetricsSnapshot } from "./utils/wbotMetrics";
 
+const isTransientUndiciOrSocketError = (input: any): boolean => {
+  const message = input?.message || input?.output?.payload?.message || "";
+  const statusCode = input?.statusCode || input?.output?.statusCode || input?.output?.payload?.statusCode;
+  const code = input?.code || input?.cause?.code || input?.output?.payload?.code;
+  const stack = input?.stack || "";
+
+  return (
+    message === "terminated" ||
+    message === "Connection Closed" ||
+    message.includes("terminated") ||
+    input?.name === "AbortError" ||
+    statusCode === 428 ||
+    code === "UND_ERR_SOCKET" ||
+    code === "ECONNRESET" ||
+    code === "ECONNABORTED" ||
+    stack.includes("internal/deps/undici")
+  );
+};
+
 // Handler global para unhandled promise rejections
 process.on("unhandledRejection", (reason: any, promise: Promise<any>) => {
-  // Verificar se é um erro de requisição abortada (terminated)
-  if (reason?.message === "terminated" || reason?.name === "AbortError") {
-    logger.debug("Requisição HTTP abortada (terminated)", {
-      reason: reason?.message,
-      stack: reason?.stack
+  if (isTransientUndiciOrSocketError(reason)) {
+    logger.debug("Unhandled Promise Rejection transitória (ignorada)", {
+      reason: reason?.message || reason,
+      statusCode: reason?.statusCode || reason?.output?.statusCode || reason?.output?.payload?.statusCode,
+      code: reason?.code || reason?.cause?.code
     });
-    return; // Não logar como erro crítico
-  }
-
-  // Verificar se é erro de conexão fechada do Baileys
-  if (reason?.message === "Connection Closed" || reason?.output?.payload?.message === "Connection Closed") {
-    logger.debug("Conexão WhatsApp fechada (esperado)", {
-      statusCode: reason?.output?.payload?.statusCode
-    });
-    return; // Não logar como erro crítico
+    return;
   }
 
   logger.error("Unhandled Promise Rejection:", {
@@ -48,10 +59,17 @@ process.on("unhandledRejection", (reason: any, promise: Promise<any>) => {
 });
 
 // Handler global para exceções não capturadas
-process.on("uncaughtException", (error: Error) => {
+process.on("uncaughtException", (error: any) => {
+  if (isTransientUndiciOrSocketError(error)) {
+    logger.debug("Uncaught transient exception (ignored)", {
+      message: error?.message || error?.output?.payload?.message,
+      statusCode: error?.statusCode || error?.output?.statusCode || error?.output?.payload?.statusCode,
+      code: error?.code || error?.cause?.code
+    });
+    return;
+  }
+
   logger.error("Uncaught Exception:", error);
-  // Em produção, pode ser necessário fazer graceful shutdown
-  // Por enquanto, apenas logamos o erro
 });
 
 const server = app.listen(process.env.PORT, async () => {

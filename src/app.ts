@@ -91,7 +91,27 @@ app.use(async (err: Error, req: Request, res: Response, _: NextFunction) => {
   }
 
   if (err instanceof AppError) {
-    logger.warn(err);
+    const isAuthNoise =
+      err.message === "ERR_SESSION_EXPIRED" ||
+      err.message === "Invalid token. We'll try to assign a new one on next request" ||
+      err.message.includes("Invalid token") ||
+      err.message.includes("Token inválido");
+    const isTransientWappNoise =
+      err.message === "ERR_WAPP_CONNECTION_CLOSED" ||
+      err.message === "ERR_WAPP_NOT_INITIALIZED" ||
+      err.message === "ERR_REQUEST_ABORTED" ||
+      err.message === "ERR_WAPP_LOCK_NOT_ACQUIRED";
+
+    if (isAuthNoise || isTransientWappNoise) {
+      logger.debug("Erro transitório esperado na API", {
+        error: err.message,
+        path: req.path,
+        method: req.method,
+        statusCode: err.statusCode
+      });
+    } else {
+      logger.warn(err);
+    }
     return res.status(err.statusCode).json({ error: err.message });
   }
 

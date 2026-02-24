@@ -7,6 +7,8 @@ type MetricsRecord = {
   sendFailures: number;
   connectionClosed: number;
   requestAborted: number;
+  closeByStatusCode: Record<string, number>;
+  closeByReasonCode: Record<string, number>;
   lastErrorCode?: string;
 };
 
@@ -24,7 +26,9 @@ const getRecord = (companyId: number, whatsappId: number): MetricsRecord => {
       sendSuccess: 0,
       sendFailures: 0,
       connectionClosed: 0,
-      requestAborted: 0
+        requestAborted: 0,
+        closeByStatusCode: {},
+        closeByReasonCode: {}
     });
   }
   return metrics.get(key)!;
@@ -52,6 +56,22 @@ export const metricsSendFailure = (
   record.lastErrorCode = errorCode;
   if (errorCode === "ERR_WAPP_CONNECTION_CLOSED") record.connectionClosed += 1;
   if (errorCode === "ERR_REQUEST_ABORTED") record.requestAborted += 1;
+};
+
+export const metricsConnectionClose = (
+  companyId: number,
+  whatsappId: number,
+  statusCode?: number,
+  reasonCode?: string
+): void => {
+  const record = getRecord(companyId, whatsappId);
+  record.connectionClosed += 1;
+
+  const statusKey = String(statusCode ?? "unknown");
+  record.closeByStatusCode[statusKey] = (record.closeByStatusCode[statusKey] || 0) + 1;
+
+  const reasonKey = reasonCode || "unknown";
+  record.closeByReasonCode[reasonKey] = (record.closeByReasonCode[reasonKey] || 0) + 1;
 };
 
 export const logWbotMetricsSnapshot = (): void => {

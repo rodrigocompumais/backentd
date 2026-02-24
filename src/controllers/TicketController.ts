@@ -255,7 +255,7 @@ export const remove = async (
     .to(`queue-${ticket.queueId}-notification`)
     .emit(`company-${companyId}-ticket`, {
       action: "delete",
-      ticketId: +ticketId
+      ticketId: ticket.id
     });
 
   return res.status(200).json({ message: "ticket deleted" });

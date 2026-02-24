@@ -41,7 +41,7 @@ const ListMessagesService = async ({
 
   const options: FindOptions = {
     where: {
-      ticketId,
+      ticketId: ticket.id,
       companyId
     }
   };

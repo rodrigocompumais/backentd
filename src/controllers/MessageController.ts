@@ -108,7 +108,7 @@ export const store = async (req: Request, res: Response): Promise<Response> => {
     const messageData = {
       id: `${ticketId}-${Date.now()}`,
       body: body || "",
-      ticketId: parseInt(ticketId),
+      ticketId: ticket.id,
       contactId: ticket.contactId,
       companyId: companyId,
       fromMe: true,

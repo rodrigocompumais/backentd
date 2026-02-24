@@ -11,7 +11,12 @@ const ShowTicketService = async (
   id: string | number,
   companyId: number
 ): Promise<Ticket> => {
-  const ticket = await Ticket.findByPk(id, {
+  const normalizedId = Number(id);
+  if (!Number.isInteger(normalizedId) || normalizedId <= 0) {
+    throw new AppError("ID de ticket inválido.", 400);
+  }
+
+  const ticket = await Ticket.findByPk(normalizedId, {
     include: [
       {
         model: Contact,

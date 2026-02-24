@@ -5,6 +5,7 @@ import type {
 } from "baileys";
 import { BufferJSON, initAuthCreds, proto } from "baileys";
 import Whatsapp from "../models/Whatsapp";
+import { logger } from "../utils/logger";
 
 const KEY_MAP: { [T in keyof SignalDataTypeMap]: string } = {
   "pre-key": "preKeys",
@@ -33,14 +34,19 @@ const authState = async (
       await whatsapp.update({
         session: JSON.stringify({ creds, keys }, BufferJSON.replacer, 0)
       });
-    } catch (error) {
-      console.log(error);
+    } catch (error: any) {
+      logger.error("Erro ao persistir auth state do WhatsApp", {
+        whatsappId: whatsapp.id,
+        error: error?.message
+      });
     }
   };
 
   const saveState = async () => {
     dirty = true;
-    if (persistTimer) return;
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+    }
     persistTimer = setTimeout(async () => {
       persistTimer = null;
       await persistState();
@@ -52,11 +58,31 @@ const authState = async (
   if (whatsapp.session && whatsapp.session !== null) {
     try {
       const result = JSON.parse(whatsapp.session, BufferJSON.reviver);
-      creds = result?.creds || initAuthCreds();
-      keys = result?.keys || {};
+      const hasValidCreds = !!result?.creds && typeof result.creds === "object";
+      const hasValidKeys = result?.keys && typeof result.keys === "object";
+
+      if (!hasValidCreds || !hasValidKeys) {
+        throw new Error("Invalid auth state payload");
+      }
+
+      creds = result.creds;
+      keys = result.keys;
     } catch (_parseError) {
+      logger.warn("Sessão WhatsApp inválida/corrompida, resetando auth state", {
+        whatsappId: whatsapp.id,
+        error: (_parseError as Error)?.message
+      });
+
       creds = initAuthCreds();
       keys = {};
+      try {
+        await whatsapp.update({ session: "" });
+      } catch (clearError: any) {
+        logger.warn("Falha ao limpar sessão corrompida no banco", {
+          whatsappId: whatsapp.id,
+          error: clearError?.message
+        });
+      }
     }
   } else {
     creds = initAuthCreds();

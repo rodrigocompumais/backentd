@@ -78,6 +78,9 @@ const MAX_RECONNECT_DELAY_MS = Number(process.env.WBOT_RECONNECT_MAX_DELAY_MS ||
 const BASE_RECONNECT_DELAY_MS = Number(process.env.WBOT_RECONNECT_BASE_DELAY_MS || 2000);
 const MAX_RECONNECT_ATTEMPTS_BEFORE_COOLDOWN = Number(process.env.WBOT_RECONNECT_MAX_ATTEMPTS || 10);
 const RECONNECT_COOLDOWN_MS = Number(process.env.WBOT_RECONNECT_COOLDOWN_MS || 5 * 60 * 1000);
+const TRANSIENT_RECONNECT_MIN_DELAY_MS = Number(process.env.WBOT_RECONNECT_TRANSIENT_MIN_DELAY_MS || 15000);
+const USE_LATEST_BAILEYS_VERSION = process.env.WBOT_BAILEYS_USE_LATEST === "true";
+const FIXED_BAILEYS_VERSION = process.env.WBOT_BAILEYS_VERSION || "2.3000.1033105955";
 
 const calculateReconnectDelay = (attempt: number): number => {
   const exponentialDelay = Math.min(
@@ -96,6 +99,49 @@ const clearReconnectTimer = (whatsappId: number): void => {
   }
 };
 
+const parseVersionString = (rawVersion: string): [number, number, number] => {
+  const fallback: [number, number, number] = [2, 3000, 1033105955];
+  const parts = rawVersion.split(".").map(part => Number(part));
+  if (parts.length !== 3 || parts.some(part => Number.isNaN(part))) {
+    logger.warn("WBOT_BAILEYS_VERSION inválida, usando fallback", {
+      configuredVersion: rawVersion,
+      fallbackVersion: fallback.join(".")
+    });
+    return fallback;
+  }
+  return [parts[0], parts[1], parts[2]];
+};
+
+const resolveBaileysVersion = async (): Promise<{ version: [number, number, number]; isLatest: boolean }> => {
+  if (USE_LATEST_BAILEYS_VERSION) {
+    const latest = await fetchLatestBaileysVersion();
+    return {
+      version: [latest.version[0], latest.version[1], latest.version[2]],
+      isLatest: latest.isLatest
+    };
+  }
+
+  return {
+    version: parseVersionString(FIXED_BAILEYS_VERSION),
+    isLatest: false
+  };
+};
+
+const isTransientDisconnectReason = (reasonCode?: string, reasonMessage?: string, statusCode?: number): boolean => {
+  if (statusCode === 428) return true;
+
+  const code = (reasonCode || "").toUpperCase();
+  const message = (reasonMessage || "").toLowerCase();
+
+  return (
+    code.includes("ECONNRESET") ||
+    code.includes("ECONNABORTED") ||
+    code.includes("UND_ERR_SOCKET") ||
+    message.includes("terminated") ||
+    message.includes("connection closed")
+  );
+};
+
 const getDisconnectContext = (error: any) => {
   const statusCode =
     error?.output?.statusCode ||
@@ -109,6 +155,48 @@ const getDisconnectContext = (error: any) => {
     reasonCode,
     reasonMessage
   };
+};
+
+const forceTeardownSocket = async (socket: Session | null | undefined, whatsappId: number): Promise<void> => {
+  if (!socket) return;
+
+  try {
+    (socket.ev as any)?.removeAllListeners?.();
+  } catch (err: any) {
+    logger.debug("Falha ao remover listeners do socket", {
+      whatsappId,
+      error: err?.message
+    });
+  }
+
+  try {
+    if (typeof (socket as any).end === "function") {
+      (socket as any).end();
+    }
+  } catch (err: any) {
+    logger.debug("Falha ao encerrar socket.end()", {
+      whatsappId,
+      error: err?.message
+    });
+  }
+
+  try {
+    socket.ws?.close?.();
+  } catch (err: any) {
+    logger.debug("Falha ao fechar websocket", {
+      whatsappId,
+      error: err?.message
+    });
+  }
+
+  try {
+    (socket.ws as any)?.terminate?.();
+  } catch (err: any) {
+    logger.debug("Falha ao terminar websocket", {
+      whatsappId,
+      error: err?.message
+    });
+  }
 };
 
 const scheduleReconnect = (whatsapp: Whatsapp, reason?: any): void => {
@@ -135,6 +223,9 @@ const scheduleReconnect = (whatsapp: Whatsapp, reason?: any): void => {
   metricsReconnectAttempt(companyId, id);
 
   let delay = calculateReconnectDelay(attempts);
+  if (isTransientDisconnectReason(reasonCode, reasonMessage, statusCode)) {
+    delay = Math.max(delay, TRANSIENT_RECONNECT_MIN_DELAY_MS);
+  }
   if (attempts > MAX_RECONNECT_ATTEMPTS_BEFORE_COOLDOWN) {
     delay = Math.max(delay, RECONNECT_COOLDOWN_MS);
   }
@@ -175,9 +266,10 @@ export const removeWbot = async (
     clearReconnectTimer(whatsappId);
     const sessionIndex = sessions.findIndex(s => s.id === whatsappId);
     if (sessionIndex !== -1) {
+      const session = sessions[sessionIndex];
       if (isLogout) {
         try {
-          sessions[sessionIndex].logout();
+          session.logout();
         } catch (logoutErr: any) {
           // Erros de "Connection Closed" são esperados quando a conexão já está fechada
           if (logoutErr?.message === "Connection Closed" || 
@@ -188,18 +280,9 @@ export const removeWbot = async (
             logger.warn(`Erro ao fazer logout da sessão ${whatsappId}:`, logoutErr);
           }
         }
-        try {
-          sessions[sessionIndex].ws.close();
-        } catch (closeErr: any) {
-          // Erros ao fechar websocket já fechado são esperados
-          if (closeErr?.message?.includes("closed") || closeErr?.code === "ECONNRESET") {
-            logger.debug(`WebSocket ${whatsappId} já estava fechado`);
-          } else {
-            logger.warn(`Erro ao fechar websocket ${whatsappId}:`, closeErr);
-          }
-        }
       }
 
+      await forceTeardownSocket(session, whatsappId);
       sessions.splice(sessionIndex, 1);
     }
     const lockHandle = sessionLockHandles.get(whatsappId) || null;
@@ -233,7 +316,7 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
           return;
         }
 
-        const { id, name, provider } = whatsappUpdate;
+        const { id, name } = whatsappUpdate;
 
         // Verificar se já existe uma sessão ativa
         const existingSession = sessions.find(s => s.id === id);
@@ -275,11 +358,9 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
         }
         sessionLockHandles.set(id, lockHandle);
 
-        const { version, isLatest } = await fetchLatestBaileysVersion();
-        const isLegacy = provider === "stable" ? true : false;
+        const { version, isLatest } = await resolveBaileysVersion();
 
         logger.info(`using WA v${version.join(".")}, isLatest: ${isLatest}`);
-        logger.info(`isLegacy: ${isLegacy}`);
         logger.info(`Starting session ${name}`);
         let retriesQrCode = 0;
 
@@ -367,31 +448,23 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
               await releaseSessionLock(sessionLockHandles.get(id) || null);
               sessionLockHandles.delete(id);
               
-              if ((lastDisconnect?.error as Boom)?.output?.statusCode === 403) {
+              const disconnectStatusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+              const isForbidden = disconnectStatusCode === 403;
+              const isLoggedOut = disconnectStatusCode === DisconnectReason.loggedOut;
+
+              if (isForbidden || isLoggedOut) {
                 await whatsapp.update({ status: "PENDING", session: "" });
                 await DeleteBaileysService(whatsapp.id);
                 io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
                   action: "update",
                   session: whatsapp
                 });
-                removeWbot(id, false);
+                await removeWbot(id, false);
+                return;
               }
-              if (
-                (lastDisconnect?.error as Boom)?.output?.statusCode !==
-                DisconnectReason.loggedOut
-              ) {
-                removeWbot(id, false);
-                scheduleReconnect(whatsapp, lastDisconnect?.error);
-              } else {
-                await whatsapp.update({ status: "PENDING", session: "" });
-                await DeleteBaileysService(whatsapp.id);
-                io.to(`company-${whatsapp.companyId}-mainchannel`).emit(`company-${whatsapp.companyId}-whatsappSession`, {
-                  action: "update",
-                  session: whatsapp
-                });
-                removeWbot(id, false);
-                scheduleReconnect(whatsapp, lastDisconnect?.error);
-              }
+
+              await removeWbot(id, false);
+              scheduleReconnect(whatsapp, lastDisconnect?.error);
             }
 
             if (connection === "open") {
@@ -436,7 +509,7 @@ export const initWASocket = async (whatsapp: Whatsapp): Promise<Session> => {
                   session: whatsappUpdate
                 });
                 wsocket.ev.removeAllListeners("connection.update");
-                wsocket.ws.close();
+                await forceTeardownSocket(wsocket, id);
                 wsocket = null;
                 retriesQrCodeMap.delete(id);
               } else {
